@@ -6,7 +6,7 @@ Interval :: struct {
 
 between :: proc(a: Interval, b: Interval) -> (i: Interval) {
 	i.min = a.min <= b.min ? a.min : b.min
-	i.max = a.max <= b.max ? a.max : b.max
+	i.max = a.max >= b.max ? a.max : b.max
 	return
 }
 

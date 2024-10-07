@@ -16,6 +16,7 @@ Hit_Record :: struct {
 }
 
 Hittable :: union {
+	BVH,
 	Hittable_List,
 	Sphere,
 }
@@ -26,6 +27,8 @@ hittable_aabb :: proc(ht: Hittable) -> aabb.AABB {
 		return v.box
 	case Sphere:
 		return v.box
+	case BVH:
+		return v.nodes[v.root].box
 	}
 	return {}
 }
@@ -36,6 +39,8 @@ hit :: proc(ht: Hittable, r: ray.Ray, inter: interval.Interval) -> (Hit_Record, 
 		return hittable_list_hit(v, r, inter)
 	case Sphere:
 		return sphere_hit(v, r, inter)
+	case BVH:
+		return bvh_hit(v, r, inter)
 	}
 
 	return {}, false

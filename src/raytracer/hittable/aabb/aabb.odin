@@ -3,8 +3,6 @@ package aabb
 import "../../interval"
 import "../../ray"
 import "../../utils"
-import "core:fmt"
-import "core:math"
 
 AABB :: struct {
 	x, y, z: interval.Interval,
@@ -28,27 +26,26 @@ merge :: proc(b1: AABB, b2: AABB) -> AABB {
 }
 
 hit :: proc(aabb: AABB, r: ray.Ray, r_interval: interval.Interval) -> bool {
-	r_interval := r_interval
-	t0 := r_interval.min
-	t1 := r_interval.max
+	t_min := r_interval.min
+	t_max := r_interval.max
+
 	origin := r.origin
 	direction := r.direction
 
 	for axis in 0 ..< 3 {
 		ax := axis_interval(aabb, axis)
-		adinv := 1.0 / direction[axis]
-		tnear := (ax.min - origin[axis]) * adinv
-		tfar := (ax.max - origin[axis]) * adinv
+		inv_d := 1.0 / direction[axis]
+		t0 := (ax.min - origin[axis]) * inv_d
+		t1 := (ax.max - origin[axis]) * inv_d
 
-		if tnear > tfar {}
+		if inv_d < 0 {
+			t0, t1 = t1, t0
+		}
 
-		tmin := min(t1, t2)
-		tmax := max(t1, t2)
-		r_interval.min = max(tmin, r_interval.min)
-		r_interval.max = min(tmax, r_interval.max)
-		fmt.println(r_interval)
+		t_min = max(t0, t_min)
+		t_max = min(t1, t_max)
 
-		if r_interval.max <= r_interval.min {
+		if t_max <= t_min {
 			return false
 		}
 	}

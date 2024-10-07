@@ -19,7 +19,15 @@ hittable_list_add :: proc(
 	hittable: Hittable,
 ) -> mem.Allocator_Error {
 	_, err := append(&hittable_list.hittables, hittable)
+
 	hittable_list.box = aabb.merge(hittable_list.box, hittable_aabb(hittable))
+
+	new_box := hittable_aabb(hittable)
+	if len(hittable_list.hittables) == 1 {
+		hittable_list.box = new_box
+	} else {
+		hittable_list.box = aabb.merge(hittable_list.box, new_box)
+	}
 	return err
 }
 
@@ -31,8 +39,6 @@ hittable_list_hit :: proc(
 	rec: Hit_Record,
 	hitted: bool,
 ) {
-	// if !aabb.hit(ht.box, r, inter) do return
-
 	closest_so_far := inter.max
 
 	for &object in ht.hittables {
@@ -54,6 +60,7 @@ hittable_list_clear :: proc(hittable_list: ^Hittable_List) {
 	clear(&hittable_list.hittables)
 }
 
-hittable_list_destroy :: proc(hittable_list: Hittable_List) {
+hittable_list_destroy :: proc(hittable_list: ^Hittable_List) {
 	delete(hittable_list.hittables)
+	hittable_list.hittables = nil
 }

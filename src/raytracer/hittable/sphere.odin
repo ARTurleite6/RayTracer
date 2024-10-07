@@ -5,7 +5,6 @@ import mat "../material"
 import "../ray"
 import "../utils"
 import "aabb"
-//import "core:fmt"
 import "core:math/linalg"
 
 Sphere :: struct {
@@ -20,13 +19,9 @@ sphere_init :: proc(s: ^Sphere, center: utils.Vec3, radius: f64, material: mat.M
 	s.radius = radius
 	s.material = material
 	s.box = sphere_aabb(s^)
-
-	// fmt.println(s.box)
 }
 
 sphere_hit :: proc(s: Sphere, r: ray.Ray, inter: interval.Interval) -> (Hit_Record, bool) {
-	if !aabb.hit(s.box, r, inter) do return {}, false
-
 	oc := s.center - r.origin
 	a := linalg.length2(r.direction)
 	h := linalg.dot(r.direction, oc)
