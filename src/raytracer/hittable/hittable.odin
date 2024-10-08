@@ -28,7 +28,7 @@ hittable_aabb :: proc(ht: Hittable) -> aabb.AABB {
 	case Sphere:
 		return v.box
 	case BVH:
-		return v.nodes[v.root].box
+		return v.nodes[v.root.(int)].box
 	}
 	return {}
 }

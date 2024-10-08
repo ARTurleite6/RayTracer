@@ -8,13 +8,16 @@ AABB :: struct {
 	x, y, z: interval.Interval,
 }
 
-init :: proc(aabb: ^AABB, a, b: utils.Vec3) {
-	aabb.x =
-		(a.x <= b.x) ? interval.Interval{min = a.x, max = b.x} : interval.Interval{min = b.x, max = a.x}
-	aabb.y =
-		(a.y <= b.y) ? interval.Interval{min = a.y, max = b.y} : interval.Interval{min = b.y, max = a.y}
-	aabb.z =
-		(a.z <= b.z) ? interval.Interval{min = a.z, max = b.z} : interval.Interval{min = b.z, max = a.z}
+create :: proc(a, b: utils.Vec3) -> AABB {
+	return {
+		x = (a.x <= b.x) ? interval.Interval{min = a.x, max = b.x} : interval.Interval{min = b.x, max = a.x},
+		y = (a.y <= b.y) ? interval.Interval{min = a.y, max = b.y} : interval.Interval{min = b.y, max = a.y},
+		z = (a.z <= b.z) ? interval.Interval{min = a.z, max = b.z} : interval.Interval{min = b.z, max = a.z},
+	}
+}
+
+empty :: proc() -> AABB {
+	return {x = interval.empty(), y = interval.empty(), z = interval.empty()}
 }
 
 merge :: proc(b1: AABB, b2: AABB) -> AABB {
@@ -22,6 +25,18 @@ merge :: proc(b1: AABB, b2: AABB) -> AABB {
 		x = interval.between(b1.x, b2.x),
 		y = interval.between(b1.y, b2.y),
 		z = interval.between(b1.z, b2.z),
+	}
+}
+
+longest_axis :: proc(a: AABB) -> int {
+	x_size := interval.size(a.x)
+	y_size := interval.size(a.y)
+	z_size := interval.size(a.z)
+
+	if x_size > y_size {
+		return x_size > z_size ? 0 : 2
+	} else {
+		return y_size > z_size ? 1 : 2
 	}
 }
 
@@ -51,6 +66,14 @@ hit :: proc(aabb: AABB, r: ray.Ray, r_interval: interval.Interval) -> bool {
 	}
 
 	return true
+}
+
+contains :: proc(outer, inner: AABB) -> bool {
+	return(
+		interval.contains(outer.x, inner.x) &&
+		interval.contains(outer.y, inner.y) &&
+		interval.contains(outer.z, inner.z) \
+	)
 }
 
 axis_interval :: proc(aabb: AABB, axis: int) -> interval.Interval {

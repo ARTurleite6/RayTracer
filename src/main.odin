@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:log"
 import "core:math/linalg"
 import "raytracer/camera"
 import "raytracer/color"
@@ -55,6 +56,30 @@ create_book_scene :: proc() -> hittable.Hittable_List {
 			}
 		}
 	}
+
+	hittable.sphere_init(
+		&sphere,
+		center = {0, 1, 0},
+		radius = 1,
+		material = mat.Dieletric{refraction_index = 1.5},
+	)
+	hittable.hittable_list_add(&world, sphere)
+
+	hittable.sphere_init(
+		&sphere,
+		center = {-4, 1, 0},
+		radius = 1,
+		material = mat.Lambertian{albedo = {0.4, 0.2, 0.1}},
+	)
+	hittable.hittable_list_add(&world, sphere)
+
+	hittable.sphere_init(
+		&sphere,
+		center = {4, 1, 0},
+		radius = 1,
+		material = mat.Metal{albedo = {0.7, 0.6, 0.5}, fuzz = 0},
+	)
+	hittable.hittable_list_add(&world, sphere)
 	return world
 }
 
@@ -65,12 +90,11 @@ create_world :: proc() -> hittable.Hittable_List {
 	material_bubble := mat.Dieletric{1.0 / 1.50}
 	material_right := mat.Metal{{0.8, 0.6, 0.2}, 1.0}
 
-	world: hittable.Hittable_List
-	hittable.hittable_list_init(&world)
-	defer hittable.hittable_list_destroy(&world)
-
 
 	sphere: hittable.Sphere
+	world: hittable.Hittable_List
+	hittable.hittable_list_init(&world)
+
 	hittable.sphere_init(
 		&sphere,
 		center = {0, -100.5, -1},
@@ -87,10 +111,14 @@ create_world :: proc() -> hittable.Hittable_List {
 	hittable.sphere_init(&sphere, center = {1.0, 0, -1}, radius = 0.5, material = material_right)
 	hittable.hittable_list_add(&world, sphere)
 
+
 	return world
 }
 
 main :: proc() {
+	context.logger = log.create_console_logger()
+	defer log.destroy_console_logger(context.logger)
+
 	aspect_ratio := 16.0 / 9.0
 	image_width := 1200
 
@@ -113,11 +141,13 @@ main :: proc() {
 	)
 
 	world := create_book_scene()
+	defer hittable.hittable_list_destroy(&world)
 
 	tree: hittable.BVH
 	hittable.bvh_init(&tree, world.hittables[:])
+	defer hittable.bvh_destroy(&tree)
 
-	if err := camera.render(c, world, "image.ppm"); err != nil {
+	if err := camera.render(c, tree, "image.ppm"); err != nil {
 		fmt.eprintln(err)
 		return
 	}

@@ -46,8 +46,5 @@ sphere_hit :: proc(s: Sphere, r: ray.Ray, inter: interval.Interval) -> (Hit_Reco
 
 sphere_aabb :: proc(sphere: Sphere) -> aabb.AABB {
 	rvec := utils.Vec3{sphere.radius, sphere.radius, sphere.radius}
-
-	box: aabb.AABB
-	aabb.init(&box, sphere.center - rvec, sphere.center + rvec)
-	return box
+	return aabb.create(sphere.center - rvec, sphere.center + rvec)
 }

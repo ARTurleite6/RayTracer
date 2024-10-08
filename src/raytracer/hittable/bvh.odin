@@ -3,25 +3,25 @@ package hittable
 import "../interval"
 import "../ray"
 import "aabb"
-import "core:math/rand"
 import "core:slice"
 
 BVH :: struct {
 	nodes: [dynamic]Node,
-	root:  int,
+	root:  Maybe(int),
 }
 
 Node :: struct {
 	box:         aabb.AABB,
-	left, right: int,
+	left, right: Maybe(int),
 	object:      Maybe(^Hittable),
 }
 
 bvh_init :: proc(bvh: ^BVH, objects: []Hittable, allocator := context.allocator) {
-	bvh.nodes = make([dynamic]Node, 0, len(objects) * 2 - 1, allocator = allocator)
-	bvh.root = 0
-
-	bvh.root = bvh_build(bvh, objects, 0, len(objects))
+	num_nodes := len(objects) * 2 - 1
+	if num_nodes > 0 {
+		bvh.nodes = make([dynamic]Node, 0, num_nodes, allocator = allocator)
+		bvh.root = bvh_build(bvh, objects, 0, len(objects))
+	}
 }
 
 bvh_destroy :: proc(bvh: ^BVH) {
@@ -34,13 +34,18 @@ bvh_build :: proc(
 	objects: []Hittable,
 	start, end: int,
 	gen := context.random_generator,
-) -> int {
+) -> Maybe(int) {
 	context.random_generator = gen
 	node_index := len(bvh.nodes)
 	append(&bvh.nodes, Node{})
 	node := &bvh.nodes[node_index]
 
-	axis := rand.int_max(3)
+	node.box = aabb.empty()
+	for &obj in objects[start:end] {
+		node.box = aabb.merge(node.box, hittable_aabb(obj))
+	}
+
+	axis := aabb.longest_axis(node.box)
 	context.user_index = axis
 	comparator := proc(a, b: Hittable) -> slice.Ordering {
 		axis := context.user_index
@@ -49,13 +54,9 @@ bvh_build :: proc(
 
 	object_span := end - start
 
-	if object_span <= 0 {
-		return -1
-	}
-
 	if object_span == 1 {
-		node.left = -1
-		node.right = -1
+		node.left = nil
+		node.right = nil
 		node.object = &objects[start]
 	} else if object_span == 2 {
 		node.left = bvh_build(bvh, objects, start, start + 1)
@@ -64,52 +65,29 @@ bvh_build :: proc(
 		slice.sort_by_cmp(objects[start:end], comparator)
 
 		mid := start + (object_span / 2)
-		node.left = bvh_build(bvh, objects, 0, mid)
-		node.right = bvh_build(bvh, objects, mid, object_span)
+		node.left = bvh_build(bvh, objects, start, mid)
+		node.right = bvh_build(bvh, objects, mid, end)
 	}
 
-	left_box, right_box: aabb.AABB
-	left_valid, right_valid: bool
-
-	if node.left != -1 {
-		left_box = bvh.nodes[node.left].box
-		left_valid = true
-	}
-
-	if node.right != -1 {
-		right_box = bvh.nodes[node.right].box
-		right_valid = true
-	}
-
-	if left_valid && right_valid {
-		node.box = aabb.merge(left_box, right_box)
-	} else if left_valid {
-		node.box = left_box
-	} else if right_valid {
-		node.box = right_box
-	} else {
-		if value, ok := node.object.(^Hittable); ok {
-			node.box = hittable_aabb(value^)
-		}
-	}
 	return node_index
 }
 
 bvh_hit :: proc(b: BVH, r: ray.Ray, ray_t: interval.Interval) -> (Hit_Record, bool) {
-	return _bvh_hit(b, 0, r, ray_t)
+	return _bvh_hit(b, b.root, r, ray_t)
 }
 
 @(private)
 _bvh_hit :: proc(
 	b: BVH,
-	node_index: int,
+	node_index: Maybe(int),
 	r: ray.Ray,
 	ray_t: interval.Interval,
 ) -> (
 	Hit_Record,
 	bool,
 ) {
-	if node_index == -1 {
+	node_index, has_node := node_index.(int)
+	if !has_node {
 		return {}, false
 	}
 
