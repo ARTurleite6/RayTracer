@@ -16,6 +16,11 @@ create :: proc(a, b: utils.Vec3) -> AABB {
 	}
 }
 
+centroid :: proc(box: AABB) -> utils.Vec3 {
+	min_vec, max_vec := min_max_vecs(box)
+	return 0.5 * min_vec + 0.5 * max_vec
+}
+
 empty :: proc() -> AABB {
 	return {x = interval.empty(), y = interval.empty(), z = interval.empty()}
 }
@@ -26,6 +31,12 @@ merge :: proc(b1: AABB, b2: AABB) -> AABB {
 		y = interval.between(b1.y, b2.y),
 		z = interval.between(b1.z, b2.z),
 	}
+}
+
+min_max_vecs :: proc(box: AABB) -> (min: utils.Vec3, max: utils.Vec3) {
+	min = {box.x.min, box.y.min, box.z.min}
+	max = {box.x.max, box.y.max, box.z.max}
+	return
 }
 
 longest_axis :: proc(a: AABB) -> int {
@@ -74,6 +85,15 @@ contains :: proc(outer, inner: AABB) -> bool {
 		interval.contains(outer.y, inner.y) &&
 		interval.contains(outer.z, inner.z) \
 	)
+}
+
+offset :: proc(box: AABB, point: utils.Vec3) -> utils.Vec3 {
+	min, max := min_max_vecs(box)
+	o := point - min
+	if max.x > min.x do o.x /= max.x - min.x
+	if max.y > min.y do o.y /= max.y - min.y
+	if max.z > min.z do o.z /= max.z - min.z
+	return o
 }
 
 axis_interval :: proc(aabb: AABB, axis: int) -> interval.Interval {

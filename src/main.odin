@@ -1,8 +1,8 @@
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:math/linalg"
+import "core:time"
 import "raytracer/camera"
 import "raytracer/color"
 import "raytracer/hittable"
@@ -135,7 +135,7 @@ main :: proc() {
 		look_at = {0, 0, 0},
 		up = {0, 1, 0},
 		center = {13, 2, 3},
-		samples_per_pixel = 1,
+		samples_per_pixel = 100,
 		defocus_angle = 0.6,
 		focal_distance = 10,
 	)
@@ -143,12 +143,22 @@ main :: proc() {
 	world := create_book_scene()
 	defer hittable.hittable_list_destroy(&world)
 
-	tree: hittable.BVH
-	hittable.bvh_init(&tree, world.hittables[:])
-	defer hittable.bvh_destroy(&tree)
+	begin := time.tick_now()
+	tree: hittable.HLBVH
+	hittable.hlbvh_init(&tree, world.hittables[:])
+	//tree: hittable.BVH
+	//hittable.bvh_init(
+	//	&tree,
+	//	world.hittables[:],
+	//	algorithm = hittable.Algorigthm.SurfaceAreaHeuristic,
+	//)
+	//defer hittable.bvh_destroy(&tree)
+	log.infof("Time constructing tree: %v", time.tick_since(begin))
 
-	if err := camera.render(c, tree, "image.ppm"); err != nil {
-		fmt.eprintln(err)
-		return
-	}
+	free_all(context.temp_allocator)
+
+	// if err := camera.render(c, tree, "image.ppm"); err != nil {
+	// 	fmt.eprintln(err)
+	// 	return
+	// }
 }
