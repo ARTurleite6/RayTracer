@@ -25,7 +25,20 @@ empty :: proc() -> AABB {
 	return {x = interval.empty(), y = interval.empty(), z = interval.empty()}
 }
 
-merge :: proc(b1: AABB, b2: AABB) -> AABB {
+merge :: proc {
+	merge_with_box,
+	merge_with_point,
+}
+
+merge_with_point :: proc(b: AABB, p: utils.Vec3) -> AABB {
+	return {
+		x = {min = min(b.x.min, p.x), max = max(b.x.max, p.x)},
+		y = {min = min(b.y.min, p.y), max = max(b.y.max, p.y)},
+		z = {min = min(b.z.min, p.z), max = max(b.z.max, p.z)},
+	}
+}
+
+merge_with_box :: proc(b1: AABB, b2: AABB) -> AABB {
 	return {
 		x = interval.between(b1.x, b2.x),
 		y = interval.between(b1.y, b2.y),
@@ -37,6 +50,22 @@ min_max_vecs :: proc(box: AABB) -> (min: utils.Vec3, max: utils.Vec3) {
 	min = {box.x.min, box.y.min, box.z.min}
 	max = {box.x.max, box.y.max, box.z.max}
 	return
+}
+
+diagonal :: proc(b: AABB) -> utils.Vec3 {
+	min, max := min_max_vecs(b)
+	return max - min
+}
+
+maximum_extent :: proc(b: AABB) -> int {
+	d := diagonal(b)
+	if d.x > d.y && d.x > d.z {
+		return 0
+	} else if d.y > d.z {
+		return 1
+	} else {
+		return 2
+	}
 }
 
 longest_axis :: proc(a: AABB) -> int {

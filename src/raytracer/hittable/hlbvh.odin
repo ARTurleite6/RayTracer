@@ -2,8 +2,6 @@ package hittable
 
 import "../utils"
 import "aabb"
-import "core:fmt"
-import "core:log"
 import "core:thread"
 
 NUM_THREADS :: 16
@@ -46,6 +44,7 @@ hlbvh_init :: proc(
 	morton_codes := calculate_morton_codes(objects, scene_bounds)
 
 	treelets := calculate_treelets(morton_codes)
+	_ = treelets
 	return
 }
 
@@ -57,9 +56,9 @@ calculate_treelets :: proc(
 ) -> []LBVHTreelets {
 	context.allocator = allocator
 
-	treelets := make([]LBVHTreelets, 0, len(codes))
+	treelets := make([dynamic]LBVHTreelets, 0, len(codes))
 
-	mask := 0b00111111111111000000000000000000
+	mask: u32 = 0b00111111111111000000000000000000
 	start := 0
 	for end := 1; end <= len(codes); end += 1 {
 		if (end == len(codes) || (codes[start].code & mask != codes[end].code & mask)) {
@@ -68,7 +67,7 @@ calculate_treelets :: proc(
 		}
 	}
 
-	return treelets
+	return treelets[:]
 }
 
 @(private)
