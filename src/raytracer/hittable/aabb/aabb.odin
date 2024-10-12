@@ -57,7 +57,12 @@ diagonal :: proc(b: AABB) -> utils.Vec3 {
 	return max - min
 }
 
-maximum_extent :: proc(b: AABB) -> int {
+surface_area :: proc(b: AABB) -> f64 {
+	d := diagonal(b)
+	return 2 * (d.x * d.y + d.x * d.z + d.y * d.z)
+}
+
+maximum_extent :: proc(b: AABB) -> uint {
 	d := diagonal(b)
 	if d.x > d.y && d.x > d.z {
 		return 0
@@ -88,6 +93,7 @@ hit :: proc(aabb: AABB, r: ray.Ray, r_interval: interval.Interval) -> bool {
 	direction := r.direction
 
 	for axis in 0 ..< 3 {
+		axis := uint(axis)
 		ax := axis_interval(aabb, axis)
 		inv_d := 1.0 / direction[axis]
 		t0 := (ax.min - origin[axis]) * inv_d
@@ -125,7 +131,7 @@ offset :: proc(box: AABB, point: utils.Vec3) -> utils.Vec3 {
 	return o
 }
 
-axis_interval :: proc(aabb: AABB, axis: int) -> interval.Interval {
+axis_interval :: proc(aabb: AABB, axis: uint) -> interval.Interval {
 	if axis == 0 {
 		return aabb.x
 	} else if axis == 1 {

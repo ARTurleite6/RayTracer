@@ -144,8 +144,9 @@ main :: proc() {
 	defer hittable.hittable_list_destroy(&world)
 
 	begin := time.tick_now()
-	tree: hittable.HLBVH
-	hittable.hlbvh_init(&tree, world.hittables[:])
+	tree: hittable.BVH
+	hittable.bvh_init(&tree, world.hittables[:], 10, .SAH)
+	log.debug(tree)
 	//tree: hittable.BVH
 	//hittable.bvh_init(
 	//	&tree,
