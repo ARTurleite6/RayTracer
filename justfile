@@ -1,8 +1,11 @@
-build:
+build-debug:
+  odin build src -vet -strict-style -out:raytracer -show-timings -debug
+
+build-release:
   odin build src -vet -strict-style -out:raytracer -show-timings -o:speed
 
 test:
   odin test tests -all-packages
 
-run: build
-  ./raytracer && open image.ppm
+run: build-release
+  ./raytracer

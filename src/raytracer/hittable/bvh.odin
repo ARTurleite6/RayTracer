@@ -1,16 +1,34 @@
 package hittable
 
+import "../interval"
+import "../ray"
 import "../utils"
 import "aabb"
+import "core:container/queue"
 import "core:log"
 import "core:slice"
 
+_ :: log
+
 N_BUCKETS :: 12
+
+Bucket_Info :: struct {
+	count:  int,
+	bounds: aabb.AABB,
+}
 
 BVH :: struct {
 	max_prims_in_node: uint,
 	split_method:      Split_Method,
 	primitives:        []Hittable,
+	nodes:             []Linear_BVH_Node,
+}
+
+Linear_BVH_Node :: struct {
+	bounds:       aabb.AABB,
+	offset:       uint, // either primitive offset, either second child offset
+	n_primitives: u16,
+	axis:         u8,
 }
 
 Split_Method :: enum {
@@ -66,11 +84,13 @@ bvh_init :: proc(
 		)
 	}
 
-	total_nodes := 0
+	total_nodes: uint = 0
 	ordered_primitives := make([dynamic]Hittable, 0, len(bvh.primitives))
 	root: ^BVH_Build_Node
 
-	if split_method == .SAH {
+
+	switch split_method {
+	case .SAH:
 		root = bvh_recursive_build(
 			bvh^,
 			primitive_infos[:],
@@ -79,16 +99,59 @@ bvh_init :: proc(
 			&total_nodes,
 			&ordered_primitives,
 		)
+	case .HLBVH:
+		root = hlbvh_build(
+			bvh^,
+			primitive_infos[:],
+			&total_nodes,
+			&ordered_primitives,
+			allocator,
+			temp_allocator,
+		)
+
 	}
 
 	slice.swap_with_slice(bvh.primitives, ordered_primitives[:])
+
+	bvh.nodes = make([]Linear_BVH_Node, total_nodes, allocator)
+	offset: uint = 0
+	bvh_flatten(bvh^, root, &offset)
+	log.debug(total_nodes)
+	if offset != total_nodes {
+		log.fatalf(
+			"Offset should be equal to total_nodes, expected %d, got %d",
+			offset,
+			total_nodes,
+		)
+	}
+}
+
+bvh_flatten :: proc(bvh: BVH, node: ^BVH_Build_Node, offset: ^uint) -> uint {
+	linear_node := &bvh.nodes[offset^]
+	linear_node.bounds = node.bounds
+	my_offset := offset^
+	offset^ += 1
+	if node.n_primitives > 0 {
+		assert(node.children[0] == nil)
+		assert(node.children[1] == nil)
+		linear_node.offset = node.first_prim_offset
+		linear_node.n_primitives = u16(node.n_primitives)
+	} else {
+		assert(node.children[0] != nil)
+		assert(node.children[1] != nil)
+		linear_node.axis = u8(node.split_axis)
+		linear_node.n_primitives = 0
+		bvh_flatten(bvh, node.children[0], offset)
+		linear_node.offset = bvh_flatten(bvh, node.children[1], offset)
+	}
+	return my_offset
 }
 
 bvh_recursive_build :: proc(
 	bvh: BVH,
 	primitive_info: []BVH_Primitive_Info,
 	start, end: uint,
-	total_nodes: ^int,
+	total_nodes: ^uint,
 	ordered_prims: ^[dynamic]Hittable,
 	allocator := context.allocator,
 ) -> ^BVH_Build_Node {
@@ -96,10 +159,11 @@ bvh_recursive_build :: proc(
 
 	node := new(BVH_Build_Node)
 
+	n_primitives := end - start
+
 	total_nodes^ += 1
 	bounds := calculate_scene_bounds(primitive_info[start:end])
 
-	n_primitives := end - start
 	if n_primitives == 1 {
 		node^ = bvh_create_leaf_node(
 			bvh = bvh,
@@ -138,10 +202,6 @@ bvh_recursive_build :: proc(
 					return a.centroid[dim] < b.centroid[dim]
 				})
 			} else {
-				Bucket_Info :: struct {
-					count:  int,
-					bounds: aabb.AABB,
-				}
 				buckets: [N_BUCKETS]Bucket_Info
 
 				for i in start ..< end {
@@ -185,12 +245,14 @@ bvh_recursive_build :: proc(
 
 				leaf_cost := n_primitives
 				if n_primitives > bvh.max_prims_in_node || min_cost < f64(leaf_cost) {
-					split_primitives(
-						primitive_info = primitive_info[start:end],
-						centroid_bounds = centroid_bounds,
-						dim = dim,
-						min_cost_split_bucket = min_cost_split_bucket,
-					)
+					mid =
+						start +
+						split_primitives(
+							primitive_info = primitive_info[start:end],
+							centroid_bounds = centroid_bounds,
+							dim = dim,
+							min_cost_split_bucket = min_cost_split_bucket,
+						)
 				} else {
 					node^ = bvh_create_leaf_node(
 						bvh = bvh,
@@ -214,6 +276,68 @@ bvh_recursive_build :: proc(
 	return node
 }
 
+bvh_hit :: proc(
+	bvh: BVH,
+	r: ray.Ray,
+	inter: interval.Interval,
+) -> (
+	hit_record: Hit_Record,
+	intersected: bool,
+) {
+	inv_dir := ray.inv_direction(r)
+	current_node_index := 0
+	buffer: [64]int
+	nodes_to_visit: queue.Queue(int)
+	queue.init_from_slice(&nodes_to_visit, buffer[:])
+
+	closest_so_far := inter.max
+
+	for {
+		node := &bvh.nodes[current_node_index]
+
+		new_inter := interval.Interval {
+			min = inter.min,
+			max = closest_so_far,
+		}
+		if aabb.hit(node.bounds, r, new_inter) {
+			if node.n_primitives > 0 {
+				for i in 0 ..< node.n_primitives {
+					i := uint(i)
+					if temp_hit_record, temp_intersected := hit(
+						bvh.primitives[node.offset + i],
+						r,
+						new_inter,
+					); temp_intersected {
+						intersected = true
+						closest_so_far = temp_hit_record.t
+						hit_record = temp_hit_record
+					}
+				}
+
+				if next_node, continue_travelling := queue.pop_back_safe(&nodes_to_visit);
+				   continue_travelling {
+					current_node_index = next_node
+				} else do break
+			} else {
+				if inv_dir[node.axis] < 0 {
+					queue.push_back(&nodes_to_visit, current_node_index + 1)
+					current_node_index = int(node.offset)
+				} else {
+					queue.push_back(&nodes_to_visit, int(node.offset))
+					current_node_index += 1
+				}
+			}
+		} else {
+			if next_node, continue_travelling := queue.pop_back_safe(&nodes_to_visit);
+			   continue_travelling {
+				current_node_index = next_node
+			} else do break
+		}
+	}
+
+	return
+}
+
 init_leaf :: proc(n: ^BVH_Build_Node, first, n_primitives: uint, bounds: aabb.AABB) {
 	n.first_prim_offset = first
 	n.n_primitives = n_primitives
@@ -232,7 +356,7 @@ init_interior :: proc(n: ^BVH_Build_Node, axis: uint, c0, c1: ^BVH_Build_Node) {
 
 @(private)
 split_primitives :: proc(
-	primitive_info: []BVH_Primitive_Info,
+	primitive_info: []$T,
 	centroid_bounds: aabb.AABB,
 	dim: uint,
 	min_cost_split_bucket: uint,
@@ -249,15 +373,12 @@ split_primitives :: proc(
 		dim                   = dim,
 		min_cost_split_bucket = min_cost_split_bucket,
 	}
-	log.debugf("Before = %v", info)
 	context.user_ptr = &info
-	mid = utils.partition(primitive_info, proc(a: BVH_Primitive_Info) -> bool {
-		log.debug("ola")
+	mid = utils.partition(primitive_info, proc(a: T) -> bool {
 		info := cast(^Partition_Info)context.user_ptr
-		log.debugf("After = %v", info)
 		centroid_bounds := info.centroid_bounds
 		dim := info.dim
-		b := uint(N_BUCKETS * aabb.offset(centroid_bounds, a.centroid)[dim])
+		b := uint(N_BUCKETS * aabb.offset(centroid_bounds, aabb.centroid(a.bounds))[dim])
 		if b == N_BUCKETS do b = N_BUCKETS - 1
 		return b <= info.min_cost_split_bucket
 	})

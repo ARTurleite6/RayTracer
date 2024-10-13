@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import "core:time"
@@ -22,6 +23,7 @@ create_book_scene :: proc() -> hittable.Hittable_List {
 		radius = 1000,
 		material = ground_material,
 	)
+	hittable.hittable_list_add(&world, sphere)
 
 	for i in -11 ..< 11 {
 		for j in -11 ..< 11 {
@@ -135,31 +137,21 @@ main :: proc() {
 		look_at = {0, 0, 0},
 		up = {0, 1, 0},
 		center = {13, 2, 3},
-		samples_per_pixel = 100,
+		samples_per_pixel = 1,
 		defocus_angle = 0.6,
 		focal_distance = 10,
 	)
 
-	world := create_book_scene()
+	world := create_world()
 	defer hittable.hittable_list_destroy(&world)
 
 	begin := time.tick_now()
 	tree: hittable.BVH
-	hittable.bvh_init(&tree, world.hittables[:], 10, .SAH)
-	log.debug(tree)
-	//tree: hittable.BVH
-	//hittable.bvh_init(
-	//	&tree,
-	//	world.hittables[:],
-	//	algorithm = hittable.Algorigthm.SurfaceAreaHeuristic,
-	//)
-	//defer hittable.bvh_destroy(&tree)
+	hittable.bvh_init(&tree, world.hittables[:], 1, .HLBVH)
 	log.infof("Time constructing tree: %v", time.tick_since(begin))
 
-	free_all(context.temp_allocator)
-
-	// if err := camera.render(c, tree, "image.ppm"); err != nil {
-	// 	fmt.eprintln(err)
-	// 	return
-	// }
+	if err := camera.render(c, tree, "image.ppm"); err != nil {
+		fmt.eprintln(err)
+		return
+	}
 }
