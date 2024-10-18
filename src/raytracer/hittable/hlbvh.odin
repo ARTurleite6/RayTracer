@@ -54,7 +54,6 @@ hlbvh_build :: proc(
 	morton_codes := calculate_morton_codes(primitive_infos, bounds)
 	treelets := calculate_treelets(morton_codes)
 	total_nodes^ = build_treelets(bvh, treelets, ordered_prims, primitive_infos, morton_codes)
-	log.debugf("Total nodes = %d, number of primitives = %d", total_nodes^, len(bvh.primitives))
 	finished_treelets := make([dynamic]BVH_Build_Node, 0, len(treelets))
 	for &tr in treelets {
 		append(&finished_treelets, tr.build_nodes[0])
@@ -147,33 +146,66 @@ build_treelets :: proc(
 	primitive_info: []BVH_Primitive_Info,
 	morton_prims: []Morton_Code,
 	allocator := context.allocator,
+	temp_allocator := context.temp_allocator,
 ) -> uint {
 	resize(ordered_primitives, len(primitive_info))
-	total_nodes: uint = 0
-	ordered_prims_offset: uint = 0
-	for &tr in treelets {
-		root_node: ^BVH_Build_Node
-		nodes_created: uint
-		first_bit_index: uint = 29 - 12
-		log.debug(tr.start_index, tr.n_primitives)
-		root_node, nodes_created = emit_lbvh(
-			bvh,
-			build_nodes = tr.build_nodes,
-			primitive_info = primitive_info,
-			morton_prims = morton_prims[tr.start_index:],
-			n_primitives = tr.n_primitives,
-			ordered_prims = ordered_primitives^[:],
-			ordered_prims_offset = &ordered_prims_offset,
-			bit_index = int(first_bit_index),
-		)
 
-		tr.build_nodes[0] = root_node^
+	pool: thread.Pool
+	thread.pool_init(&pool, temp_allocator, NUM_THREADS)
+	defer thread.pool_destroy(&pool)
 
-		total_nodes += nodes_created
+	Scene_Info :: struct {
+		bvh:                BVH,
+		primitive_infos:    []BVH_Primitive_Info,
+		morton_prims:       []Morton_Code,
+		ordered_primitives: []Hittable,
+		ordered_primitives_offset:  ^uint,
+		total_nodes:        ^uint,
+		treelets:           []LBVHTreelets,
 	}
+	ordered_prims_offset: uint
+	total_nodes: uint
+	info := Scene_Info {
+		bvh = bvh,
+		primitive_infos = primitive_info,
+		morton_prims = morton_prims,
+		ordered_primitives = ordered_primitives^[:],
+		ordered_primitives_offset = &ordered_prims_offset,
+		total_nodes = &total_nodes,
+		treelets = treelets,
+	}
+
+
+	for _, i in treelets {
+		thread.pool_add_task(&pool, allocator, proc(task: thread.Task) {
+				treelet_index := task.user_index
+				scene_info := cast(^Scene_Info)task.data
+				tr := &scene_info.treelets[treelet_index]
+
+				root_node: ^BVH_Build_Node
+				nodes_created: uint
+				first_bit_index: uint = 29 - 12
+				root_node, nodes_created = emit_lbvh(
+					scene_info.bvh,
+					build_nodes = tr.build_nodes,
+					primitive_info = scene_info.primitive_infos,
+					morton_prims = scene_info.morton_prims[tr.start_index:],
+					n_primitives = tr.n_primitives,
+					ordered_prims = scene_info.ordered_primitives,
+					ordered_prims_offset = scene_info.ordered_primitives_offset,
+					bit_index = int(first_bit_index),
+				)
+				tr.build_nodes[0] = root_node^
+				sync.atomic_add(scene_info.total_nodes, nodes_created)
+
+			}, &info, i)
+	}
+	thread.pool_start(&pool)
+	thread.pool_finish(&pool)
 	return total_nodes
 }
 
+@(require_results)
 emit_lbvh :: proc(
 	bvh: BVH,
 	build_nodes: []BVH_Build_Node,
@@ -199,7 +231,6 @@ emit_lbvh :: proc(
 			bounds = aabb.merge(bounds, primitive_info[primitive_index].bounds)
 		}
 		init_leaf(node, first_prim_offset, n_primitives, bounds)
-		// log.debug(node)
 		return node, 1
 	} else {
 		mask: uint = 1 << uint(bit_index)
@@ -258,8 +289,6 @@ emit_lbvh :: proc(
 			ordered_prims_offset,
 			bit_index - 1,
 		)
-
-		// log.debugf("Number of left nodes = %d, left node = %v, right_nodes = %v, number of right nodes = %d", number_left_nodes, left_nodes, right_nodes, number_right_nodes)
 
 		axis := bit_index % 3
 		init_interior(node, uint(axis), left_nodes, right_nodes)

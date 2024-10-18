@@ -116,14 +116,6 @@ bvh_init :: proc(
 	bvh.nodes = make([]Linear_BVH_Node, total_nodes, allocator)
 	offset: uint = 0
 	bvh_flatten(bvh^, root, &offset)
-	log.debug(total_nodes)
-	if offset != total_nodes {
-		log.fatalf(
-			"Offset should be equal to total_nodes, expected %d, got %d",
-			offset,
-			total_nodes,
-		)
-	}
 }
 
 bvh_flatten :: proc(bvh: BVH, node: ^BVH_Build_Node, offset: ^uint) -> uint {

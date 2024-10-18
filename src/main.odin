@@ -142,12 +142,12 @@ main :: proc() {
 		focal_distance = 10,
 	)
 
-	world := create_world()
+	world := create_book_scene()
 	defer hittable.hittable_list_destroy(&world)
 
 	begin := time.tick_now()
 	tree: hittable.BVH
-	hittable.bvh_init(&tree, world.hittables[:], 1, .HLBVH)
+	hittable.bvh_init(&tree, world.hittables[:], 10, .HLBVH)
 	log.infof("Time constructing tree: %v", time.tick_since(begin))
 
 	if err := camera.render(c, tree, "image.ppm"); err != nil {
