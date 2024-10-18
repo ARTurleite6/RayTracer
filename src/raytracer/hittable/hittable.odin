@@ -22,13 +22,13 @@ Hittable :: union {
 }
 
 hittable_aabb :: proc(ht: Hittable) -> aabb.AABB {
-	switch v in ht {
+	#partial switch v in ht {
 	case Hittable_List:
 		return v.box
 	case Sphere:
 		return v.box
 	case BVH:
-		return v.nodes[v.root.(int)].box
+		return v.nodes[0].bounds
 	}
 	return {}
 }

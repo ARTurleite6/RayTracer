@@ -26,3 +26,11 @@ hit_sphere :: proc(r: Ray, center: utils.Vec3, radius: f64) -> f64 {
 		return h - linalg.sqrt(discriminant) / a
 	}
 }
+
+inv_direction :: proc(r: Ray) -> utils.Vec3 {
+	return {
+		1 / r.direction.x,
+		1 / r.direction.y,
+		1 / r.direction.z,
+	}
+}

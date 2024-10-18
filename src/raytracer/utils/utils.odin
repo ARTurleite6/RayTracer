@@ -4,13 +4,41 @@ import "core:fmt"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
+import "core:slice"
 
 Vec3 :: [3]f64
 
+@(require_results)
 random_double :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> f64 {
 	return rand.float64_range(low, upper, generator)
 }
 
+@(require_results)
+partition :: proc(s: $E/[]$T, predicate: proc(_: T) -> bool) -> uint {
+	first := 0
+	found := false
+	for &elem, i in s {
+		if !predicate(elem) {
+			first = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		return len(s) - 1
+	}
+
+	for j := first + 1; j < len(s); j += 1 {
+		if (predicate(s[j])) {
+			slice.swap(s, j, first)
+			first += 1
+		}
+	}
+
+	return uint(first)
+}
+
+@(require_results)
 almost_zero :: proc "contextless" (vec: Vec3) -> bool {
 	epsilon := math.F64_EPSILON
 
@@ -18,6 +46,7 @@ almost_zero :: proc "contextless" (vec: Vec3) -> bool {
 }
 
 // https://en.wikipedia.org/wiki/Schlick%27s_approximation
+@(require_results)
 refletance :: proc(cosine, refraction_index: f64) -> f64 {
 	r0 := (1 - refraction_index) / (1 + refraction_index)
 	r0 = r0 * r0
@@ -25,6 +54,7 @@ refletance :: proc(cosine, refraction_index: f64) -> f64 {
 	return r0 + (1 - r0) * math.pow(1 - cosine, 5)
 }
 
+@(require_results)
 random_unit_disk :: proc() -> Vec3 {
 	for {
 		p := random_vec2()
@@ -34,6 +64,7 @@ random_unit_disk :: proc() -> Vec3 {
 	}
 }
 
+@(require_results)
 random_unit_vector :: proc() -> Vec3 {
 	for {
 		p := random_vec3(-1, 1)
@@ -42,12 +73,14 @@ random_unit_vector :: proc() -> Vec3 {
 	}
 }
 
+@(require_results)
 random_vec2 :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> Vec3 {
 	context.random_generator = generator
 
 	return {random_double(low, upper), random_double(low, upper), 0}
 }
 
+@(require_results)
 random_vec3 :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> Vec3 {
 	context.random_generator = generator
 

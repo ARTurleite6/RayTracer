@@ -25,7 +25,20 @@ empty :: proc() -> AABB {
 	return {x = interval.empty(), y = interval.empty(), z = interval.empty()}
 }
 
-merge :: proc(b1: AABB, b2: AABB) -> AABB {
+merge :: proc {
+	merge_with_box,
+	merge_with_point,
+}
+
+merge_with_point :: proc(b: AABB, p: utils.Vec3) -> AABB {
+	return {
+		x = {min = min(b.x.min, p.x), max = max(b.x.max, p.x)},
+		y = {min = min(b.y.min, p.y), max = max(b.y.max, p.y)},
+		z = {min = min(b.z.min, p.z), max = max(b.z.max, p.z)},
+	}
+}
+
+merge_with_box :: proc(b1: AABB, b2: AABB) -> AABB {
 	return {
 		x = interval.between(b1.x, b2.x),
 		y = interval.between(b1.y, b2.y),
@@ -37,6 +50,27 @@ min_max_vecs :: proc(box: AABB) -> (min: utils.Vec3, max: utils.Vec3) {
 	min = {box.x.min, box.y.min, box.z.min}
 	max = {box.x.max, box.y.max, box.z.max}
 	return
+}
+
+diagonal :: proc(b: AABB) -> utils.Vec3 {
+	min, max := min_max_vecs(b)
+	return max - min
+}
+
+surface_area :: proc(b: AABB) -> f64 {
+	d := diagonal(b)
+	return 2 * (d.x * d.y + d.x * d.z + d.y * d.z)
+}
+
+maximum_extent :: proc(b: AABB) -> uint {
+	d := diagonal(b)
+	if d.x > d.y && d.x > d.z {
+		return 0
+	} else if d.y > d.z {
+		return 1
+	} else {
+		return 2
+	}
 }
 
 longest_axis :: proc(a: AABB) -> int {
@@ -59,6 +93,7 @@ hit :: proc(aabb: AABB, r: ray.Ray, r_interval: interval.Interval) -> bool {
 	direction := r.direction
 
 	for axis in 0 ..< 3 {
+		axis := uint(axis)
 		ax := axis_interval(aabb, axis)
 		inv_d := 1.0 / direction[axis]
 		t0 := (ax.min - origin[axis]) * inv_d
@@ -96,7 +131,7 @@ offset :: proc(box: AABB, point: utils.Vec3) -> utils.Vec3 {
 	return o
 }
 
-axis_interval :: proc(aabb: AABB, axis: int) -> interval.Interval {
+axis_interval :: proc(aabb: AABB, axis: uint) -> interval.Interval {
 	if axis == 0 {
 		return aabb.x
 	} else if axis == 1 {

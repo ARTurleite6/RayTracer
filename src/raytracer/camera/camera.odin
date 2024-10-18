@@ -6,9 +6,12 @@ import "../material/scatter"
 import "../ray"
 import "../utils"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
+
+_ :: log
 
 MAX_DEPTH :: 50
 
