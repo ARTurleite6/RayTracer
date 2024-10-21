@@ -76,7 +76,7 @@ render :: proc(
 	filepath: string,
 	random_generator := context.random_generator,
 ) -> os.Error {
-	f := os.open(filepath, os.O_CREATE | os.O_RDWR) or_return
+	f := os.open(filepath, os.O_CREATE | os.O_RDWR, 0o666) or_return
 	defer os.close(f)
 	pixel_sample_scale := 1.0 / f64(c.samples_per_pixel)
 

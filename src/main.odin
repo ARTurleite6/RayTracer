@@ -2,8 +2,8 @@ package main
 
 import "core:fmt"
 import "core:log"
-import "core:mem/virtual"
 import "core:math/linalg"
+import "core:mem/virtual"
 import "core:time"
 import "raytracer/camera"
 import "raytracer/color"
@@ -138,7 +138,7 @@ main :: proc() {
 		look_at = {0, 0, 0},
 		up = {0, 1, 0},
 		center = {13, 2, 3},
-		samples_per_pixel = 1,
+		samples_per_pixel = 100,
 		defocus_angle = 0.6,
 		focal_distance = 10,
 	)
@@ -156,7 +156,7 @@ main :: proc() {
 	}
 	defer virtual.arena_destroy(&arena)
 	allocator := virtual.arena_allocator(&arena)
-	
+
 	hittable.bvh_init(&tree, world.hittables[:], 10, .HLBVH, arena = allocator)
 	free_all(context.temp_allocator)
 	log.infof("Time constructing tree: %v", time.tick_since(begin))
