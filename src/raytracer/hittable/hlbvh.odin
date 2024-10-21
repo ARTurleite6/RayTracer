@@ -17,9 +17,9 @@ Morton_Code :: struct {
 }
 
 Calculate_Morton_Codes_Task :: struct {
-	primitive_info: ^BVH_Primitive_Info,
-	morton_prims:   ^Morton_Code,
-	bounds:         aabb.AABB,
+		morton_codes:    []Morton_Code,
+		primitive_infos: []BVH_Primitive_Info,
+		scene_bounds:    aabb.AABB,
 }
 
 Calculate_Treelet_Task :: struct {
@@ -48,16 +48,16 @@ hlbvh_build :: proc(
 	allocator := context.allocator,
 	temp_allocator := context.temp_allocator,
 ) -> ^BVH_Build_Node {
-	context.allocator = allocator
-	context.temp_allocator = temp_allocator
+	context.allocator = temp_allocator
 	bounds := calculate_scene_bounds(primitive_infos)
 	morton_codes := calculate_morton_codes(primitive_infos, bounds)
 	treelets := calculate_treelets(morton_codes)
-	total_nodes^ = build_treelets(bvh, treelets, ordered_prims, primitive_infos, morton_codes)
+	total_nodes^ = build_treelets(bvh, treelets, ordered_prims, primitive_infos, morton_codes, temp_allocator = temp_allocator)
 	finished_treelets := make([dynamic]BVH_Build_Node, 0, len(treelets))
 	for &tr in treelets {
 		append(&finished_treelets, tr.build_nodes[0])
 	}
+	context.allocator = allocator
 	return build_upper_sah(bvh, finished_treelets[:], 0, len(finished_treelets), total_nodes)
 }
 
@@ -67,7 +67,9 @@ build_upper_sah :: proc(
 	treeroots: []BVH_Build_Node,
 	start, end: uint,
 	total_nodes: ^uint,
+	allocator := context.allocator
 ) -> ^BVH_Build_Node {
+	context.allocator = allocator
 	offset := end - start
 	if offset == 1 {
 		return &treeroots[start]
@@ -145,39 +147,37 @@ build_treelets :: proc(
 	ordered_primitives: ^[dynamic]Hittable,
 	primitive_info: []BVH_Primitive_Info,
 	morton_prims: []Morton_Code,
-	allocator := context.allocator,
 	temp_allocator := context.temp_allocator,
 ) -> uint {
 	resize(ordered_primitives, len(primitive_info))
 
+	context.allocator = temp_allocator
 	pool: thread.Pool
-	thread.pool_init(&pool, temp_allocator, NUM_THREADS)
-	defer thread.pool_destroy(&pool)
+	thread.pool_init(&pool, context.allocator, NUM_THREADS)
 
 	Scene_Info :: struct {
-		bvh:                BVH,
-		primitive_infos:    []BVH_Primitive_Info,
-		morton_prims:       []Morton_Code,
-		ordered_primitives: []Hittable,
-		ordered_primitives_offset:  ^uint,
-		total_nodes:        ^uint,
-		treelets:           []LBVHTreelets,
+		bvh:                       BVH,
+		primitive_infos:           []BVH_Primitive_Info,
+		morton_prims:              []Morton_Code,
+		ordered_primitives:        []Hittable,
+		ordered_primitives_offset: ^uint,
+		total_nodes:               ^uint,
+		treelets:                  []LBVHTreelets,
 	}
 	ordered_prims_offset: uint
 	total_nodes: uint
 	info := Scene_Info {
-		bvh = bvh,
-		primitive_infos = primitive_info,
-		morton_prims = morton_prims,
-		ordered_primitives = ordered_primitives^[:],
+		bvh                       = bvh,
+		primitive_infos           = primitive_info,
+		morton_prims              = morton_prims,
+		ordered_primitives        = ordered_primitives^[:],
 		ordered_primitives_offset = &ordered_prims_offset,
-		total_nodes = &total_nodes,
-		treelets = treelets,
+		total_nodes               = &total_nodes,
+		treelets                  = treelets,
 	}
 
-
 	for _, i in treelets {
-		thread.pool_add_task(&pool, allocator, proc(task: thread.Task) {
+		thread.pool_add_task(&pool, context.allocator, proc(task: thread.Task) {
 				treelet_index := task.user_index
 				scene_info := cast(^Scene_Info)task.data
 				tr := &scene_info.treelets[treelet_index]
@@ -311,7 +311,7 @@ calculate_treelets :: proc(
 	for end: uint = 1; end <= len(codes); end += 1 {
 		if (end == len(codes) || (codes[start].code & mask != codes[end].code & mask)) {
 			n_primitives := end - start
-			nodes := make([]BVH_Build_Node, 2 * n_primitives - 1, allocator)
+			nodes := make([]BVH_Build_Node, 2 * n_primitives - 1)
 			append(
 				&treelets,
 				LBVHTreelets {
@@ -332,28 +332,23 @@ calculate_treelets :: proc(
 calculate_morton_codes :: proc(
 	objects: []BVH_Primitive_Info,
 	scene_bounds: aabb.AABB,
-	allocator := context.allocator,
 	temp_allocator := context.temp_allocator,
 ) -> []Morton_Code {
-	context.allocator = allocator
-	context.temp_allocator = temp_allocator
+	context.allocator = temp_allocator
 
 	morton_codes := make([]Morton_Code, len(objects))
 
 	pool: thread.Pool
-	thread.pool_init(&pool, allocator = context.temp_allocator, thread_count = NUM_THREADS)
-	defer thread.pool_destroy(&pool)
+	thread.pool_init(&pool, allocator = context.allocator, thread_count = NUM_THREADS)
 
-	tasks := make([]Calculate_Morton_Codes_Task, len(objects), context.temp_allocator)
-	defer delete(tasks)
+	scene_info := Calculate_Morton_Codes_Task {
+		morton_codes    = morton_codes,
+		primitive_infos = objects,
+		scene_bounds    = scene_bounds,
+	}
 
 	for _, i in objects {
-		tasks[i] = Calculate_Morton_Codes_Task {
-			morton_prims   = &morton_codes[i],
-			primitive_info = &objects[i],
-			bounds         = scene_bounds,
-		}
-		thread.pool_add_task(&pool, context.allocator, calculate_obj_morton_code_task, &tasks[i])
+		thread.pool_add_task(&pool, context.allocator, calculate_obj_morton_code_task, &scene_info, i)
 	}
 
 	thread.pool_start(&pool)
@@ -371,7 +366,6 @@ sort_morton_codes :: proc(arr: []Morton_Code, temp_allocator := context.temp_all
 	n_passes: uint : n_bits / bits_per_pass
 
 	temp := make([]Morton_Code, len(arr), temp_allocator)
-	defer delete(temp)
 
 	for pass in 0 ..< n_passes {
 		low_bit := pass * bits_per_pass
@@ -408,9 +402,10 @@ sort_morton_codes :: proc(arr: []Morton_Code, temp_allocator := context.temp_all
 @(private)
 calculate_obj_morton_code_task :: proc(task: thread.Task) {
 	task_info := cast(^Calculate_Morton_Codes_Task)task.data
-	morton_prims := task_info.morton_prims
-	primitive_info := task_info.primitive_info
-	bounds := task_info.bounds
+	user_index := task.user_index
+	morton_prims := &task_info.morton_codes[user_index]
+	primitive_info := &task_info.primitive_infos[user_index]
+	bounds := task_info.scene_bounds
 
 	morton_prims.primitive_index = primitive_info.primitive_number
 	centroid_offset := aabb.offset(bounds, primitive_info.centroid)
@@ -432,3 +427,4 @@ left_shift_3 :: proc(x: uint) -> uint {
 	x = (x | (x << 2)) & 0b00001001001001001001001001001001
 	return x
 }
+

@@ -4,6 +4,7 @@ import "../interval"
 import "../ray"
 import "../utils"
 import "aabb"
+import "core:mem"
 import "core:container/queue"
 import "core:log"
 import "core:slice"
@@ -53,36 +54,18 @@ bvh_init :: proc(
 	primitives: []Hittable,
 	max_prims_in_node: uint,
 	split_method: Split_Method,
-	allocator := context.allocator,
 	temp_allocator := context.temp_allocator,
+	arena: mem.Allocator,
 ) {
-	context.allocator = allocator
-	context.temp_allocator = temp_allocator
-	bvh.primitives = primitives
+	context.allocator = arena
+	bvh.primitives = slice.clone(primitives)
 	bvh.max_prims_in_node = max_prims_in_node
 	bvh.split_method = split_method
 
 	if len(bvh.primitives) == 0 do return
 
-	primitive_infos := make(
-		[dynamic]BVH_Primitive_Info,
-		0,
-		len(bvh.primitives),
-		context.temp_allocator,
-	)
-	defer delete(primitive_infos)
-
-	for &prim, i in bvh.primitives {
-		bounds := hittable_aabb(prim)
-		append(
-			&primitive_infos,
-			BVH_Primitive_Info {
-				primitive_number = i,
-				bounds = bounds,
-				centroid = aabb.centroid(bounds),
-			},
-		)
-	}
+	context.allocator = temp_allocator
+	primitive_infos := make_primitive_infos(bvh.primitives)
 
 	total_nodes: uint = 0
 	ordered_primitives := make([dynamic]Hittable, 0, len(bvh.primitives))
@@ -105,17 +88,23 @@ bvh_init :: proc(
 			primitive_infos[:],
 			&total_nodes,
 			&ordered_primitives,
-			allocator,
-			temp_allocator,
+			temp_allocator = temp_allocator,
 		)
 
 	}
 
 	slice.swap_with_slice(bvh.primitives, ordered_primitives[:])
 
-	bvh.nodes = make([]Linear_BVH_Node, total_nodes, allocator)
+	bvh.nodes = make([]Linear_BVH_Node, total_nodes, arena)
 	offset: uint = 0
 	bvh_flatten(bvh^, root, &offset)
+}
+
+bvh_destroy :: proc(bvh: ^BVH) {
+	delete(bvh.primitives)
+	delete(bvh.nodes)
+	bvh.primitives = nil
+	bvh.nodes = nil
 }
 
 bvh_flatten :: proc(bvh: BVH, node: ^BVH_Build_Node, offset: ^uint) -> uint {
@@ -145,11 +134,9 @@ bvh_recursive_build :: proc(
 	start, end: uint,
 	total_nodes: ^uint,
 	ordered_prims: ^[dynamic]Hittable,
-	allocator := context.allocator,
+	allocator := context.allocator
 ) -> ^BVH_Build_Node {
-	context.allocator = allocator
-
-	node := new(BVH_Build_Node)
+	node := new(BVH_Build_Node, allocator)
 
 	n_primitives := end - start
 
@@ -260,8 +247,8 @@ bvh_recursive_build :: proc(
 			init_interior(
 				node,
 				dim,
-				bvh_recursive_build(bvh, primitive_info, start, mid, total_nodes, ordered_prims),
-				bvh_recursive_build(bvh, primitive_info, mid, end, total_nodes, ordered_prims),
+				bvh_recursive_build(bvh, primitive_info, start, mid, total_nodes, ordered_prims, allocator),
+				bvh_recursive_build(bvh, primitive_info, mid, end, total_nodes, ordered_prims, allocator),
 			)
 		}
 	}
@@ -396,6 +383,26 @@ bvh_create_leaf_node :: proc(
 	return node
 }
 
+@(private)
+make_primitive_infos :: proc(
+	primitive: []Hittable,
+	allocator := context.allocator,
+) -> []BVH_Primitive_Info {
+	primitive_infos := make([]BVH_Primitive_Info, len(primitive), allocator)
+
+	for &primitive, i in primitive {
+		bounds := hittable_aabb(primitive)
+		primitive_infos[i] = BVH_Primitive_Info {
+			primitive_number = i,
+			centroid         = aabb.centroid(bounds),
+			bounds           = bounds,
+		}
+	}
+
+	return primitive_infos
+}
+
+@(private)
 calculate_scene_bounds :: proc(primitive_infos: []BVH_Primitive_Info) -> aabb.AABB {
 	bounds := aabb.empty()
 
@@ -405,3 +412,4 @@ calculate_scene_bounds :: proc(primitive_infos: []BVH_Primitive_Info) -> aabb.AA
 
 	return bounds
 }
+

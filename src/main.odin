@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:mem/virtual"
 import "core:math/linalg"
 import "core:time"
 import "raytracer/camera"
@@ -147,7 +148,17 @@ main :: proc() {
 
 	begin := time.tick_now()
 	tree: hittable.BVH
-	hittable.bvh_init(&tree, world.hittables[:], 10, .HLBVH)
+
+	arena: virtual.Arena
+	if err := virtual.arena_init_growing(&arena); err != nil {
+		log.fatal("Error creating the arena allocator, reason:", err)
+		return
+	}
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+	
+	hittable.bvh_init(&tree, world.hittables[:], 10, .HLBVH, arena = allocator)
+	free_all(context.temp_allocator)
 	log.infof("Time constructing tree: %v", time.tick_since(begin))
 
 	if err := camera.render(c, tree, "image.ppm"); err != nil {
