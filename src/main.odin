@@ -1,15 +1,23 @@
 package main
 
+import "base:runtime"
+import "core:c"
+import gl "vendor:OpenGL"
 import "core:fmt"
 import "core:log"
 import "core:math/linalg"
 import "core:mem/virtual"
 import "core:time"
+import imgui "external:odin-imgui"
+import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
+import imgui_opengl "external:odin-imgui/imgui_impl_opengl3"
 import "raytracer/camera"
 import "raytracer/color"
 import "raytracer/hittable"
 import mat "raytracer/material"
 import "raytracer/utils"
+import "vendor:glfw"
+_ :: gl
 
 create_book_scene :: proc() -> hittable.Hittable_List {
 	ground_material := mat.Lambertian {
@@ -118,9 +126,7 @@ create_world :: proc() -> hittable.Hittable_List {
 	return world
 }
 
-main :: proc() {
-	context.logger = log.create_console_logger()
-	defer log.destroy_console_logger(context.logger)
+render_scene_image :: proc() {
 
 	aspect_ratio := 16.0 / 9.0
 	image_width := 1200
@@ -161,8 +167,83 @@ main :: proc() {
 	free_all(context.temp_allocator)
 	log.infof("Time constructing tree: %v", time.tick_since(begin))
 
-	if err := camera.render(c, tree, "image.ppm"); err != nil {
-		fmt.eprintln(err)
+
+}
+
+render_ui :: proc() {
+}
+
+main :: proc() {
+	context.logger = log.create_console_logger()
+	defer log.destroy_console_logger(context.logger)
+
+	clear_color := imgui.Vec4{0.45, 0.55, 0.60, 1.00}
+
+	glfw.SetErrorCallback(proc "c" (error: c.int, description: cstring) {
+		context = runtime.default_context()
+		fmt.eprintf("GLFW Error %d: %s\n", error, description)
+	})
+
+	if !glfw.Init() {
+		log.fatal("Error initializing glfw")
 		return
 	}
+	defer glfw.Terminate()
+
+	when ODIN_OS == .Darwin {
+		glsl_version: cstring = "#version 150"
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 3)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 2)
+		glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+		glfw.WindowHint(glfw.OPENGL_FORWARD_COMPAT, gl.TRUE)
+	}
+
+	window := glfw.CreateWindow(1280, 720, "RayTracing", nil, nil)
+	if window == nil {
+		log.fatal("Error initializing glfw")
+		return
+	}
+	defer glfw.DestroyWindow(window)
+	glfw.MakeContextCurrent(window)
+	glfw.SwapInterval(1)
+	gl.load_up_to(3, 2, glfw.gl_set_proc_address)
+
+	imgui.CHECKVERSION()
+	imgui.CreateContext()
+	defer imgui.DestroyContext()
+	io := imgui.GetIO()
+	io.ConfigFlags = {.NavEnableKeyboard}
+
+	imgui.StyleColorsDark()
+
+	imgui_glfw.InitForOpenGL(window, true)
+	defer imgui_glfw.Shutdown()
+	imgui_opengl.Init(glsl_version)
+	defer imgui_opengl.Shutdown()
+
+	for !glfw.WindowShouldClose(window) {
+		glfw.PollEvents()
+
+		imgui_opengl.NewFrame()
+		imgui_glfw.NewFrame()
+		imgui.NewFrame()
+
+		imgui.Begin("Basic window")
+        imgui.Text("Hello from another window!")
+        imgui.End()
+
+		imgui.Render()
+		width, height := glfw.GetFramebufferSize(window)
+		gl.Viewport(0, 0, width, height)
+		gl.ClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w)
+		gl.Clear(gl.COLOR_BUFFER_BIT)
+		imgui_opengl.RenderDrawData(imgui.GetDrawData())
+
+		glfw.SwapBuffers(window)
+	}
+
+	// if err := camera.render(c, tree, "image.ppm"); err != nil {
+	// 	fmt.eprintln(err)
+	// 	return
+	// }
 }
