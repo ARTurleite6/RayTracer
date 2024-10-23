@@ -3,11 +3,11 @@ package interval
 import "core:math"
 
 Interval :: struct {
-	min, max: f64,
+	min, max: f32,
 }
 
 empty :: proc() -> Interval {
-	return {min = +math.INF_F64, max = -math.INF_F64}
+	return {min = +math.INF_F32, max = -math.INF_F32}
 }
 
 contains :: proc(outer, inner: Interval) -> bool {
@@ -20,10 +20,10 @@ between :: proc(a: Interval, b: Interval) -> (i: Interval) {
 	return
 }
 
-surrounds :: proc(interval: Interval, value: f64) -> bool {
+surrounds :: proc(interval: Interval, value: f32) -> bool {
 	return interval.min < value && value < interval.max
 }
 
-size :: proc(i: Interval) -> f64 {
+size :: proc(i: Interval) -> f32 {
 	return i.max - i.min
 }

@@ -14,9 +14,9 @@ Lambertian :: struct {
 
 Metal :: struct {
 	albedo: color.Color,
-	fuzz:   f64,
+	fuzz:   f32,
 }
 
 Dieletric :: struct {
-	refraction_index: f64,
+	refraction_index: f32,
 }

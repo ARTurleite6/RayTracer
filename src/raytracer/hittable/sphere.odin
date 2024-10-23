@@ -9,12 +9,12 @@ import "core:math/linalg"
 
 Sphere :: struct {
 	center:   utils.Vec3,
-	radius:   f64,
+	radius:   f32,
 	box:      aabb.AABB,
 	material: mat.Material,
 }
 
-sphere_init :: proc(s: ^Sphere, center: utils.Vec3, radius: f64, material: mat.Material) {
+sphere_init :: proc(s: ^Sphere, center: utils.Vec3, radius: f32, material: mat.Material) {
 	s.center = center
 	s.radius = radius
 	s.material = material

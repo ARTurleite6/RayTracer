@@ -2,7 +2,6 @@ package main
 
 import "base:runtime"
 import "core:c"
-import gl "vendor:OpenGL"
 import "core:fmt"
 import "core:log"
 import "core:math/linalg"
@@ -16,6 +15,7 @@ import "raytracer/color"
 import "raytracer/hittable"
 import mat "raytracer/material"
 import "raytracer/utils"
+import gl "vendor:OpenGL"
 import "vendor:glfw"
 _ :: gl
 
@@ -38,9 +38,9 @@ create_book_scene :: proc() -> hittable.Hittable_List {
 		for j in -11 ..< 11 {
 			choose_mat := utils.random_double()
 			center := utils.Vec3 {
-				f64(i) + 0.9 * utils.random_double(),
+				f32(i) + 0.9 * utils.random_double(),
 				0.2,
-				f64(j) + 0.9 * utils.random_double(),
+				f32(j) + 0.9 * utils.random_double(),
 			}
 
 			if linalg.length(center - utils.Vec3{4, 0.2, 0}) > 0.9 {
@@ -128,10 +128,10 @@ create_world :: proc() -> hittable.Hittable_List {
 
 render_scene_image :: proc() {
 
-	aspect_ratio := 16.0 / 9.0
+	aspect_ratio: f32 = 16.0 / 9.0
 	image_width := 1200
 
-	image_height := int(f64(image_width) / aspect_ratio)
+	image_height := int(f32(image_width) / aspect_ratio)
 	image_height = (image_height < 1) ? 1 : image_height
 
 	//Camera
@@ -170,7 +170,31 @@ render_scene_image :: proc() {
 
 }
 
-render_ui :: proc() {
+render_ui :: proc(hittable_list: hittable.Hittable_List, last_render_time: f64) {
+	imgui.Begin("Settings")
+	imgui.Text("Last render: %.3fms", last_render_time)
+	if imgui.Button("Render") {
+		log.info("Rendering scene")
+	}
+	imgui.End()
+
+	imgui.Begin("Scene")
+	for &ht, i in hittable_list.hittables {
+		sphere := &ht.(hittable.Sphere)
+
+		imgui.PushIDInt(i32(i))
+
+		imgui.DragFloat3("Position", &sphere.center, 0.1)
+		imgui.DragFloat("Radius", &sphere.radius, 0.1)
+		imgui.Separator()
+
+		imgui.PopID()
+	}
+	imgui.End()
+
+	imgui.PopStyleVar()
+
+	imgui.Render()
 }
 
 main :: proc() {
@@ -212,7 +236,7 @@ main :: proc() {
 	imgui.CreateContext()
 	defer imgui.DestroyContext()
 	io := imgui.GetIO()
-	io.ConfigFlags = {.NavEnableKeyboard}
+	io.ConfigFlags += {.NavEnableKeyboard}
 
 	imgui.StyleColorsDark()
 
@@ -221,21 +245,31 @@ main :: proc() {
 	imgui_opengl.Init(glsl_version)
 	defer imgui_opengl.Shutdown()
 
+	world := create_world()
+	defer hittable.hittable_list_destroy(&world)
+
+	start := time.now()
 	for !glfw.WindowShouldClose(window) {
+		frame_time := time.now()
+		last_render_time := time.duration_milliseconds(time.diff(start, frame_time))
+		start = frame_time
+
 		glfw.PollEvents()
 
 		imgui_opengl.NewFrame()
 		imgui_glfw.NewFrame()
 		imgui.NewFrame()
 
-		imgui.Begin("Basic window")
-        imgui.Text("Hello from another window!")
-        imgui.End()
+		render_ui(world, last_render_time)
 
-		imgui.Render()
 		width, height := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, width, height)
-		gl.ClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w)
+		gl.ClearColor(
+			clear_color.x * clear_color.w,
+			clear_color.y * clear_color.w,
+			clear_color.z * clear_color.w,
+			clear_color.w,
+		)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 		imgui_opengl.RenderDrawData(imgui.GetDrawData())
 

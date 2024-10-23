@@ -6,11 +6,15 @@ import "core:math/linalg"
 import "core:math/rand"
 import "core:slice"
 
-Vec3 :: [3]f64
+Vec3 :: [3]f32
 
 @(require_results)
-random_double :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> f64 {
-	return rand.float64_range(low, upper, generator)
+random_double :: proc(
+	low: f32 = 0.0,
+	upper: f32 = 1.0,
+	generator := context.random_generator,
+) -> f32 {
+	return rand.float32_range(low, upper, generator)
 }
 
 @(require_results)
@@ -40,14 +44,14 @@ partition :: proc(s: $E/[]$T, predicate: proc(_: T) -> bool) -> uint {
 
 @(require_results)
 almost_zero :: proc "contextless" (vec: Vec3) -> bool {
-	epsilon := math.F64_EPSILON
+	epsilon: f32 = math.F32_EPSILON
 
 	return abs(vec.x) < epsilon && abs(vec.y) < epsilon && abs(vec.z) < epsilon
 }
 
 // https://en.wikipedia.org/wiki/Schlick%27s_approximation
 @(require_results)
-refletance :: proc(cosine, refraction_index: f64) -> f64 {
+refletance :: proc(cosine, refraction_index: f32) -> f32 {
 	r0 := (1 - refraction_index) / (1 + refraction_index)
 	r0 = r0 * r0
 
@@ -74,22 +78,30 @@ random_unit_vector :: proc() -> Vec3 {
 }
 
 @(require_results)
-random_vec2 :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> Vec3 {
+random_vec2 :: proc(
+	low: f32 = 0.0,
+	upper: f32 = 1.0,
+	generator := context.random_generator,
+) -> Vec3 {
 	context.random_generator = generator
 
 	return {random_double(low, upper), random_double(low, upper), 0}
 }
 
 @(require_results)
-random_vec3 :: proc(low := 0.0, upper := 1.0, generator := context.random_generator) -> Vec3 {
+random_vec3 :: proc(
+	low: f32 = 0.0,
+	upper: f32 = 1.0,
+	generator := context.random_generator,
+) -> Vec3 {
 	context.random_generator = generator
 
 	return {random_double(low, upper), random_double(low, upper), random_double(low, upper)}
 }
 
 progress_bar :: proc(current, total: int, width: int = 50) {
-	percent := f64(current) / f64(total)
-	filled_width := int(f64(width) * percent)
+	percent := f32(current) / f32(total)
+	filled_width := int(f32(width) * percent)
 	bar := make([]byte, width)
 
 	for i in 0 ..< width {

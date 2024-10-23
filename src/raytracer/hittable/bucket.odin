@@ -15,7 +15,7 @@ min_cost_bucket :: proc(
 	centroid_bounds, scene_bounds: aabb.AABB,
 	dim: uint,
 ) -> (
-	min_cost: f64,
+	min_cost: f32,
 	bucket: uint,
 ) {
 
@@ -54,7 +54,7 @@ primitive_offset :: proc(
 	pr: BVH_Primitive_Info,
 	centroid_bounds: aabb.AABB,
 	dim: uint,
-) -> f64 {
+) -> f32 {
 	return aabb.offset(centroid_bounds, pr.centroid)[dim]
 }
 
@@ -64,7 +64,7 @@ node_offset :: proc(
 	tr: BVH_Build_Node,
 	centroid_bounds: aabb.AABB,
 	dim: uint,
-) -> f64{
+) -> f32{
 	centroid := aabb.centroid(tr.bounds)
 	return aabb.offset(centroid_bounds, centroid)[dim]
 }
@@ -76,10 +76,10 @@ calculate_min_cost :: proc(
 	buckets: [N_BUCKETS]Bucket_Info,
 	scene_bounds: aabb.AABB,
 ) -> (
-	min_cost: f64,
+	min_cost: f32,
 	bucket: uint,
 ) {
-	cost: [N_BUCKETS - 1]f64
+	cost: [N_BUCKETS - 1]f32
 	for i in 0 ..< N_BUCKETS - 1 {
 		b0, b1 := aabb.empty(), aabb.empty()
 		count0, count1: int
@@ -95,7 +95,7 @@ calculate_min_cost :: proc(
 
 		cost[i] =
 			0.125 +
-			(f64(count0) * aabb.surface_area(b0) + f64(count1) * aabb.surface_area(b1)) /
+			(f32(count0) * aabb.surface_area(b0) + f32(count1) * aabb.surface_area(b1)) /
 				aabb.surface_area(scene_bounds)
 	}
 

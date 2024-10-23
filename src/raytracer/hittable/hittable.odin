@@ -11,7 +11,7 @@ Hit_Record :: struct {
 	point:      utils.Vec3,
 	normal:     utils.Vec3,
 	material:   mat.Material,
-	t:          f64,
+	t:          f32,
 	front_face: bool,
 }
 
@@ -50,7 +50,7 @@ hit_record_init :: proc(
 	hit_record: ^Hit_Record,
 	r: ray.Ray,
 	outward_normal: utils.Vec3,
-	t: f64,
+	t: f32,
 	material: mat.Material,
 ) {
 	hit_record.material = material

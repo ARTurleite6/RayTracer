@@ -173,7 +173,7 @@ bvh_recursive_build :: proc(
 					dim,
 				)
 				leaf_cost := n_primitives
-				if n_primitives > bvh.max_prims_in_node || min_cost < f64(leaf_cost) {
+				if n_primitives > bvh.max_prims_in_node || min_cost < f32(leaf_cost) {
 					mid = split_primitives(
 						primitive_info = primitive_info,
 						centroid_bounds = centroid_bounds,

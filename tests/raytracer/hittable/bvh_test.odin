@@ -153,9 +153,9 @@ create_book_scene :: proc() -> hittable.Hittable_List {
 		for j in -11 ..< 11 {
 			choose_mat := utils.random_double()
 			center := utils.Vec3 {
-				f64(i) + 0.9 * utils.random_double(),
+				f32(i) + 0.9 * utils.random_double(),
 				0.2,
-				f64(j) + 0.9 * utils.random_double(),
+				f32(j) + 0.9 * utils.random_double(),
 			}
 
 			if linalg.length(center - utils.Vec3{4, 0.2, 0}) > 0.9 {

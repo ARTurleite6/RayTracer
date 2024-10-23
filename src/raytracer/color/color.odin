@@ -25,6 +25,6 @@ color_linear_to_gamma :: proc(linear_color: Color) -> Color {
 	}
 }
 
-linear_component_to_gamma :: proc(linear_component: f64) -> f64 {
+linear_component_to_gamma :: proc(linear_component: f32) -> f32 {
 	return linear_component > 0 ? math.sqrt(linear_component) : 0
 }

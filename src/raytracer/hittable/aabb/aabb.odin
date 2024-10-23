@@ -57,7 +57,7 @@ diagonal :: proc(b: AABB) -> utils.Vec3 {
 	return max - min
 }
 
-surface_area :: proc(b: AABB) -> f64 {
+surface_area :: proc(b: AABB) -> f32 {
 	d := diagonal(b)
 	return 2 * (d.x * d.y + d.x * d.z + d.y * d.z)
 }

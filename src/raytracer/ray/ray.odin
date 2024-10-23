@@ -8,11 +8,11 @@ Ray :: struct {
 	direction: utils.Vec3,
 }
 
-at :: proc(r: Ray, t: f64) -> utils.Vec3 {
+at :: proc(r: Ray, t: f32) -> utils.Vec3 {
 	return r.origin + t * r.direction
 }
 
-hit_sphere :: proc(r: Ray, center: utils.Vec3, radius: f64) -> f64 {
+hit_sphere :: proc(r: Ray, center: utils.Vec3, radius: f32) -> f32 {
 	dot :: linalg.dot
 
 	oc := center - r.origin
