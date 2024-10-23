@@ -138,7 +138,7 @@ main :: proc() {
 		look_at = {0, 0, 0},
 		up = {0, 1, 0},
 		center = {13, 2, 3},
-		samples_per_pixel = 100,
+		samples_per_pixel = 1,
 		defocus_angle = 0.6,
 		focal_distance = 10,
 	)

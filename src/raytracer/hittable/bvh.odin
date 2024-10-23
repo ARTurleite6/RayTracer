@@ -4,19 +4,12 @@ import "../interval"
 import "../ray"
 import "../utils"
 import "aabb"
-import "core:mem"
 import "core:container/queue"
 import "core:log"
+import "core:mem"
 import "core:slice"
 
 _ :: log
-
-N_BUCKETS :: 12
-
-Bucket_Info :: struct {
-	count:  int,
-	bounds: aabb.AABB,
-}
 
 BVH :: struct {
 	max_prims_in_node: uint,
@@ -74,19 +67,11 @@ bvh_init :: proc(
 
 	switch split_method {
 	case .SAH:
-		root = bvh_recursive_build(
-			bvh^,
-			primitive_infos[:],
-			0,
-			len(bvh.primitives),
-			&total_nodes,
-			&ordered_primitives,
-		)
+		root, total_nodes = bvh_recursive_build(bvh^, primitive_infos[:], &ordered_primitives)
 	case .HLBVH:
-		root = hlbvh_build(
+		root, total_nodes = hlbvh_build(
 			bvh^,
 			primitive_infos[:],
-			&total_nodes,
 			&ordered_primitives,
 			temp_allocator = temp_allocator,
 		)
@@ -131,128 +116,99 @@ bvh_flatten :: proc(bvh: BVH, node: ^BVH_Build_Node, offset: ^uint) -> uint {
 bvh_recursive_build :: proc(
 	bvh: BVH,
 	primitive_info: []BVH_Primitive_Info,
-	start, end: uint,
-	total_nodes: ^uint,
 	ordered_prims: ^[dynamic]Hittable,
-	allocator := context.allocator
-) -> ^BVH_Build_Node {
+	allocator := context.allocator,
+) -> (
+	root: ^BVH_Build_Node,
+	total_nodes: uint,
+) {
 	node := new(BVH_Build_Node, allocator)
 
-	n_primitives := end - start
+	n_primitives := uint(len(primitive_info))
 
-	total_nodes^ += 1
-	bounds := calculate_scene_bounds(primitive_info[start:end])
+	bounds := calculate_scene_bounds(primitive_info)
 
 	if n_primitives == 1 {
 		node^ = bvh_create_leaf_node(
 			bvh = bvh,
 			ordered_prims = ordered_prims,
-			primitive_info = primitive_info[start:end],
+			primitive_info = primitive_info,
 			n_primitives = n_primitives,
 			bounds = bounds,
 		)
-		return node
+		return node, 1
 	} else {
 		centroid_bounds := aabb.empty()
-		for i in start ..< end {
-			centroid_bounds = aabb.merge(centroid_bounds, primitive_info[i].centroid)
+		for &pr in primitive_info {
+			centroid_bounds = aabb.merge(centroid_bounds, pr.centroid)
 		}
 		dim := aabb.maximum_extent(centroid_bounds)
 
-		mid := (start + end) / 2
+		mid := n_primitives / 2
 		axis_value := aabb.axis_interval(centroid_bounds, dim)
 		if axis_value.max == axis_value.min {
 			node^ = bvh_create_leaf_node(
 				bvh = bvh,
 				ordered_prims = ordered_prims,
-				primitive_info = primitive_info[start:end],
+				primitive_info = primitive_info,
 				n_primitives = n_primitives,
 				bounds = bounds,
 			)
-			return node
+			return node, 1
 		} else {
 			if n_primitives <= 4 {
-				mid = (start + end) / 2
+				mid = n_primitives / 2
 
 				// TODO improve this function just like the book
 				context.user_index = int(dim)
-				slice.sort_by(primitive_info[start:end], proc(a, b: BVH_Primitive_Info) -> bool {
+				slice.sort_by(primitive_info, proc(a, b: BVH_Primitive_Info) -> bool {
 					dim := uint(context.user_index)
 					return a.centroid[dim] < b.centroid[dim]
 				})
 			} else {
-				buckets: [N_BUCKETS]Bucket_Info
-
-				for i in start ..< end {
-					b := int(
-						N_BUCKETS * aabb.offset(centroid_bounds, primitive_info[i].centroid)[dim],
-					)
-					if b == N_BUCKETS do b = N_BUCKETS - 1
-					buckets[b].count += 1
-					buckets[b].bounds = aabb.merge(buckets[b].bounds, primitive_info[i].bounds)
-				}
-
-				cost: [N_BUCKETS - 1]f64
-				for i in 0 ..< N_BUCKETS - 1 {
-					b0, b1 := aabb.empty(), aabb.empty()
-					count0, count1: int
-					for j in 0 ..= i {
-						b0 = aabb.merge(b0, buckets[j].bounds)
-						count0 += buckets[j].count
-					}
-
-					for j in (i + 1) ..< N_BUCKETS {
-						b1 = aabb.merge(b1, buckets[j].bounds)
-						count1 += buckets[j].count
-					}
-
-					cost[i] =
-						0.125 +
-						(f64(count0) * aabb.surface_area(b0) +
-								f64(count1) * aabb.surface_area(b1)) /
-							aabb.surface_area(bounds)
-				}
-
-				min_cost := cost[0]
-				min_cost_split_bucket: uint = 0
-				for i in 1 ..< N_BUCKETS - 1 {
-					if cost[i] < min_cost {
-						min_cost = cost[i]
-						min_cost_split_bucket = uint(i)
-					}
-				}
-
+				min_cost, min_cost_split_bucket := min_cost_bucket(
+					primitive_info,
+					centroid_bounds,
+					bounds,
+					dim,
+				)
 				leaf_cost := n_primitives
 				if n_primitives > bvh.max_prims_in_node || min_cost < f64(leaf_cost) {
-					mid =
-						start +
-						split_primitives(
-							primitive_info = primitive_info[start:end],
-							centroid_bounds = centroid_bounds,
-							dim = dim,
-							min_cost_split_bucket = min_cost_split_bucket,
-						)
+					mid = split_primitives(
+						primitive_info = primitive_info,
+						centroid_bounds = centroid_bounds,
+						dim = dim,
+						min_cost_split_bucket = min_cost_split_bucket,
+					)
 				} else {
 					node^ = bvh_create_leaf_node(
 						bvh = bvh,
 						ordered_prims = ordered_prims,
-						primitive_info = primitive_info[start:end],
+						primitive_info = primitive_info,
 						n_primitives = n_primitives,
 						bounds = bounds,
 					)
-					return node
+					return node, 1
 				}
 			}
 
-			init_interior(
-				node,
-				dim,
-				bvh_recursive_build(bvh, primitive_info, start, mid, total_nodes, ordered_prims, allocator),
-				bvh_recursive_build(bvh, primitive_info, mid, end, total_nodes, ordered_prims, allocator),
+			left_root, nodes_left := bvh_recursive_build(
+				bvh,
+				primitive_info[:mid],
+				ordered_prims,
+				allocator,
 			)
+			right_root, nodes_right := bvh_recursive_build(
+				bvh,
+				primitive_info[mid:],
+				ordered_prims,
+				allocator,
+			)
+			init_interior(node, dim, left_root, right_root)
+			total_nodes = 1 + nodes_left + nodes_right
 		}
 	}
-	return node
+	return node, total_nodes
 }
 
 bvh_hit :: proc(
@@ -412,4 +368,3 @@ calculate_scene_bounds :: proc(primitive_infos: []BVH_Primitive_Info) -> aabb.AA
 
 	return bounds
 }
-

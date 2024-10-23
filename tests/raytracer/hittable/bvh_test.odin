@@ -54,7 +54,7 @@ three_items_bvh_ok :: proc(t: ^testing.T) {
 	defer hittable_list_destroy(&world)
 
 	bvh: BVH
-	bvh_init(&bvh, world.hittables[:], 10, .HLBVH, arena = context.allocator)
+	bvh_init(&bvh, world.hittables[:], 1, .HLBVH, arena = context.allocator)
 	defer bvh_destroy(&bvh)
 
 	testing.expect_value(t, len(bvh.nodes), 5)

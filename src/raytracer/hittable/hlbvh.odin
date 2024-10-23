@@ -17,9 +17,9 @@ Morton_Code :: struct {
 }
 
 Calculate_Morton_Codes_Task :: struct {
-		morton_codes:    []Morton_Code,
-		primitive_infos: []BVH_Primitive_Info,
-		scene_bounds:    aabb.AABB,
+	morton_codes:    []Morton_Code,
+	primitive_infos: []BVH_Primitive_Info,
+	scene_bounds:    aabb.AABB,
 }
 
 Calculate_Treelet_Task :: struct {
@@ -43,101 +43,78 @@ LBVHTreelets :: struct {
 hlbvh_build :: proc(
 	bvh: BVH,
 	primitive_infos: []BVH_Primitive_Info,
-	total_nodes: ^uint,
 	ordered_prims: ^[dynamic]Hittable,
 	allocator := context.allocator,
 	temp_allocator := context.temp_allocator,
-) -> ^BVH_Build_Node {
+) -> (
+	root: ^BVH_Build_Node,
+	total_nodes: uint,
+) {
 	context.allocator = temp_allocator
 	bounds := calculate_scene_bounds(primitive_infos)
 	morton_codes := calculate_morton_codes(primitive_infos, bounds)
 	treelets := calculate_treelets(morton_codes)
-	total_nodes^ = build_treelets(bvh, treelets, ordered_prims, primitive_infos, morton_codes, temp_allocator = temp_allocator)
+	total_nodes = build_treelets(
+		bvh,
+		treelets,
+		ordered_prims,
+		primitive_infos,
+		morton_codes,
+		temp_allocator = temp_allocator,
+	)
 	finished_treelets := make([dynamic]BVH_Build_Node, 0, len(treelets))
 	for &tr in treelets {
 		append(&finished_treelets, tr.build_nodes[0])
 	}
 	context.allocator = allocator
-	return build_upper_sah(bvh, finished_treelets[:], 0, len(finished_treelets), total_nodes)
+	number_nodes: uint
+	root, number_nodes = build_upper_sah(bvh, finished_treelets[:])
+	return root, number_nodes + total_nodes
 }
 
 @(private)
 build_upper_sah :: proc(
 	bvh: BVH,
 	treeroots: []BVH_Build_Node,
-	start, end: uint,
-	total_nodes: ^uint,
-	allocator := context.allocator
-) -> ^BVH_Build_Node {
+	allocator := context.allocator,
+) -> (
+	root: ^BVH_Build_Node,
+	total_nodes: uint,
+) {
 	context.allocator = allocator
-	offset := end - start
+	offset := len(treeroots)
 	if offset == 1 {
-		return &treeroots[start]
+		// already counted this node
+		return &treeroots[0], 0
 	}
-
-	total_nodes^ += 1
 
 	node := new(BVH_Build_Node)
 
 	centroid_bounds := aabb.empty()
 	bounds := aabb.empty()
-	for &tr in treeroots[start:end] {
+	for &tr in treeroots {
 		bounds = aabb.merge(bounds, tr.bounds)
 		centroid := aabb.centroid(tr.bounds)
 		centroid_bounds = aabb.merge(centroid_bounds, centroid)
 	}
 
 	dim := aabb.maximum_extent(centroid_bounds)
-	buckets: [N_BUCKETS]Bucket_Info
-	for i in start ..< end {
-		centroid := aabb.centroid(treeroots[i].bounds)
-		b := int(N_BUCKETS * aabb.offset(centroid_bounds, centroid)[dim])
-		if b == N_BUCKETS do b -= 1
 
-		buckets[b].count += 1
-		buckets[b].bounds = aabb.merge(buckets[b].bounds, treeroots[i].bounds)
-	}
-
-	cost: [N_BUCKETS - 1]f64
-	for i in 0 ..< N_BUCKETS - 1 {
-		b0, b1 := aabb.empty(), aabb.empty()
-		count0, count1: int
-		for j in 0 ..= i {
-			b0 = aabb.merge(b0, buckets[j].bounds)
-			count0 += buckets[j].count
-		}
-
-		for j in (i + 1) ..< N_BUCKETS {
-			b1 = aabb.merge(b1, buckets[j].bounds)
-			count1 += buckets[j].count
-		}
-
-		cost[i] =
-			0.125 +
-			(f64(count0) * aabb.surface_area(b0) + f64(count1) * aabb.surface_area(b1)) /
-				aabb.surface_area(bounds)
-	}
-
-	min_cost := cost[0]
-	min_cost_split_bucket: uint = 0
-	for i in 1 ..< N_BUCKETS - 1 {
-		if cost[i] < min_cost {
-			min_cost = cost[i]
-			min_cost_split_bucket = uint(i)
-		}
-	}
-
-	mid :=
-		start + split_primitives(treeroots[start:end], centroid_bounds, dim, min_cost_split_bucket)
-	init_interior(
-		node,
+	_, min_cost_split_bucket := min_cost_bucket(
+		treeroots,
+		centroid_bounds,
+		bounds,
 		dim,
-		build_upper_sah(bvh, treeroots, start, mid, total_nodes),
-		build_upper_sah(bvh, treeroots, mid, end, total_nodes),
 	)
 
+	mid := split_primitives(treeroots, centroid_bounds, dim, min_cost_split_bucket)
 
-	return node
+	left_root, nodes_left := build_upper_sah(bvh, treeroots[:mid])
+	right_root, nodes_right := build_upper_sah(bvh, treeroots[mid:])
+	init_interior(node, dim, left_root, right_root)
+
+
+	return node, 1 + nodes_left + nodes_right
 }
 
 @(private)
@@ -332,9 +309,9 @@ calculate_treelets :: proc(
 calculate_morton_codes :: proc(
 	objects: []BVH_Primitive_Info,
 	scene_bounds: aabb.AABB,
-	temp_allocator := context.temp_allocator,
+	allocator := context.allocator,
 ) -> []Morton_Code {
-	context.allocator = temp_allocator
+	context.allocator = allocator
 
 	morton_codes := make([]Morton_Code, len(objects))
 
@@ -348,7 +325,13 @@ calculate_morton_codes :: proc(
 	}
 
 	for _, i in objects {
-		thread.pool_add_task(&pool, context.allocator, calculate_obj_morton_code_task, &scene_info, i)
+		thread.pool_add_task(
+			&pool,
+			context.allocator,
+			calculate_obj_morton_code_task,
+			&scene_info,
+			i,
+		)
 	}
 
 	thread.pool_start(&pool)
@@ -427,4 +410,3 @@ left_shift_3 :: proc(x: uint) -> uint {
 	x = (x | (x << 2)) & 0b00001001001001001001001001001001
 	return x
 }
-
