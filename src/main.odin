@@ -4,198 +4,163 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:log"
-import "core:math/linalg"
-import "core:mem/virtual"
 import "core:time"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_opengl "external:odin-imgui/imgui_impl_opengl3"
-import "raytracer/camera"
-import "raytracer/color"
-import "raytracer/hittable"
-import mat "raytracer/material"
-import "raytracer/utils"
+import "raytracer"
 import gl "vendor:OpenGL"
 import "vendor:glfw"
 _ :: gl
 
-create_book_scene :: proc() -> hittable.Hittable_List {
-	ground_material := mat.Lambertian {
-		albedo = {0.5, 0.5, 0.5},
-	}
-	world: hittable.Hittable_List
-	hittable.hittable_list_init(&world)
-	sphere: hittable.Sphere
-	hittable.sphere_init(
-		&sphere,
-		center = {0, -1000, 0},
-		radius = 1000,
-		material = ground_material,
-	)
-	hittable.hittable_list_add(&world, sphere)
-
-	for i in -11 ..< 11 {
-		for j in -11 ..< 11 {
-			choose_mat := utils.random_double()
-			center := utils.Vec3 {
-				f32(i) + 0.9 * utils.random_double(),
-				0.2,
-				f32(j) + 0.9 * utils.random_double(),
-			}
-
-			if linalg.length(center - utils.Vec3{4, 0.2, 0}) > 0.9 {
-				material: mat.Material
-				if choose_mat < 0.8 {
-					albedo: color.Color = utils.random_vec3() * utils.random_vec3()
-					material = mat.Lambertian {
-						albedo = albedo,
-					}
-				} else if choose_mat < 0.95 {
-					albedo := utils.random_vec3(0.5, 1)
-					fuzz := utils.random_double(0, 0.5)
-					material = mat.Metal {
-						albedo = albedo,
-						fuzz   = fuzz,
-					}
-				} else {
-					material = mat.Dieletric {
-						refraction_index = 1.5,
-					}
-				}
-				hittable.sphere_init(&sphere, center = center, radius = 0.2, material = material)
-				hittable.hittable_list_add(&world, sphere)
-			}
-		}
-	}
-
-	hittable.sphere_init(
-		&sphere,
-		center = {0, 1, 0},
-		radius = 1,
-		material = mat.Dieletric{refraction_index = 1.5},
-	)
-	hittable.hittable_list_add(&world, sphere)
-
-	hittable.sphere_init(
-		&sphere,
-		center = {-4, 1, 0},
-		radius = 1,
-		material = mat.Lambertian{albedo = {0.4, 0.2, 0.1}},
-	)
-	hittable.hittable_list_add(&world, sphere)
-
-	hittable.sphere_init(
-		&sphere,
-		center = {4, 1, 0},
-		radius = 1,
-		material = mat.Metal{albedo = {0.7, 0.6, 0.5}, fuzz = 0},
-	)
-	hittable.hittable_list_add(&world, sphere)
-	return world
+Application :: struct {
+	renderer:        raytracer.Renderer,
+	scene:           raytracer.Scene,
+	camera:          raytracer.Camera,
+	viewport_height: u32,
+	viewport_width:  u32,
 }
 
-create_world :: proc() -> hittable.Hittable_List {
-	material_ground := mat.Lambertian{{0.8, 0.8, 0.0}}
-	material_center := mat.Lambertian{{0.1, 0.2, 0.5}}
-	material_left := mat.Dieletric{1.50}
-	material_bubble := mat.Dieletric{1.0 / 1.50}
-	material_right := mat.Metal{{0.8, 0.6, 0.2}, 1.0}
-
-
-	sphere: hittable.Sphere
-	world: hittable.Hittable_List
-	hittable.hittable_list_init(&world)
-
-	hittable.sphere_init(
-		&sphere,
-		center = {0, -100.5, -1},
-		radius = 100,
-		material = material_ground,
-	)
-	hittable.hittable_list_add(&world, sphere)
-	hittable.sphere_init(&sphere, center = {0, 0, -1.2}, radius = 0.5, material = material_center)
-	hittable.hittable_list_add(&world, sphere)
-	hittable.sphere_init(&sphere, center = {-1.0, 0, -1}, radius = 0.5, material = material_left)
-	hittable.hittable_list_add(&world, sphere)
-	hittable.sphere_init(&sphere, center = {-1.0, 0, -1}, radius = 0.4, material = material_bubble)
-	hittable.hittable_list_add(&world, sphere)
-	hittable.sphere_init(&sphere, center = {1.0, 0, -1}, radius = 0.5, material = material_right)
-	hittable.hittable_list_add(&world, sphere)
-
-
-	return world
-}
-
-render_scene_image :: proc() {
-
-	aspect_ratio: f32 = 16.0 / 9.0
-	image_width := 1200
-
-	image_height := int(f32(image_width) / aspect_ratio)
-	image_height = (image_height < 1) ? 1 : image_height
-
-	//Camera
-	c: camera.Camera
-	camera.init(
-		&c,
-		image_width = image_width,
-		image_height = image_height,
-		vfov = 20,
-		look_at = {0, 0, 0},
-		up = {0, 1, 0},
-		center = {13, 2, 3},
-		samples_per_pixel = 1,
-		defocus_angle = 0.6,
-		focal_distance = 10,
-	)
-
-	world := create_book_scene()
-	defer hittable.hittable_list_destroy(&world)
-
-	begin := time.tick_now()
-	tree: hittable.BVH
-
-	arena: virtual.Arena
-	if err := virtual.arena_init_growing(&arena); err != nil {
-		log.fatal("Error creating the arena allocator, reason:", err)
-		return
+create_application :: proc() -> Application {
+	application := Application {
+		renderer = raytracer.Renderer{frame_index = 1, accumulate = true},
 	}
-	defer virtual.arena_destroy(&arena)
-	allocator := virtual.arena_allocator(&arena)
 
-	hittable.bvh_init(&tree, world.hittables[:], 10, .HLBVH, arena = allocator)
-	free_all(context.temp_allocator)
-	log.infof("Time constructing tree: %v", time.tick_since(begin))
+	raytracer.camera_init(&application.camera, 45, 0.1, 100)
 
+	application.scene.spheres = make([dynamic]raytracer.Sphere)
+	application.scene.materials = make([dynamic]raytracer.Material)
 
+	pink_sphere := raytracer.Material {
+		albedo    = {1, 0, 1},
+		roughness = 0,
+	}
+	blue_sphere := raytracer.Material {
+		albedo    = {0.2, 0.3, 1.0},
+		roughness = 0.1,
+	}
+
+	orange_sphere := raytracer.Material {
+		albedo         = {0.8, 0.5, 0.2},
+		roughness      = 0.1,
+		emission_color = {0.8, 0.5, 0.2},
+		emission_power = 2,
+	}
+
+	append(&application.scene.materials, pink_sphere, blue_sphere, orange_sphere)
+
+	{
+		sphere: raytracer.Sphere
+		sphere.position = {0.0, 0.0, 0.0}
+		sphere.radius = 1.0
+		sphere.material_index = 0
+		append(&application.scene.spheres, sphere)
+	}
+
+	{
+		sphere: raytracer.Sphere
+		sphere.position = {2.0, 0.0, 0.0}
+		sphere.radius = 1.0
+		sphere.material_index = 2
+		append(&application.scene.spheres, sphere)
+	}
+
+	{
+		sphere: raytracer.Sphere
+		sphere.position = {0.0, -101.0, 0.0}
+		sphere.radius = 100.0
+		sphere.material_index = 1
+		append(&application.scene.spheres, sphere)
+	}
+
+	return application
 }
 
-render_ui :: proc(hittable_list: hittable.Hittable_List, last_render_time: f64) {
+render_ui :: proc(application: ^Application, last_render_time: f64) {
 	imgui.Begin("Settings")
 	imgui.Text("Last render: %.3fms", last_render_time)
 	if imgui.Button("Render") {
-		log.info("Rendering scene")
+		render(application)
 	}
+
+	imgui.Checkbox("Accumulate", &application.renderer.accumulate)
+
 	imgui.End()
 
 	imgui.Begin("Scene")
-	for &ht, i in hittable_list.hittables {
-		sphere := &ht.(hittable.Sphere)
-
+	for &sphere, i in application.scene.spheres {
 		imgui.PushIDInt(i32(i))
 
-		imgui.DragFloat3("Position", &sphere.center, 0.1)
+		imgui.DragFloat3("Position", &sphere.position, 0.1)
 		imgui.DragFloat("Radius", &sphere.radius, 0.1)
+		imgui.DragInt("Material", cast(^i32)&sphere.material_index)
 		imgui.Separator()
 
 		imgui.PopID()
 	}
+
+	for &material, i in application.scene.materials {
+		imgui.PushIDInt(i32(i))
+
+		imgui.ColorEdit3("Albedo", &material.albedo)
+		imgui.DragFloat("Roughness", &material.roughness, 0.05, 0.0, 1.0)
+		imgui.DragFloat("Metallic", &material.metallic, 0.05, 0.0, 1.0)
+		imgui.ColorEdit3("Emission Color", &material.emission_color)
+		imgui.DragFloat("Emission Power", &material.emission_power, 0.05, 0.0, 100)
+		imgui.Separator()
+
+		imgui.PopID()
+	}
+
 	imgui.End()
 
+	imgui.PushStyleVarImVec2(.WindowPadding, imgui.Vec2{0, 0})
+	imgui.Begin("Viewport")
+
+	application.viewport_width = u32(imgui.GetContentRegionAvail().x)
+	application.viewport_height = u32(imgui.GetContentRegionAvail().y)
+
+	image := application.renderer.image
+	if image != nil {
+		imgui.Text(
+			"size = %d x %d",
+			application.renderer.image.width,
+			application.renderer.image.width,
+		)
+
+		imgui.Image(
+			raytracer.image_descriptor(image^),
+			{f32(image.width), f32(image.height)},
+			{0, 1},
+			{1, 0},
+		)
+	}
+
+	imgui.End()
 	imgui.PopStyleVar()
 
-	imgui.Render()
+	render(application)
 }
+
+render :: proc(application: ^Application) {
+	application.renderer.camera = &application.camera
+	application.renderer.scene = &application.scene
+
+	raytracer.camera_on_resize(
+		&application.camera,
+		application.viewport_width,
+		application.viewport_height,
+	)
+
+	raytracer.renderer_on_resize(
+		&application.renderer,
+		application.viewport_width,
+		application.viewport_height,
+	)
+
+	raytracer.renderer_render(&application.renderer)
+}
+
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -216,8 +181,8 @@ main :: proc() {
 
 	when ODIN_OS == .Darwin {
 		glsl_version: cstring = "#version 150"
-		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 3)
-		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 2)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 1)
 		glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 		glfw.WindowHint(glfw.OPENGL_FORWARD_COMPAT, gl.TRUE)
 	}
@@ -230,7 +195,7 @@ main :: proc() {
 	defer glfw.DestroyWindow(window)
 	glfw.MakeContextCurrent(window)
 	glfw.SwapInterval(1)
-	gl.load_up_to(3, 2, glfw.gl_set_proc_address)
+	gl.load_up_to(4, 1, glfw.gl_set_proc_address)
 
 	imgui.CHECKVERSION()
 	imgui.CreateContext()
@@ -245,8 +210,7 @@ main :: proc() {
 	imgui_opengl.Init(glsl_version)
 	defer imgui_opengl.Shutdown()
 
-	world := create_world()
-	defer hittable.hittable_list_destroy(&world)
+	application := create_application()
 
 	start := time.now()
 	for !glfw.WindowShouldClose(window) {
@@ -260,8 +224,6 @@ main :: proc() {
 		imgui_glfw.NewFrame()
 		imgui.NewFrame()
 
-		render_ui(world, last_render_time)
-
 		width, height := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, width, height)
 		gl.ClearColor(
@@ -271,6 +233,11 @@ main :: proc() {
 			clear_color.w,
 		)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
+
+		render_ui(&application, last_render_time)
+
+		imgui.Render()
+
 		imgui_opengl.RenderDrawData(imgui.GetDrawData())
 
 		glfw.SwapBuffers(window)
