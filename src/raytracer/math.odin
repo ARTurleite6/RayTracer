@@ -12,13 +12,13 @@ Vec3 :: linalg.Vector3f32
 Vec2 :: linalg.Vector2f32
 
 @(require_results)
-convert_to_rgba :: proc "contextless" (color: Vec4) -> u32 {
-	r := u8(color.r * 255.0)
-	g := u8(color.g * 255.0)
-	b := u8(color.b * 255.0)
-	a := u8(color.a * 255.0)
+convert_to_rgba :: proc(color: Vec4) -> u32 {
+	r := u32(color.r * 255.0)
+	g := u32(color.g * 255.0)
+	b := u32(color.b * 255.0)
+	a := u32(color.a * 255.0)
 
-	result: u32 = u32((a << 24) | (b << 16) | (g << 8) | r)
+	result: u32 = (r << 24) | (g << 16) | (b << 8) | a
 	return result
 }
 

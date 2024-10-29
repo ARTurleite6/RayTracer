@@ -83,6 +83,10 @@ render_ui :: proc(application: ^Application, last_render_time: f64) {
 		render(application)
 	}
 
+	if imgui.Button("Reset") {
+		raytracer.renderer_reset_frame_index(&application.renderer)
+	}
+
 	imgui.Checkbox("Accumulate", &application.renderer.accumulate)
 
 	imgui.End()

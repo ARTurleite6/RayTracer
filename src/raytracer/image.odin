@@ -64,7 +64,7 @@ image_set_data :: proc(image: Image, data: rawptr) {
 		0, // yoffset
 		i32(image.width), // width
 		i32(image.height), // height
-		gl.RGBA8, // format
+		gl.RGBA, // format
 		gl.UNSIGNED_BYTE, // type
 		data, // data
 	)

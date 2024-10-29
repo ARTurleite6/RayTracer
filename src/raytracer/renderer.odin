@@ -154,3 +154,7 @@ renderer_closest_hit :: proc(
 renderer_miss :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
 	return Hit_Payload{hit_distance = -1}
 }
+
+renderer_reset_frame_index :: proc(renderer: ^Renderer) {
+	renderer.frame_index = 1
+}
