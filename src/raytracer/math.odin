@@ -6,6 +6,8 @@ import "core:math/linalg"
 import "core:math/rand"
 _ :: log
 
+seed :: 2024
+
 Mat4 :: linalg.Matrix4x4f32
 Vec4 :: linalg.Vector4f32
 Vec3 :: linalg.Vector3f32
@@ -18,7 +20,7 @@ convert_to_rgba :: proc(color: Vec4) -> u32 {
 	b := u32(color.b * 255.0)
 	a := u32(color.a * 255.0)
 
-	result: u32 = (r << 24) | (g << 16) | (b << 8) | a
+	result: u32 = (a << 24) | (b << 16) | (g << 8) | r
 	return result
 }
 
@@ -74,7 +76,7 @@ refletance :: proc(cosine, refraction_index: f32) -> f32 {
 
 @(require_results)
 random_unit_disk :: proc() -> Vec3 {
-	return linalg.normalize(random_vec2(-1, 1))
+	return linalg.normalize(random_vec3(-1, 1))
 }
 
 @(require_results)

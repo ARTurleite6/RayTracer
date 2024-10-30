@@ -2,7 +2,10 @@ package raytracer
 
 import "core:log"
 import "core:math/linalg"
+import "vendor:glfw"
 _ :: log
+
+ROTATION_SPEED :: 0.5
 
 Camera :: struct {
 	projection, view, inverse_projection, inverse_view: Mat4,
@@ -24,6 +27,67 @@ camera_init :: proc(camera: ^Camera, vertical_fov, near_clip, far_clip: f32) {
 	camera_recalculate_projections(camera)
 	camera_recalculate_view(camera)
 	camera_recalculate_ray_directions(camera)
+}
+
+camera_update :: proc(camera: ^Camera, window: glfw.WindowHandle, ts: f32) -> (moved: bool) {
+	mouse_position := get_mouse_position(window)
+	delta := (mouse_position - camera.last_mouse_position) * 0.002
+	camera.last_mouse_position = mouse_position
+
+	if !is_mouse_button_down(window, glfw.MOUSE_BUTTON_RIGHT) {
+		set_cursor_mode(window, .Normal)
+		return false
+	}
+
+	set_cursor_mode(window, .Locked)
+
+	up_direction :: Vec3{0, 1, 0}
+	right_direction := linalg.cross(camera.forward_direction, up_direction)
+
+	speed :: 5
+
+	if is_key_down(window, glfw.KEY_W) {
+		camera.position += camera.forward_direction * speed * ts
+		moved = true
+	}
+
+	if is_key_down(window, glfw.KEY_S) {
+		camera.position += -camera.forward_direction * speed * ts
+		moved = true
+	}
+
+	if is_key_down(window, glfw.KEY_D) {
+		camera.position += right_direction * speed * ts
+		moved = true
+	}
+
+	if is_key_down(window, glfw.KEY_A) {
+		camera.position += -right_direction * speed * ts
+		moved = true
+	}
+
+	if delta.x != 0 || delta.y != 0 {
+		pitch_delta := delta.y * ROTATION_SPEED
+		yaw_delta := delta.x * ROTATION_SPEED
+
+		q := linalg.normalize(
+			linalg.cross(
+				linalg.quaternion_angle_axis(-pitch_delta, right_direction),
+				linalg.quaternion_angle_axis(-yaw_delta, up_direction),
+			),
+		)
+
+		camera.forward_direction = linalg.quaternion_mul_vector3(q, camera.forward_direction)
+
+		moved = true
+	}
+
+	if moved {
+		camera_recalculate_view(camera)
+		camera_recalculate_ray_directions(camera)
+	}
+
+	return
 }
 
 camera_recalculate_view :: proc(camera: ^Camera) {

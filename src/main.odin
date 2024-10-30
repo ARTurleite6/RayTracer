@@ -4,7 +4,6 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:log"
-import "core:time"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_opengl "external:odin-imgui/imgui_impl_opengl3"
@@ -13,7 +12,10 @@ import gl "vendor:OpenGL"
 import "vendor:glfw"
 _ :: gl
 
+DISABLE_DOCKING :: #config(DISABLE_DOCKING, false)
+
 Application :: struct {
+	window:          glfw.WindowHandle,
 	renderer:        raytracer.Renderer,
 	scene:           raytracer.Scene,
 	camera:          raytracer.Camera,
@@ -21,8 +23,9 @@ Application :: struct {
 	viewport_width:  u32,
 }
 
-create_application :: proc() -> Application {
+create_application :: proc(window: glfw.WindowHandle) -> Application {
 	application := Application {
+		window = window,
 		renderer = raytracer.Renderer{frame_index = 1, accumulate = true},
 	}
 
@@ -76,7 +79,13 @@ create_application :: proc() -> Application {
 	return application
 }
 
-render_ui :: proc(application: ^Application, last_render_time: f64) {
+on_update :: proc(application: ^Application, last_render_time: f32) {
+	if raytracer.camera_update(&application.camera, application.window, last_render_time) {
+		raytracer.renderer_reset_frame_index(&application.renderer)
+	}
+}
+
+on_render :: proc(application: ^Application, last_render_time: f64) {
 	imgui.Begin("Settings")
 	imgui.Text("Last render: %.3fms", last_render_time)
 	if imgui.Button("Render") {
@@ -207,6 +216,14 @@ main :: proc() {
 	io := imgui.GetIO()
 	io.ConfigFlags += {.NavEnableKeyboard}
 
+	when !DISABLE_DOCKING {
+		io.ConfigFlags += {.DockingEnable, .ViewportsEnable}
+
+		style := imgui.GetStyle()
+		style.WindowRounding = 0
+		style.Colors[imgui.Col.WindowBg].w = 1
+	}
+
 	imgui.StyleColorsDark()
 
 	imgui_glfw.InitForOpenGL(window, true)
@@ -214,19 +231,31 @@ main :: proc() {
 	imgui_opengl.Init(glsl_version)
 	defer imgui_opengl.Shutdown()
 
-	application := create_application()
+	application := create_application(window)
 
-	start := time.now()
+	last_frame: f64
 	for !glfw.WindowShouldClose(window) {
-		frame_time := time.now()
-		last_render_time := time.duration_milliseconds(time.diff(start, frame_time))
-		start = frame_time
+		free_all(context.temp_allocator)
+		current_frame := glfw.GetTime()
+		delta_time := current_frame - last_frame
+		last_frame = current_frame
 
 		glfw.PollEvents()
 
 		imgui_opengl.NewFrame()
 		imgui_glfw.NewFrame()
 		imgui.NewFrame()
+
+		on_update(&application, f32(delta_time))
+
+		on_render(&application, delta_time)
+
+		imgui.Render()
+
+		viewport := imgui.GetMainViewport()
+		imgui.SetNextWindowPos(viewport.Pos)
+		imgui.SetNextWindowSize(viewport.Size)
+		imgui.SetNextWindowViewport(viewport._ID)
 
 		width, height := glfw.GetFramebufferSize(window)
 		gl.Viewport(0, 0, width, height)
@@ -238,11 +267,14 @@ main :: proc() {
 		)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
-		render_ui(&application, last_render_time)
-
-		imgui.Render()
-
 		imgui_opengl.RenderDrawData(imgui.GetDrawData())
+
+		when !DISABLE_DOCKING {
+			backup_current_window := glfw.GetCurrentContext()
+			imgui.UpdatePlatformWindows()
+			imgui.RenderPlatformWindowsDefault()
+			glfw.MakeContextCurrent(backup_current_window)
+		}
 
 		glfw.SwapBuffers(window)
 	}

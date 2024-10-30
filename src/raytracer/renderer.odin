@@ -3,6 +3,7 @@ package raytracer
 import "core:log"
 import "core:math/linalg"
 import "core:slice"
+import "core:thread"
 _ :: log
 
 Renderer :: struct {
@@ -27,18 +28,32 @@ renderer_render :: proc(renderer: ^Renderer) {
 		slice.fill(renderer.accumulation_data, 0)
 	}
 
+	pool: thread.Pool
+	thread.pool_init(&pool, context.temp_allocator, 8)
+	defer thread.pool_destroy(&pool)
+
 	for y in 0 ..< renderer.image.height {
-		for x in 0 ..< renderer.image.width {
-			color := renderer_per_pixel(renderer^, x, y)
-			renderer.accumulation_data[x + y * renderer.image.width] += color
+		thread.pool_add_task(&pool, context.temp_allocator, proc(task: thread.Task) {
+				renderer := cast(^Renderer)task.data
+				y := u32(task.user_index)
 
-			accumulated_color := renderer.accumulation_data[x + y * renderer.image.width]
-			accumulated_color /= f32(renderer.frame_index)
+				for x in 0 ..< renderer.image.width {
+					color := renderer_per_pixel(renderer^, x, y)
+					renderer.accumulation_data[x + y * renderer.image.width] += color
 
-			accumulated_color = linalg.clamp(accumulated_color, 0, 1)
-			renderer.image_data[x + y * renderer.image.width] = convert_to_rgba(accumulated_color)
-		}
+					accumulated_color := renderer.accumulation_data[x + y * renderer.image.width]
+					accumulated_color /= f32(renderer.frame_index)
+
+					accumulated_color = linalg.clamp(accumulated_color, 0, 1)
+					renderer.image_data[x + y * renderer.image.width] = convert_to_rgba(
+						accumulated_color,
+					)
+				}
+			}, renderer, int(y))
 	}
+
+	thread.pool_start(&pool)
+	thread.pool_finish(&pool)
 
 	image_set_data(renderer.image^, raw_data(renderer.image_data[:]))
 
@@ -92,8 +107,8 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 	for _ in 0 ..< bounces {
 		payload := renderer_trace_ray(renderer, ray)
 		if payload.hit_distance < 0 {
-			sky_color := Vec3{0.6, 0.7, 0.9}
-			light += sky_color * contribution
+			//sky_color := Vec3{0.6, 0.7, 0.9}
+			//light += sky_color * contribution
 			break
 		}
 
@@ -102,6 +117,7 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 
 		contribution *= material.albedo
 		light += material_get_emission(material)
+
 		ray.origin = payload.world_position + payload.world_normal * 0.0001
 		ray.direction = linalg.normalize(payload.world_normal + random_unit_disk())
 	}
