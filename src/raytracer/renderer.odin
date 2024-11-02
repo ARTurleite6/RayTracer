@@ -21,6 +21,7 @@ Hit_Payload :: struct {
 	hit_distance:                 f32,
 	world_position, world_normal: Vec3,
 	object_index:                 int,
+	front_face:                   bool,
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
@@ -107,19 +108,22 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 	for _ in 0 ..< bounces {
 		payload := renderer_trace_ray(renderer, ray)
 		if payload.hit_distance < 0 {
-			//sky_color := Vec3{0.6, 0.7, 0.9}
-			//light += sky_color * contribution
+			sky_color := Vec3{0.6, 0.7, 0.9}
+			light += sky_color * contribution
 			break
 		}
 
 		sphere := renderer.scene.spheres[payload.object_index]
 		material := renderer.scene.materials[sphere.material_index]
 
-		contribution *= material.albedo
 		light += material_get_emission(material)
 
 		ray.origin = payload.world_position + payload.world_normal * 0.0001
-		ray.direction = linalg.normalize(payload.world_normal + random_unit_disk())
+
+		wi, f, pdf := lambertian_brdf_sample(material, payload.world_normal, random_vec2())
+		contribution *= f * linalg.dot(wi, payload.world_normal) / pdf
+		ray.direction = wi
+
 	}
 	return Vec4{light.x, light.y, light.z, 1.0}
 }
@@ -161,6 +165,8 @@ renderer_closest_hit :: proc(
 	origin := ray.origin - sphere.position
 	payload.world_position = origin + ray.direction * hit_distance
 	payload.world_normal = linalg.normalize(payload.world_position)
+	payload.front_face = linalg.dot(-ray.direction, payload.world_normal) > 0
+	payload.world_normal = payload.front_face ? payload.world_normal : -payload.world_normal
 
 	payload.world_position += sphere.position
 

@@ -8,6 +8,8 @@ _ :: log
 
 seed :: 2024
 
+INV_PI :: 1.0 / linalg.PI
+
 Mat4 :: linalg.Matrix4x4f32
 Vec4 :: linalg.Vector4f32
 Vec3 :: linalg.Vector3f32
@@ -65,6 +67,25 @@ almost_zero :: proc "contextless" (vec: Vec3) -> bool {
 	return abs(vec.x) < epsilon && abs(vec.y) < epsilon && abs(vec.z) < epsilon
 }
 
+fresnell_reflect_ammount :: proc(n1, n2: f32, normal, incident: Vec3, reflectiviy: f32) -> f32 {
+	r0 := (n1 - n2) / (n1 + n2)
+	r0 *= r0
+	cos_x := -linalg.dot(normal, incident)
+	if n1 > n2 {
+		n := n1 / n2
+		sin_t2 := n * n * (1 - cos_x * cos_x)
+		if sin_t2 > 1 {
+			return 1
+		}
+
+		cos_x = linalg.sqrt(1.0 - sin_t2)
+	}
+	x := 1.0 - cos_x
+	ret := r0 + (1 - r0) * x * x * x * x * x
+
+	return reflectiviy + (1 - reflectiviy) * ret
+}
+
 // https://en.wikipedia.org/wiki/Schlick%27s_approximation
 @(require_results)
 refletance :: proc(cosine, refraction_index: f32) -> f32 {
@@ -72,6 +93,29 @@ refletance :: proc(cosine, refraction_index: f32) -> f32 {
 	r0 = r0 * r0
 
 	return r0 + (1 - r0) * math.pow(1 - cosine, 5)
+}
+
+@(require_results)
+same_hemisphere :: proc "contextless" (w: Vec3, wi: Vec3) -> bool {
+	return w.z * wi.z > 0
+}
+
+@(require_results)
+abs_cos_theta :: proc "contextless" (w: Vec3) -> f32 {
+	return linalg.abs(w.z)
+}
+
+@(require_results)
+random_cosine_direction :: proc(r: Vec2) -> (vec: Vec3) {
+	r1 := r.x
+	r2 := r.y
+
+	phi := 2 * math.PI * r1
+	vec.x = linalg.cos(phi) * linalg.sqrt(r2)
+	vec.y = linalg.sin(phi) * linalg.sqrt(r2)
+	vec.z = linalg.sqrt(1 - r2)
+
+	return
 }
 
 @(require_results)
@@ -93,10 +137,10 @@ random_vec2 :: proc(
 	low: f32 = 0.0,
 	upper: f32 = 1.0,
 	generator := context.random_generator,
-) -> Vec3 {
+) -> Vec2 {
 	context.random_generator = generator
 
-	return {random_double(low, upper), random_double(low, upper), 0}
+	return {random_double(low, upper), random_double(low, upper)}
 }
 
 @(require_results)

@@ -2,7 +2,7 @@ package main
 
 import "base:runtime"
 import "core:c"
-import "core:fmt"
+// import "core:fmt"
 import "core:log"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
@@ -34,29 +34,27 @@ create_application :: proc(window: glfw.WindowHandle) -> Application {
 	application.scene.spheres = make([dynamic]raytracer.Sphere)
 	application.scene.materials = make([dynamic]raytracer.Material)
 
-	pink_sphere := raytracer.Material {
-		albedo    = {1, 0, 1},
-		roughness = 0,
-	}
-	blue_sphere := raytracer.Material {
-		albedo    = {0.2, 0.3, 1.0},
-		roughness = 0.1,
-	}
+	ground: raytracer.Material
+	raytracer.material_init(&ground, {0.8, 0.8, 0.0})
 
-	orange_sphere := raytracer.Material {
-		albedo         = {0.8, 0.5, 0.2},
-		roughness      = 0.1,
-		emission_color = {0.8, 0.5, 0.2},
+	center: raytracer.Material
+	raytracer.material_init(&center, {0.1, 0.2, 0.5})
+
+	light: raytracer.Material
+	raytracer.material_init(
+		&light,
+		{0.1, 0.2, 0.5},
+		emission_color = {1, 1, 1},
 		emission_power = 2,
-	}
+	)
 
-	append(&application.scene.materials, pink_sphere, blue_sphere, orange_sphere)
+	append(&application.scene.materials, ground, center, light)
 
 	{
 		sphere: raytracer.Sphere
 		sphere.position = {0.0, 0.0, 0.0}
 		sphere.radius = 1.0
-		sphere.material_index = 0
+		sphere.material_index = 1
 		append(&application.scene.spheres, sphere)
 	}
 
@@ -72,7 +70,7 @@ create_application :: proc(window: glfw.WindowHandle) -> Application {
 		sphere: raytracer.Sphere
 		sphere.position = {0.0, -101.0, 0.0}
 		sphere.radius = 100.0
-		sphere.material_index = 1
+		sphere.material_index = 0
 		append(&application.scene.spheres, sphere)
 	}
 
@@ -96,7 +94,9 @@ on_render :: proc(application: ^Application, last_render_time: f64) {
 		raytracer.renderer_reset_frame_index(&application.renderer)
 	}
 
-	imgui.Checkbox("Accumulate", &application.renderer.accumulate)
+	if imgui.Checkbox("Accumulate", &application.renderer.accumulate) {
+		raytracer.renderer_reset_frame_index(&application.renderer)
+	}
 
 	imgui.End()
 
@@ -183,7 +183,7 @@ main :: proc() {
 
 	glfw.SetErrorCallback(proc "c" (error: c.int, description: cstring) {
 		context = runtime.default_context()
-		fmt.eprintf("GLFW Error %d: %s\n", error, description)
+		// fmt.eprintf("GLFW Error %d: %s\n", error, description)
 	})
 
 	if !glfw.Init() {
@@ -192,11 +192,11 @@ main :: proc() {
 	}
 	defer glfw.Terminate()
 
+	glsl_version: cstring = "#version 150"
+	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
+	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 1)
+	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 	when ODIN_OS == .Darwin {
-		glsl_version: cstring = "#version 150"
-		glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, 4)
-		glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, 1)
-		glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 		glfw.WindowHint(glfw.OPENGL_FORWARD_COMPAT, gl.TRUE)
 	}
 
