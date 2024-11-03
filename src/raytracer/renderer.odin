@@ -114,13 +114,19 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 		}
 
 		sphere := renderer.scene.spheres[payload.object_index]
+		context.user_index = payload.object_index
 		material := renderer.scene.materials[sphere.material_index]
 
 		light += material_get_emission(material)
 
 		ray.origin = payload.world_position + payload.world_normal * 0.0001
 
-		wi, f, pdf := lambertian_brdf_sample(material, payload.world_normal, random_vec2())
+		f, pdf, wi := cook_torrance_brdf_sample(
+			material,
+			-ray.direction,
+			payload.world_normal,
+			random_vec2(),
+		)
 		contribution *= f * linalg.dot(wi, payload.world_normal) / pdf
 		ray.direction = wi
 

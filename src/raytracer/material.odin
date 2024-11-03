@@ -9,7 +9,6 @@ Material :: struct {
 material_init :: proc(
 	material: ^Material,
 	albedo: Vec3,
-	specular: f32 = 0.5,
 	index_of_refraction: f32 = 1,
 	roughness: f32 = 1.0,
 	metallic: f32 = 0.0,
