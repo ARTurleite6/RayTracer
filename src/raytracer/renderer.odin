@@ -30,27 +30,57 @@ renderer_render :: proc(renderer: ^Renderer) {
 	}
 
 	pool: thread.Pool
-	thread.pool_init(&pool, context.temp_allocator, 8)
-	defer thread.pool_destroy(&pool)
+	thread.pool_init(&pool, context.temp_allocator, 16)
 
-	for y in 0 ..< renderer.image.height {
-		thread.pool_add_task(&pool, context.temp_allocator, proc(task: thread.Task) {
-				renderer := cast(^Renderer)task.data
-				y := u32(task.user_index)
+	y_chunk_size := int(renderer.image.height / 16)
+	x_chunk_size := int(renderer.image.width / 16)
+	for y := 0; y < int(renderer.image.height); y += y_chunk_size {
+		for x := 0; x < int(renderer.image.height); x += x_chunk_size {
+			Task :: struct {
+				renderer:  ^Renderer,
+				outer_idx: int,
+				inner_idx: int,
+				outer_end: int,
+				inner_end: int,
+			}
+			task := new(Task, context.temp_allocator)
+			task.renderer = renderer
+			task.outer_idx = y
+			task.inner_idx = x
+			task.outer_end = min(int(y + y_chunk_size), int(renderer.image.height))
+			task.inner_end = min(int(x + x_chunk_size), int(renderer.image.width))
 
-				for x in 0 ..< renderer.image.width {
-					color := renderer_per_pixel(renderer^, x, y)
-					renderer.accumulation_data[x + y * renderer.image.width] += color
+			thread.pool_add_task(
+				&pool,
+				context.allocator,
+				proc(task: thread.Task) {
+					context.allocator = task.allocator
+					task_data := cast(^Task)task.data
+					renderer := task_data.renderer
 
-					accumulated_color := renderer.accumulation_data[x + y * renderer.image.width]
-					accumulated_color /= f32(renderer.frame_index)
+					for y in task_data.outer_idx ..< task_data.outer_end {
+						for x in task_data.inner_idx ..< task_data.inner_end {
+							x := u32(x)
+							y := u32(y)
 
-					accumulated_color = linalg.clamp(accumulated_color, 0, 1)
-					renderer.image_data[x + y * renderer.image.width] = convert_to_rgba(
-						accumulated_color,
-					)
-				}
-			}, renderer, int(y))
+							color := renderer_per_pixel(renderer^, x, y)
+							renderer.accumulation_data[x + y * renderer.image.width] += color
+
+							accumulated_color :=
+								renderer.accumulation_data[x + y * renderer.image.width]
+							accumulated_color /= f32(renderer.frame_index)
+
+							accumulated_color = linalg.clamp(accumulated_color, 0, 1)
+							renderer.image_data[x + y * renderer.image.width] = convert_to_rgba(
+								accumulated_color,
+							)
+
+						}
+					}
+				},
+				task,
+			)
+		}
 	}
 
 	thread.pool_start(&pool)
@@ -121,7 +151,7 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 
 		ray.origin = payload.world_position + payload.world_normal * 0.0001
 
-		f, pdf, wi := cook_torrance_brdf_sample(
+		f, pdf, wi := multi_brdf_sample(
 			material,
 			-ray.direction,
 			payload.world_normal,
@@ -186,3 +216,4 @@ renderer_miss :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
 renderer_reset_frame_index :: proc(renderer: ^Renderer) {
 	renderer.frame_index = 1
 }
+

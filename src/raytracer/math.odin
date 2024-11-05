@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "core:math/rand"
 _ :: log
 
-seed :: 2024
+SEED :: 2024
 
 INV_PI :: 1.0 / linalg.PI
 
@@ -153,3 +153,4 @@ random_vec3 :: proc(
 
 	return {random_double(low, upper), random_double(low, upper), random_double(low, upper)}
 }
+

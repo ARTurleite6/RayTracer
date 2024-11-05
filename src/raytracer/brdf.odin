@@ -5,6 +5,56 @@ import "core:math"
 import "core:math/linalg"
 _ :: log
 
+multi_brdf_sample :: proc(
+	material: Material,
+	wo: Vec3,
+	normal: Vec3,
+	rand: Vec2,
+) -> (
+	f: Vec3,
+	pdf: f32,
+	wi: Vec3,
+) {
+	alpha := material.roughness * material.roughness
+	wh := cook_torrance_sample_wh(alpha, normal, rand)
+
+	f0 := linalg.lerp(Vec3{0.04, 0.04, 0.04}, material.albedo, material.metallic)
+	fresnel := fresnel_schlick(max(linalg.dot(wh, wo), 0), f0)
+
+	ps := linalg.length(fresnel)
+	pd := linalg.length(material.albedo)
+
+	p_specular := ps / (pd + ps)
+
+	cook_torrance_f, lam_f: Vec3
+	cook_torrance_pdf, lam_pdf: f32
+	if random_double() < p_specular {
+		cook_torrance_f, cook_torrance_pdf, wi = cook_torrance_brdf_sample(
+			material,
+			wo,
+			normal,
+			rand,
+		)
+		lam_f = lambertian_eval(material, wi, normal)
+		lam_pdf = lambertian_pdf(wi, normal)
+
+		// reflected := fresnel_schlick(max(linalg.dot(normal, wi), 0.0), f0)
+
+		pdf = cook_torrance_pdf * p_specular + lam_pdf * (1 - p_specular)
+		// f = reflected + cook_torrance_f + lam_f * (1 - reflected)
+		f = cook_torrance_f
+	} else {
+		wi, lam_f, lam_pdf = lambertian_brdf_sample(material, normal, rand)
+
+		_, cook_pdf := cook_torrance_brdf_eval(material, alpha, normal, wo, wi, wh)
+		// reflected := fresnel_schlick(max(linalg.dot(normal, wi), 0), f0)
+
+		pdf = cook_pdf * p_specular + lam_pdf * (1 - p_specular)
+		f = lam_f
+	}
+	return
+}
+
 cook_torrance_brdf_sample :: proc(
 	material: Material,
 	wo: Vec3,
@@ -34,7 +84,7 @@ cook_torrance_brdf_eval :: proc(
 	f32,
 ) {
 
-	f0 := linalg.mix(Vec3{0.04, 0.04, 0.04}, material.albedo, material.metallic)
+	f0 := linalg.lerp(Vec3{0.04, 0.04, 0.04}, material.albedo, material.metallic)
 
 	ndotv := max(linalg.dot(n, wo), 0)
 	ndotl := max(linalg.dot(n, wi), 0)
