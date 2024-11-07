@@ -111,11 +111,12 @@ random_cosine_direction :: proc(r: Vec2) -> (vec: Vec3) {
 	r2 := r.y
 
 	phi := 2 * math.PI * r1
-	vec.x = linalg.cos(phi) * linalg.sqrt(r2)
-	vec.y = linalg.sin(phi) * linalg.sqrt(r2)
-	vec.z = linalg.sqrt(1 - r2)
 
-	return
+	return {
+		linalg.cos(phi) * linalg.sqrt(r2),
+		linalg.sin(phi) * linalg.sqrt(r2),
+		linalg.sqrt(1 - r2),
+	}
 }
 
 @(require_results)
@@ -153,4 +154,3 @@ random_vec3 :: proc(
 
 	return {random_double(low, upper), random_double(low, upper), random_double(low, upper)}
 }
-

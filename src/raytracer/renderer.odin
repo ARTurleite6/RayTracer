@@ -50,10 +50,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 			task.outer_end = min(int(y + y_chunk_size), int(renderer.image.height))
 			task.inner_end = min(int(x + x_chunk_size), int(renderer.image.width))
 
-			thread.pool_add_task(
-				&pool,
-				context.allocator,
-				proc(task: thread.Task) {
+			thread.pool_add_task(&pool, context.allocator, proc(task: thread.Task) {
 					context.allocator = task.allocator
 					task_data := cast(^Task)task.data
 					renderer := task_data.renderer
@@ -77,9 +74,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 						}
 					}
-				},
-				task,
-			)
+				}, task)
 		}
 	}
 
@@ -149,16 +144,17 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 
 		light += material_get_emission(material)
 
-		ray.origin = payload.world_position + payload.world_normal * 0.0001
+		onb: ONB
+		onb_init(&onb, payload.world_normal)
+		wo := onb_world_to_local(onb, -ray.direction)
 
-		f, pdf, wi := multi_brdf_sample(
-			material,
-			-ray.direction,
-			payload.world_normal,
-			random_vec2(),
-		)
-		contribution *= f * linalg.dot(wi, payload.world_normal) / pdf
-		ray.direction = wi
+		f, pdf, wi := multi_brdf_sample(material, wo, random_vec2())
+		if pdf == 0 {
+			break
+		}
+		contribution *= f * wi.z / pdf
+		ray.origin = payload.world_position + payload.world_normal * 0.0001
+		ray.direction = onb_local_to_world(onb, wi)
 
 	}
 	return Vec4{light.x, light.y, light.z, 1.0}
@@ -216,4 +212,3 @@ renderer_miss :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
 renderer_reset_frame_index :: proc(renderer: ^Renderer) {
 	renderer.frame_index = 1
 }
-

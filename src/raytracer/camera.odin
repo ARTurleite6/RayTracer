@@ -136,9 +136,10 @@ camera_recalculate_ray_directions :: proc(camera: ^Camera) {
 
 	for y in 0 ..< camera.viewport_height {
 		for x in 0 ..< camera.viewport_width {
+			jitter := random_vec2(-0.5, 0.5)
 			coord := Vec2 {
-				f32(x) / f32(camera.viewport_width),
-				f32(y) / f32(camera.viewport_height),
+				(f32(x) + jitter.x) / f32(camera.viewport_width),
+				(f32(y) + jitter.y) / f32(camera.viewport_height),
 			}
 			coord = coord * 2 - 1
 

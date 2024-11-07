@@ -8,49 +8,38 @@ _ :: log
 multi_brdf_sample :: proc(
 	material: Material,
 	wo: Vec3,
-	normal: Vec3,
 	rand: Vec2,
 ) -> (
 	f: Vec3,
 	pdf: f32,
 	wi: Vec3,
 ) {
-	alpha := material.roughness * material.roughness
-	wh := cook_torrance_sample_wh(alpha, normal, rand)
+	if random_double() < 0.5 {
+		//cook torrance
+		cook_f, cook_pdf, scattered := cook_torrance_brdf_sample(material, wo, rand)
+		wi = scattered
 
-	f0 := linalg.lerp(Vec3{0.04, 0.04, 0.04}, material.albedo, material.metallic)
-	fresnel := fresnel_schlick(max(linalg.dot(wh, wo), 0), f0)
+		lam_f := lambertian_eval(material.albedo)
+		lam_pdf := lambertian_pdf(wi.z)
 
-	ps := linalg.length(fresnel)
-	pd := linalg.length(material.albedo)
+		pdf = (lam_pdf + cook_pdf) / 2
 
-	p_specular := ps / (pd + ps)
-
-	cook_torrance_f, lam_f: Vec3
-	cook_torrance_pdf, lam_pdf: f32
-	if random_double() < p_specular {
-		cook_torrance_f, cook_torrance_pdf, wi = cook_torrance_brdf_sample(
-			material,
-			wo,
-			normal,
-			rand,
-		)
-		lam_f = lambertian_eval(material, wi, normal)
-		lam_pdf = lambertian_pdf(wi, normal)
-
-		// reflected := fresnel_schlick(max(linalg.dot(normal, wi), 0.0), f0)
-
-		pdf = cook_torrance_pdf * p_specular + lam_pdf * (1 - p_specular)
-		// f = reflected + cook_torrance_f + lam_f * (1 - reflected)
-		f = cook_torrance_f
+		f = cook_f + lam_f
 	} else {
-		wi, lam_f, lam_pdf = lambertian_brdf_sample(material, normal, rand)
+		///cook torrance
+		lam_f, lam_pdf, scattered := lambertian_brdf_sample(material, wo, rand)
+		wi = scattered
 
-		_, cook_pdf := cook_torrance_brdf_eval(material, alpha, normal, wo, wi, wh)
-		// reflected := fresnel_schlick(max(linalg.dot(normal, wi), 0), f0)
+		cook_f, cook_pdf := cook_torrance_brdf_eval(
+			material,
+			material.roughness * material.roughness,
+			wo,
+			wi,
+		)
 
-		pdf = cook_pdf * p_specular + lam_pdf * (1 - p_specular)
-		f = lam_f
+		pdf = (lam_pdf + cook_pdf) / 2
+
+		f = cook_f + lam_f
 	}
 	return
 }
@@ -58,7 +47,6 @@ multi_brdf_sample :: proc(
 cook_torrance_brdf_sample :: proc(
 	material: Material,
 	wo: Vec3,
-	normal: Vec3,
 	rand: Vec2,
 ) -> (
 	f: Vec3,
@@ -67,28 +55,24 @@ cook_torrance_brdf_sample :: proc(
 ) {
 	alpha := material.roughness * material.roughness
 
-	wh := cook_torrance_sample_wh(alpha, normal, rand)
+	wh := cook_torrance_sample_wh(alpha, wo, rand)
+	if linalg.dot(wo, wh) < 0 do return // rare
 	wi = linalg.reflect(-wo, wh)
+	if !same_hemisphere(wo, wi) do return
 
-	f, pdf = cook_torrance_brdf_eval(material, alpha, normal, wo, wi, wh)
+	f, pdf = cook_torrance_brdf_eval(material, alpha, wo, wi)
 
 	return f, pdf, wi
 }
 
-cook_torrance_brdf_eval :: proc(
-	material: Material,
-	alpha: f32,
-	n, wo, wi, h: Vec3,
-) -> (
-	Vec3,
-	f32,
-) {
-
+cook_torrance_brdf_eval :: proc(material: Material, alpha: f32, wo, wi: Vec3) -> (Vec3, f32) {
 	f0 := linalg.lerp(Vec3{0.04, 0.04, 0.04}, material.albedo, material.metallic)
 
-	ndotv := max(linalg.dot(n, wo), 0)
-	ndotl := max(linalg.dot(n, wi), 0)
-	ndoth := max(linalg.dot(n, h), 0)
+	h := linalg.normalize(wo + wi)
+
+	ndotv := max(wo.z, 0)
+	ndotl := max(wi.z, 0)
+	ndoth := max(h.z, 0)
 	hdotv := max(linalg.dot(h, wo), 0)
 
 	d := d(ndoth, alpha)
@@ -96,14 +80,11 @@ cook_torrance_brdf_eval :: proc(
 	f := fresnel_schlick(hdotv, f0)
 
 	specular := (f * d * g) / (4.0 * ndotv * ndotl + 0.0001)
-	kd := Vec3{1, 1, 1} - f
-	kd *= 1.0 - material.metallic
 
-	diffuse := material.albedo * kd * INV_PI
-
+	//TODO: check if its the same hemisphere
 	pdf := d * ndoth / (4 * hdotv + 0.0001)
 
-	return diffuse + specular, pdf
+	return specular, pdf
 }
 
 d :: proc(alpha: f32, ndoth: f32) -> f32 {
@@ -133,7 +114,7 @@ g :: proc(ndotv, ndotl, alpha: f32) -> f32 {
 	return gg1 * gg2
 }
 
-cook_torrance_sample_wh :: proc(alpha: f32, normal: Vec3, rand: Vec2) -> Vec3 {
+cook_torrance_sample_wh :: proc(alpha: f32, wo: Vec3, rand: Vec2) -> Vec3 {
 	phi := (2 * math.PI) * rand.y
 	theta := math.atan(alpha * math.sqrt(rand.x / (1 - rand.x)))
 
@@ -142,39 +123,34 @@ cook_torrance_sample_wh :: proc(alpha: f32, normal: Vec3, rand: Vec2) -> Vec3 {
 
 	w := Vec3{sin_theta * linalg.cos(phi), sin_theta * linalg.sin(phi), cos_theta}
 
-	onb := make_onb(normal)
-	return linalg.normalize(onb_transform(onb, w))
+	if !same_hemisphere(wo, w) do w = -w
+	return w
 }
 
 lambertian_brdf_sample :: proc(
 	material: Material,
-	normal: Vec3,
+	wo: Vec3,
 	rand: Vec2,
 ) -> (
-	scattered: Vec3,
 	f: Vec3,
 	pdf: f32,
+	wi: Vec3,
 ) {
-	uvw := make_onb(normal)
-
-	scattered = onb_transform(uvw, random_cosine_direction(rand))
-	pdf = lambertian_pdf(scattered, normal)
-	f = lambertian_eval(material, scattered, normal)
-	return scattered, f, pdf
+	wi = random_cosine_direction(rand)
+	if wo.z < 0 do wi.z *= -1
+	pdf = lambertian_pdf(wi.z)
+	f = lambertian_eval(material.albedo)
+	return f, pdf, wi
 }
 
 @(private = "file")
-lambertian_pdf :: proc "contextless" (wi, normal: Vec3) -> f32 {
-	return linalg.dot(wi, normal) * INV_PI
+lambertian_pdf :: proc "contextless" (ndotl: f32) -> f32 {
+	return ndotl * INV_PI
 }
 
 @(private = "file")
-lambertian_eval :: proc "contextless" (
-	material: Material,
-	input_direction: Vec3,
-	normal: Vec3,
-) -> Vec3 {
-	return material.albedo * INV_PI
+lambertian_eval :: proc "contextless" (albedo: Vec3) -> Vec3 {
+	return albedo * INV_PI
 }
 
 fresnel_schlick :: proc "contextless" (cosTheta: f32, F0: Vec3) -> Vec3 {

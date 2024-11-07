@@ -5,14 +5,12 @@ import mat "../material"
 import "../ray"
 import "../utils"
 import "aabb"
-import "core:math/linalg"
 
 Hit_Record :: struct {
-	point:      utils.Vec3,
-	normal:     utils.Vec3,
-	material:   mat.Material,
-	t:          f32,
-	front_face: bool,
+	point:    utils.Vec3,
+	normal:   utils.Vec3,
+	material: mat.Material,
+	t:        f32,
 }
 
 Hittable :: union {
@@ -57,6 +55,5 @@ hit_record_init :: proc(
 	hit_record.t = t
 	hit_record.point = ray.at(r, t)
 
-	hit_record.front_face = linalg.dot(r.direction, outward_normal) < 0
-	hit_record.normal = hit_record.front_face ? outward_normal : -outward_normal
+	hit_record.normal = outward_normal
 }
