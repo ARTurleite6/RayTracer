@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:log"
+import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:thread"
@@ -138,9 +139,9 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 			break
 		}
 
-		sphere := renderer.scene.spheres[payload.object_index]
+		mesh := renderer.scene.meshes[payload.object_index]
 		context.user_index = payload.object_index
-		material := renderer.scene.materials[sphere.material_index]
+		material := renderer.scene.materials[mesh.material_index]
 
 		light += material_get_emission(material)
 
@@ -161,31 +162,23 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 }
 
 renderer_trace_ray :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
-	closest_sphere := -1
-	interval := empty_interval()
-	hit_distance := interval.max
+	hit_distance, closest_mesh, normal, _ := hit(
+		renderer.scene.meshes[:],
+		ray,
+		Interval{min = 0, max = math.F32_MAX},
+	)
 
-	for &sphere, i in renderer.scene.spheres {
-		if distance, did_hit := sphere_hit(
-			sphere,
-			ray,
-			Interval{min = interval.min, max = hit_distance},
-		); did_hit {
-			hit_distance = distance
-			closest_sphere = i
-		}
-	}
-
-	if closest_sphere < 0 {
+	if closest_mesh < 0 {
 		return renderer_miss(renderer, ray)
 	}
-	return renderer_closest_hit(renderer, ray, hit_distance, u32(closest_sphere))
+	return renderer_closest_hit(renderer, ray, hit_distance, normal, u32(closest_mesh))
 }
 
 renderer_closest_hit :: proc(
 	renderer: Renderer,
 	ray: Ray,
 	hit_distance: f32,
+	normal: Vec3,
 	object_index: u32,
 ) -> Hit_Payload {
 	payload := Hit_Payload {
@@ -193,14 +186,11 @@ renderer_closest_hit :: proc(
 		object_index = int(object_index),
 	}
 
-	sphere := renderer.scene.spheres[object_index]
-	origin := ray.origin - sphere.position
-	payload.world_position = origin + ray.direction * hit_distance
-	payload.world_normal = linalg.normalize(payload.world_position)
-	payload.front_face = linalg.dot(-ray.direction, payload.world_normal) > 0
-	payload.world_normal = payload.front_face ? payload.world_normal : -payload.world_normal
-
-	payload.world_position += sphere.position
+	// mesh := renderer.scene.meshes[object_index]
+	payload.world_position = ray.origin + ray.direction * hit_distance
+	payload.world_normal = normal
+	// payload.front_face = linalg.dot(-ray.direction, payload.world_normal) > 0
+	// payload.world_normal = payload.front_face ? payload.world_normal : -payload.world_normal
 
 	return payload
 }

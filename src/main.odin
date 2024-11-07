@@ -30,9 +30,7 @@ create_application :: proc(window: glfw.WindowHandle) -> Application {
 	}
 
 	raytracer.camera_init(&application.camera, 45, 0.1, 100)
-
-	application.scene.spheres = make([dynamic]raytracer.Sphere)
-	application.scene.materials = make([dynamic]raytracer.Material)
+	raytracer.scene_init(&application.scene)
 
 	ground: raytracer.Material
 	raytracer.material_init(&ground, {0.8, 0.8, 0.0})
@@ -51,11 +49,13 @@ create_application :: proc(window: glfw.WindowHandle) -> Application {
 	append(&application.scene.materials, ground, center, light)
 
 	{
-		sphere: raytracer.Sphere
-		sphere.position = {0.0, 0.0, 0.0}
-		sphere.radius = 1.0
-		sphere.material_index = 1
-		append(&application.scene.spheres, sphere)
+		triangles := make([]raytracer.Triangle, 2)
+		raytracer.triangle_init(&triangles[0], {{0, 0, 0}, {0, 1, 0}, {1, 0, 0}})
+		raytracer.triangle_init(&triangles[1], {{0, 1, 0}, {1, 1, 0}, {1, 0, 0}})
+
+		mesh: raytracer.Mesh
+		raytracer.mesh_init(&mesh, 1, triangles)
+		append(&application.scene.meshes, mesh)
 	}
 
 	{
@@ -101,12 +101,12 @@ on_render :: proc(application: ^Application, last_render_time: f64) {
 	imgui.End()
 
 	imgui.Begin("Scene")
-	for &sphere, i in application.scene.spheres {
+	for &mesh, i in application.scene.meshes {
 		imgui.PushIDInt(i32(i))
 
-		imgui.DragFloat3("Position", &sphere.position, 0.1)
-		imgui.DragFloat("Radius", &sphere.radius, 0.1)
-		imgui.DragInt("Material", cast(^i32)&sphere.material_index)
+		//imgui.DragFloat3("Position", &sphere.position, 0.1)
+		//imgui.DragFloat("Radius", &sphere.radius, 0.1)
+		imgui.DragInt("Material", cast(^i32)&mesh.material_index)
 		imgui.Separator()
 
 		imgui.PopID()
@@ -181,10 +181,12 @@ main :: proc() {
 
 	clear_color := imgui.Vec4{0.45, 0.55, 0.60, 1.00}
 
-	glfw.SetErrorCallback(proc "c" (error: c.int, description: cstring) {
-		context = runtime.default_context()
-		// fmt.eprintf("GLFW Error %d: %s\n", error, description)
-	})
+	glfw.SetErrorCallback(
+		proc "c" (error: c.int, description: cstring) {
+			context = runtime.default_context()
+			// fmt.eprintf("GLFW Error %d: %s\n", error, description)
+		},
+	)
 
 	if !glfw.Init() {
 		log.fatal("Error initializing glfw")
@@ -232,6 +234,7 @@ main :: proc() {
 	defer imgui_opengl.Shutdown()
 
 	application := create_application(window)
+	log.debug(application)
 
 	last_frame: f64
 	for !glfw.WindowShouldClose(window) {
