@@ -53,26 +53,24 @@ create_application :: proc(window: glfw.WindowHandle) -> Application {
 		raytracer.triangle_init(&triangles[0], {{0, 0, 0}, {0, 1, 0}, {1, 0, 0}})
 		raytracer.triangle_init(&triangles[1], {{0, 1, 0}, {1, 1, 0}, {1, 0, 0}})
 
-		mesh: raytracer.Mesh
-		raytracer.mesh_init(&mesh, 1, triangles)
-		append(&application.scene.meshes, mesh)
+		primitive: raytracer.Primitive
+		raytracer.primitive_init(&primitive, triangles, 1)
+		append(&application.scene.primitives, primitive)
 	}
 
 	{
-		sphere: raytracer.Sphere
-		sphere.position = {2.0, 0.0, 0.0}
-		sphere.radius = 1.0
-		sphere.material_index = 2
-		append(&application.scene.spheres, sphere)
+		primitive: raytracer.Primitive
+		raytracer.primitive_sphere_init(&primitive, {2.0, 0.0, 0.0}, 1, 2)
+		append(&application.scene.primitives, primitive)
 	}
 
-	{
-		sphere: raytracer.Sphere
-		sphere.position = {0.0, -101.0, 0.0}
-		sphere.radius = 100.0
-		sphere.material_index = 0
-		append(&application.scene.spheres, sphere)
-	}
+	// {
+	// 	sphere: raytracer.Sphere
+	// 	sphere.position = {0.0, -101.0, 0.0}
+	// 	sphere.radius = 100.0
+	// 	sphere.material_index = 0
+	// 	append(&application.scene.spheres, sphere)
+	// }
 
 	return application
 }
@@ -101,12 +99,19 @@ on_render :: proc(application: ^Application, last_render_time: f64) {
 	imgui.End()
 
 	imgui.Begin("Scene")
-	for &mesh, i in application.scene.meshes {
+	for &primitive, i in application.scene.primitives {
 		imgui.PushIDInt(i32(i))
 
-		//imgui.DragFloat3("Position", &sphere.position, 0.1)
-		//imgui.DragFloat("Radius", &sphere.radius, 0.1)
-		imgui.DragInt("Material", cast(^i32)&mesh.material_index)
+		imgui.DragInt("Material", cast(^i32)&primitive.material_index)
+		#partial switch &v in primitive.variant {
+		case raytracer.Sphere:
+			if imgui.DragFloat3("Position", &v.position, 0.1) {
+				primitive.box = raytracer.sphere_aabb(v)
+			}
+			if imgui.DragFloat("Radius", &v.radius, 0.1) {
+				primitive.box = raytracer.sphere_aabb(v)
+			}
+		}
 		imgui.Separator()
 
 		imgui.PopID()

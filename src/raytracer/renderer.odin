@@ -134,14 +134,14 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 	for _ in 0 ..< bounces {
 		payload := renderer_trace_ray(renderer, ray)
 		if payload.hit_distance < 0 {
-			sky_color := Vec3{0.6, 0.7, 0.9}
-			light += sky_color * contribution
+			//sky_color := Vec3{0.6, 0.7, 0.9}
+			//light += sky_color * contribution
 			break
 		}
 
-		mesh := renderer.scene.meshes[payload.object_index]
+		primitive := renderer.scene.primitives[payload.object_index]
 		context.user_index = payload.object_index
-		material := renderer.scene.materials[mesh.material_index]
+		material := renderer.scene.materials[primitive.material_index]
 
 		light += material_get_emission(material)
 
@@ -163,7 +163,7 @@ renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
 
 renderer_trace_ray :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
 	hit_distance, closest_mesh, normal, _ := hit(
-		renderer.scene.meshes[:],
+		renderer.scene.primitives[:],
 		ray,
 		Interval{min = 0, max = math.F32_MAX},
 	)

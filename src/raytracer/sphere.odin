@@ -4,16 +4,13 @@ package raytracer
 import "core:math/linalg"
 
 Sphere :: struct {
-	using primitive: Primitive,
-	position:        Vec3,
-	radius:          f32,
+	position: Vec3,
+	radius:   f32,
 }
 
-sphere_init :: proc(s: ^Sphere, center: Vec3, radius: f32, material_index: u32) {
+sphere_init :: proc(s: ^Sphere, center: Vec3, radius: f32) {
 	s.position = center
 	s.radius = radius
-	s.material_index = material_index
-	s.box = sphere_aabb(s^)
 }
 
 sphere_hit :: proc(
