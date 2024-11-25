@@ -58,6 +58,6 @@ debugger_callback :: proc "system" (
 		level = .Debug
 	}
 
-	log.log(level, "vulkan[%v]: %s", messageTypes, pCallbackData.pMessage)
+	log.logf(level, "vulkan[%v]: %s", messageTypes, pCallbackData.pMessage)
 	return false
 }

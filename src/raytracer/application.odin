@@ -50,9 +50,16 @@ application_init :: proc(
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
 
-	window_init(&app.window, window_width, window_height, application_name)
+	window_init(
+		&app.window,
+		window_width,
+		window_height,
+		application_name,
+		app.allocator,
+		app.temp_allocator,
+	) or_return
 
-	return renderer_init(&app.renderer, app.temp_allocator)
+	return renderer_init(&app.renderer)
 }
 
 application_destroy :: proc(app: Application) {
