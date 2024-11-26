@@ -10,6 +10,7 @@ g_context: runtime.Context
 
 Error :: union #shared_nil {
 	General_Error,
+	Context_Error,
 	vk.Result,
 }
 
@@ -59,17 +60,24 @@ application_init :: proc(
 		app.temp_allocator,
 	) or_return
 
-	return renderer_init(&app.renderer)
+	return renderer_init(&app.renderer, &app.window.ctx)
 }
 
-application_destroy :: proc(app: Application) {
+application_destroy :: proc(app: ^Application) {
 	renderer_destroy(app.renderer)
-	window_destroy(app.window)
+	window_destroy(&app.window)
 }
 
-application_run :: proc(app: Application) {
+application_run :: proc(app: ^Application) {
 	for !window_should_close(app.window) {
 		free_all(context.temp_allocator)
 		window_poll_events()
+
+		if result := renderer_render(&app.renderer); result != .SUCCESS {
+			log.fatalf("Error while rendering frame %v", result)
+			break
+		}
 	}
+
+	vk.DeviceWaitIdle(app.renderer.ctx.device)
 }

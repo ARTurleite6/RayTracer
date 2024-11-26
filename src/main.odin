@@ -16,7 +16,7 @@ main :: proc() {
 		fmt.eprintfln("Error while initialing Application %v", err)
 		return
 	}
-	defer raytracer.application_destroy(app)
+	defer raytracer.application_destroy(&app)
 
-	raytracer.application_run(app)
+	raytracer.application_run(&app)
 }

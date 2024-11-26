@@ -15,23 +15,22 @@ window_init :: proc(
 	title: cstring,
 	allocator: mem.Allocator,
 	temp_allocator: mem.Allocator,
-) -> Error {
+) -> (
+	err: Error,
+) {
 	window.handle = glfw.CreateWindow(width, height, title, nil, nil)
 	if window.handle == nil do return .WindowCreation
-	if result := context_init(&window.ctx, window^, allocator, temp_allocator);
-	   result != .SUCCESS {
-		return result
-	}
+	context_init(&window.ctx, window^, allocator, temp_allocator) or_return
 
-	return .None
+	return
 }
 
 window_get_framebuffer_size :: proc(window: Window) -> (width: i32, height: i32) {
 	return glfw.GetFramebufferSize(window.handle)
 }
 
-window_destroy :: proc(window: Window) {
-	context_destroy(window.ctx)
+window_destroy :: proc(window: ^Window) {
+	context_destroy(&window.ctx)
 	glfw.DestroyWindow(window.handle)
 }
 

@@ -1,18 +1,21 @@
 package raytracer
 
+import "core:mem"
+import "core:strings"
 import vk "vendor:vulkan"
 
 Pipeline :: struct {
-	handle:  vk.Pipeline,
-	layout:  vk.PipelineLayout,
-	shaders: []^Shader,
+	handle: vk.Pipeline,
+	layout: vk.PipelineLayout,
 }
 
 pipeline_init :: proc(
-	pipeline: Pipeline,
+	pipeline: ^Pipeline,
 	device: Device,
 	swapchain: Swapchain,
-	shaders: []^Shader,
+	render_pass: vk.RenderPass,
+	shaders: []Shader,
+	temp_allocator: mem.Allocator,
 ) -> vk.Result {
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 
@@ -32,21 +35,14 @@ pipeline_init :: proc(
 		primitiveRestartEnable = false,
 	}
 
-	viewport := vk.Viewport {
-		x        = 0.0,
-		y        = 0.0,
-		width    = f32(swapchain.extent.width),
-		height   = f32(swapchain.extent.height),
-		minDepth = 0.0,
-		maxDepth = 1.0,
-	}
-
-	scissor := vk.Rect2D {
-		offset = {},
-		extent = swapchain.extent,
+	viewport_state := vk.PipelineViewportStateCreateInfo {
+		sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		viewportCount = 1,
+		scissorCount  = 1,
 	}
 
 	rasterizer := vk.PipelineRasterizationStateCreateInfo {
+		sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		depthClampEnable        = false,
 		rasterizerDiscardEnable = false,
 		polygonMode             = .FILL,
@@ -84,11 +80,45 @@ pipeline_init :: proc(
 		}
 	}
 
-	// TODO: Finish creating the pipeline and create graphics pass
+
+	// TODO: Finish creating the pipeline
+	{
+		stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), temp_allocator)
+		for shader, i in shaders {
+			stages[i] = vk.PipelineShaderStageCreateInfo {
+				sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+				stage  = shader.stage,
+				module = shader.module,
+				pName  = strings.clone_to_cstring(shader.entrypoint, temp_allocator),
+			}
+		}
+
+		create_info := vk.GraphicsPipelineCreateInfo {
+			sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+			stageCount          = u32(len(stages)),
+			pStages             = raw_data(stages),
+			pVertexInputState   = &vertex_input_info,
+			pInputAssemblyState = &assembly_info,
+			pViewportState      = &viewport_state,
+			pRasterizationState = &rasterizer,
+			pMultisampleState   = &multisampling_info,
+			pColorBlendState    = &color_blend_state,
+			pDynamicState       = &dynamic_state,
+			layout              = pipeline.layout,
+			renderPass          = render_pass,
+			subpass             = 0,
+		}
+
+		if result := vk.CreateGraphicsPipelines(device, 0, 1, &create_info, nil, &pipeline.handle);
+		   result != .SUCCESS {
+			return result
+		}
+	}
+
+	return .SUCCESS
 }
 
 pipeline_destroy :: proc(pipeline: Pipeline, device: Device) {
-	delete(pipeline.shaders)
 	vk.DestroyPipelineLayout(device, pipeline.layout, nil)
 	vk.DestroyPipeline(device, pipeline.handle, nil)
 }

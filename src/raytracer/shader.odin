@@ -15,34 +15,29 @@ Shader_Load_Error :: enum u8 {
 }
 
 Shader :: struct {
-	module: vk.ShaderModule,
+	module:     vk.ShaderModule,
+	stage:      vk.ShaderStageFlags,
+	entrypoint: string,
 }
 
 @(require_results)
-shader_init_from_filepath :: proc(
+shader_init :: proc(
 	shader: ^Shader,
 	device: Device,
+	stage: vk.ShaderStageFlags,
+	entrypoint: string,
 	file_path: string,
 	temp_allocator: mem.Allocator,
 ) -> (
 	err: Shader_Error,
 ) {
+	shader.entrypoint = entrypoint
+	shader.stage = stage
+
 	content, found := os.read_entire_file(file_path, temp_allocator)
 	if !found {
 		return .FileNonExistent
 	}
-
-	return shader_init_from_code(shader, device, content)
-}
-
-@(require_results)
-shader_init_from_code :: proc(
-	shader: ^Shader,
-	device: Device,
-	content: []byte,
-) -> (
-	err: Shader_Error,
-) {
 	code := transmute([]u32)content
 
 	create_info := vk.ShaderModuleCreateInfo {
@@ -55,11 +50,10 @@ shader_init_from_code :: proc(
 	   result != .SUCCESS {
 		return result
 	}
-
 	return
+
 }
 
-shader_init :: proc {
-	shader_init_from_code,
-	shader_init_from_filepath,
+shader_destroy :: proc(shader: Shader, device: Device) {
+	vk.DestroyShaderModule(device, shader.module, nil)
 }

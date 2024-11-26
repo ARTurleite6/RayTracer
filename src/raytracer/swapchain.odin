@@ -8,7 +8,7 @@ Swapchain :: struct {
 	handle:       vk.SwapchainKHR,
 	images:       []vk.Image,
 	image_views:  []vk.ImageView,
-	framebuffers: []vk.Framebuffer,
+	framebuffers: []Framebuffer,
 	format:       vk.Format,
 	extent:       vk.Extent2D,
 }
@@ -119,7 +119,34 @@ swapchain_init :: proc(
 	return .SUCCESS
 }
 
+swapchain_init_framebuffers :: proc(
+	swapchain: ^Swapchain,
+	device: Device,
+	render_pass: vk.RenderPass,
+	allocator: mem.Allocator,
+) -> vk.Result {
+	swapchain.framebuffers = make([]Framebuffer, len(swapchain.image_views), allocator)
+	for image, i in swapchain.image_views {
+		if result := framebuffer_init(
+			&swapchain.framebuffers[i],
+			device,
+			render_pass,
+			swapchain.extent,
+			image,
+		); result != .SUCCESS {
+			return result
+		}
+	}
+
+	return .SUCCESS
+}
+
 swapchain_destroy :: proc(swapchain: Swapchain, device: Device) {
+	for framebuffer in swapchain.framebuffers {
+		vk.DestroyFramebuffer(device, framebuffer, nil)
+	}
+	delete(swapchain.framebuffers)
+
 	for image_view in swapchain.image_views {
 		vk.DestroyImageView(device, image_view, nil)
 	}
@@ -128,6 +155,28 @@ swapchain_destroy :: proc(swapchain: Swapchain, device: Device) {
 	delete(swapchain.images)
 
 	vk.DestroySwapchainKHR(device, swapchain.handle, nil)
+}
+
+@(require_results)
+swapchain_acquire_next_image :: proc(
+	swapchain: Swapchain,
+	device: Device,
+	semaphore: Semaphore,
+	fence: Fence = 0,
+) -> (
+	image_index: u32,
+	result: vk.Result,
+) {
+	result = vk.AcquireNextImageKHR(
+		device,
+		swapchain.handle,
+		max(u64),
+		semaphore,
+		fence,
+		&image_index,
+	)
+
+	return
 }
 
 @(require_results)
