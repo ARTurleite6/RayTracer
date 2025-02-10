@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import "core:os"
 import vk "vendor:vulkan"
 
@@ -27,14 +26,13 @@ shader_init :: proc(
 	stage: vk.ShaderStageFlags,
 	entrypoint: string,
 	file_path: string,
-	temp_allocator: mem.Allocator,
 ) -> (
 	err: Shader_Error,
 ) {
 	shader.entrypoint = entrypoint
 	shader.stage = stage
 
-	content, found := os.read_entire_file(file_path, temp_allocator)
+	content, found := os.read_entire_file(file_path)
 	if !found {
 		return .FileNonExistent
 	}

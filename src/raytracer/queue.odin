@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import vk "vendor:vulkan"
 
 Queue_Family_Index :: struct {
@@ -11,13 +10,12 @@ Queue_Family_Index :: struct {
 find_queue_families :: proc(
 	device: PhysicalDevice,
 	surface: vk.SurfaceKHR,
-	temp_allocator: mem.Allocator,
 ) -> (
 	result: Queue_Family_Index,
 ) {
 	count: u32 = 0
 	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, nil)
-	queue_families := make([]vk.QueueFamilyProperties, count, temp_allocator)
+	queue_families := make([]vk.QueueFamilyProperties, count, context.temp_allocator)
 	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, raw_data(queue_families))
 
 	for family, i in queue_families {

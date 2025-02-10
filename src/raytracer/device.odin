@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import "core:slice"
 import vk "vendor:vulkan"
 
@@ -17,13 +16,16 @@ device_init :: proc(
 	physical_device: PhysicalDevice,
 	surface: vk.SurfaceKHR,
 	queues_families: Queue_Family_Index,
-	temp_allocator: mem.Allocator,
 ) -> (
 	result: vk.Result,
 ) {
 	indices := []u32{queues_families.graphics.?, queues_families.present.?}
 	unique_indices := slice.unique(indices)
-	queue_create_infos := make([]vk.DeviceQueueCreateInfo, len(unique_indices), temp_allocator)
+	queue_create_infos := make(
+		[]vk.DeviceQueueCreateInfo,
+		len(unique_indices),
+		context.temp_allocator,
+	)
 
 	for indice, i in unique_indices {
 		queue_create_infos[i] = vk.DeviceQueueCreateInfo {

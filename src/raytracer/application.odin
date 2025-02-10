@@ -2,7 +2,6 @@ package raytracer
 
 import "base:runtime"
 import "core:log"
-import "core:mem"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
@@ -23,8 +22,6 @@ General_Error :: enum u8 {
 Application :: struct {
 	window:         Window,
 	renderer:       Renderer,
-	allocator:      mem.Allocator,
-	temp_allocator: mem.Allocator,
 }
 
 @(require_results)
@@ -32,16 +29,13 @@ application_init :: proc(
 	app: ^Application,
 	window_width, window_height: i32,
 	application_name: cstring,
-	allocator: mem.Allocator,
-	temp_allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> (
 	err: Error,
 ) {
-	context.logger = log.create_console_logger()
+    context.logger = log.create_console_logger()
+    runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 	g_context = context
-
-	app.allocator = allocator
-	app.temp_allocator = temp_allocator
 
 	if !glfw.Init() {
 		log.fatal("GLFW: error initializing")
@@ -56,8 +50,7 @@ application_init :: proc(
 		window_width,
 		window_height,
 		application_name,
-		app.allocator,
-		app.temp_allocator,
+		allocator,
 	) or_return
 
 	return renderer_init(&app.renderer, &app.window.ctx)

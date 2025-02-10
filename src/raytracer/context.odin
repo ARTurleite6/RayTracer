@@ -3,7 +3,6 @@ package raytracer
 @(require, extra_linker_flags = "-rpath /usr/local/lib")
 foreign import __ "system:System.framework"
 
-import "core:mem"
 import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
@@ -32,27 +31,24 @@ Context :: struct {
 context_init :: proc(
 	ctx: ^Context,
 	window: Window,
-	allocator: mem.Allocator,
-	temp_allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> (
 	result: Context_Error,
 ) {
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
-	extensions := required_extensions(temp_allocator)
-	debug_info: ^vk.DebugUtilsMessengerCreateInfoEXT
+	extensions := required_extensions(context.temp_allocator)
+	debug_info: vk.DebugUtilsMessengerCreateInfoEXT
 	when ODIN_DEBUG {
-		debug_info_value: vk.DebugUtilsMessengerCreateInfoEXT
-		debugger_get_info(&debug_info_value)
-		debug_info = &debug_info_value
+		debugger_get_info(&debug_info)
 	}
 
-	if result = instance_init(&ctx.instance, "Raytracing", extensions, debug_info);
+	if result = instance_init(&ctx.instance, "Raytracing", extensions, &debug_info);
 	   result != vk.Result.SUCCESS {
 		return
 	}
 	vk.load_proc_addresses(ctx.instance)
-	if debug_info != nil {
-		debugger_init(&ctx.debugger, ctx.instance, debug_info)
+	when ODIN_DEBUG {
+		debugger_init(&ctx.debugger, ctx.instance, &debug_info)
 	}
 
 	if ctx.surface, result = window_create_surface(window, ctx.instance);
@@ -60,10 +56,10 @@ context_init :: proc(
 		return
 	}
 
-	physical_device_init(&ctx.physical_device, ctx.instance, ctx.surface, temp_allocator)
+	physical_device_init(&ctx.physical_device, ctx.instance, ctx.surface)
 
-	queues := find_queue_families(ctx.physical_device, ctx.surface, temp_allocator)
-	if result = device_init(&ctx.device, ctx.physical_device, ctx.surface, queues, temp_allocator);
+	queues := find_queue_families(ctx.physical_device, ctx.surface)
+	if result = device_init(&ctx.device, ctx.physical_device, ctx.surface, queues);
 	   result != vk.Result.SUCCESS {
 		return
 	}
@@ -81,7 +77,6 @@ context_init :: proc(
 		window,
 		queues,
 		allocator,
-		temp_allocator,
 	)
 
 	{ 	// create shaders
@@ -94,7 +89,6 @@ context_init :: proc(
 			{.VERTEX},
 			"main",
 			"shaders/vert.spv",
-			temp_allocator,
 		) or_return
 
 		shader_init(
@@ -103,7 +97,6 @@ context_init :: proc(
 			{.FRAGMENT},
 			"main",
 			"shaders/frag.spv",
-			temp_allocator,
 		) or_return
 	}
 
@@ -115,7 +108,6 @@ context_init :: proc(
 		ctx.swapchain,
 		ctx.render_pass,
 		ctx.shaders,
-		temp_allocator,
 	)
 
 	swapchain_init_framebuffers(&ctx.swapchain, ctx.device, ctx.render_pass, allocator)
@@ -195,8 +187,8 @@ context_render_pass_init :: proc(
 	return .SUCCESS
 }
 
-required_extensions :: proc(temp_allocator: mem.Allocator) -> []cstring {
-	extensions := slice.to_dynamic(glfw.GetRequiredInstanceExtensions(), temp_allocator)
+required_extensions :: proc(allocator := context.allocator) -> []cstring {
+	extensions := slice.to_dynamic(glfw.GetRequiredInstanceExtensions(), allocator)
 
 	when ODIN_OS == .Darwin {
 		append(&extensions, vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)

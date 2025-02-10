@@ -11,7 +11,6 @@ main :: proc() {
 		600,
 		"Raytracer",
 		context.allocator,
-		context.temp_allocator,
 	); err != nil {
 		fmt.eprintfln("Error while initialing Application %v", err)
 		return

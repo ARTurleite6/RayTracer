@@ -2,7 +2,6 @@ package raytracer
 
 // import "core:fmt"
 import "core:log"
-import "core:mem"
 import "core:strings"
 import vk "vendor:vulkan"
 
@@ -12,16 +11,15 @@ physical_device_init :: proc(
 	device: ^PhysicalDevice,
 	instance: Instance,
 	surface: vk.SurfaceKHR,
-	temp_allocator: mem.Allocator,
 ) {
 	num_devices: u32
 	vk.EnumeratePhysicalDevices(instance, &num_devices, nil)
-	physical_devices := make([]PhysicalDevice, num_devices, temp_allocator)
+	physical_devices := make([]PhysicalDevice, num_devices, context.temp_allocator)
 	vk.EnumeratePhysicalDevices(instance, &num_devices, raw_data(physical_devices))
 
 	high_score: uint = 0
 	for d in physical_devices {
-		score := rate_device(d, surface, temp_allocator)
+		score := rate_device(d, surface)
 		if score > high_score {
 			high_score = score
 			device^ = d
@@ -34,7 +32,6 @@ physical_device_init :: proc(
 rate_device :: proc(
 	device: PhysicalDevice,
 	surface: vk.SurfaceKHR,
-	temp_allocator: mem.Allocator,
 ) -> uint {
 	features: vk.PhysicalDeviceFeatures
 	properties: vk.PhysicalDeviceProperties
@@ -43,10 +40,10 @@ rate_device :: proc(
 
 	log.infof("vulkan: rating device %s", properties.deviceName)
 
-	family_indexes := find_queue_families(device, surface, temp_allocator)
+	family_indexes := find_queue_families(device, surface)
 
-	swapchain_capabilities := query_swapchain_support(device, surface, temp_allocator)
-	if !is_device_suitable(device, family_indexes, swapchain_capabilities, temp_allocator) do return 0
+	swapchain_capabilities := query_swapchain_support(device, surface, context.temp_allocator)
+	if !is_device_suitable(device, family_indexes, swapchain_capabilities) do return 0
 
 	rate: uint = 0
 	switch properties.deviceType {
@@ -83,24 +80,22 @@ is_device_suitable :: proc(
 	physical_device: PhysicalDevice,
 	queue_familiy_index: Queue_Family_Index,
 	swapchain_capabilities: Swapchain_Support_Details,
-	temp_allocator: mem.Allocator,
 ) -> bool {
 	return(
 		is_queue_family_index_complete(queue_familiy_index) &&
 		len(swapchain_capabilities.formats) > 0 &&
 		len(swapchain_capabilities.present_modes) > 0 &&
-		check_device_extension_support(physical_device, temp_allocator) \
+		check_device_extension_support(physical_device) \
 	)
 }
 
 @(private)
 check_device_extension_support :: proc(
 	device: PhysicalDevice,
-	temp_allocator: mem.Allocator,
 ) -> bool {
 	extension_count: u32 = 0
 	vk.EnumerateDeviceExtensionProperties(device, nil, &extension_count, nil)
-	available_extensions := make([]vk.ExtensionProperties, extension_count, temp_allocator)
+	available_extensions := make([]vk.ExtensionProperties, extension_count, context.temp_allocator)
 	vk.EnumerateDeviceExtensionProperties(
 		device,
 		nil,

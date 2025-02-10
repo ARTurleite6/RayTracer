@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import "core:strings"
 import vk "vendor:vulkan"
 
@@ -15,7 +14,6 @@ pipeline_init :: proc(
 	swapchain: Swapchain,
 	render_pass: vk.RenderPass,
 	shaders: []Shader,
-	temp_allocator: mem.Allocator,
 ) -> vk.Result {
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 
@@ -83,13 +81,13 @@ pipeline_init :: proc(
 
 	// TODO: Finish creating the pipeline
 	{
-		stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), temp_allocator)
+		stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), context.temp_allocator)
 		for shader, i in shaders {
 			stages[i] = vk.PipelineShaderStageCreateInfo {
 				sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 				stage  = shader.stage,
 				module = shader.module,
-				pName  = strings.clone_to_cstring(shader.entrypoint, temp_allocator),
+				pName  = strings.clone_to_cstring(shader.entrypoint, context.temp_allocator),
 			}
 		}
 

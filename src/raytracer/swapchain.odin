@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import "core:slice"
 import vk "vendor:vulkan"
 
@@ -26,10 +25,9 @@ swapchain_init :: proc(
 	surface: vk.SurfaceKHR,
 	window: Window,
 	graphics_queues_families: Queue_Family_Index,
-	allocator: mem.Allocator,
-	temp_allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> vk.Result {
-	swapchain_support := query_swapchain_support(physical_device, surface, temp_allocator)
+	swapchain_support := query_swapchain_support(physical_device, surface, context.temp_allocator)
 	assert(
 		len(swapchain_support.formats) > 0,
 		"Vulkan: Swapchain does not have any available formats",
@@ -123,7 +121,7 @@ swapchain_init_framebuffers :: proc(
 	swapchain: ^Swapchain,
 	device: Device,
 	render_pass: vk.RenderPass,
-	allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> vk.Result {
 	swapchain.framebuffers = make([]Framebuffer, len(swapchain.image_views), allocator)
 	for image, i in swapchain.image_views {
@@ -183,7 +181,7 @@ swapchain_acquire_next_image :: proc(
 query_swapchain_support :: proc(
 	physical_device: PhysicalDevice,
 	surface: vk.SurfaceKHR,
-	allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> (
 	details: Swapchain_Support_Details,
 ) {

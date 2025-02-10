@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:mem"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
@@ -13,14 +12,13 @@ window_init :: proc(
 	window: ^Window,
 	width, height: i32,
 	title: cstring,
-	allocator: mem.Allocator,
-	temp_allocator: mem.Allocator,
+	allocator := context.allocator,
 ) -> (
 	err: Error,
 ) {
 	window.handle = glfw.CreateWindow(width, height, title, nil, nil)
 	if window.handle == nil do return .WindowCreation
-	context_init(&window.ctx, window^, allocator, temp_allocator) or_return
+	context_init(&window.ctx, window^, allocator) or_return
 
 	return
 }
