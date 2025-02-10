@@ -42,8 +42,7 @@ renderer_render :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 	); result != .SUCCESS {
 		return result
 	}
-	frame_start(&current_frame, ctx.swapchain.framebuffers[image_index], image_index)
-	current_framebuffer := ctx.swapchain.framebuffers[image_index]
+	frame_start(&current_frame, image_index)
 
 	{ 	// rendering 
 		if result = command_buffer_start_recording(current_frame.command_buffer);
@@ -53,8 +52,7 @@ renderer_render :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 
 		command_buffer_start_rendering(
 			current_frame.command_buffer,
-			ctx.render_pass,
-			current_framebuffer,
+			swapchain.image_views[image_index],
 			{offset = {}, extent = swapchain.extent},
 		)
 

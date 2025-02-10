@@ -1,7 +1,9 @@
 package raytracer
 
-@(require, extra_linker_flags = "-rpath /usr/local/lib")
-foreign import __ "system:System.framework"
+when ODIN_OS == .Darwin {
+	@(require, extra_linker_flags = "-rpath /usr/local/lib")
+	foreign import __ "system:System.framework"
+}
 
 import "core:slice"
 import "vendor:glfw"
@@ -21,7 +23,6 @@ Context :: struct {
 	surface:         vk.SurfaceKHR,
 	swapchain:       Swapchain,
 	pipeline:        Pipeline,
-	render_pass:     vk.RenderPass,
 	shaders:         []Shader,
 	command_pool:    Command_Pool,
 	debugger:        Debugger,
@@ -83,34 +84,13 @@ context_init :: proc(
 		// TODO: for now the shaders will be only two and will be hardcoded
 		ctx.shaders = make([]Shader, 2, allocator)
 
-		shader_init(
-			&ctx.shaders[0],
-			ctx.device,
-			{.VERTEX},
-			"main",
-			"shaders/vert.spv",
-		) or_return
+		shader_init(&ctx.shaders[0], ctx.device, {.VERTEX}, "main", "shaders/vert.spv") or_return
 
-		shader_init(
-			&ctx.shaders[1],
-			ctx.device,
-			{.FRAGMENT},
-			"main",
-			"shaders/frag.spv",
-		) or_return
+		shader_init(&ctx.shaders[1], ctx.device, {.FRAGMENT}, "main", "shaders/frag.spv") or_return
 	}
 
-	context_render_pass_init(&ctx.render_pass, ctx.device, ctx.swapchain)
+	pipeline_init(&ctx.pipeline, ctx.device, &ctx.swapchain, ctx.shaders)
 
-	pipeline_init(
-		&ctx.pipeline,
-		ctx.device,
-		ctx.swapchain,
-		ctx.render_pass,
-		ctx.shaders,
-	)
-
-	swapchain_init_framebuffers(&ctx.swapchain, ctx.device, ctx.render_pass, allocator)
 	if result := command_pool_init(&ctx.command_pool, ctx.device, queues.graphics.?);
 	   result != .SUCCESS {
 		return result
@@ -122,7 +102,6 @@ context_init :: proc(
 context_destroy :: proc(ctx: ^Context) {
 	command_pool_destroy(&ctx.command_pool, ctx.device)
 	pipeline_destroy(ctx.pipeline, ctx.device)
-	vk.DestroyRenderPass(ctx.device, ctx.render_pass, nil)
 
 	for shader in ctx.shaders {
 		shader_destroy(shader, ctx.device)
@@ -134,57 +113,6 @@ context_destroy :: proc(ctx: ^Context) {
 	vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
 	debugger_destroy(ctx.debugger, ctx.instance)
 	instance_destroy(ctx.instance)
-}
-
-context_render_pass_init :: proc(
-	render_pass: ^vk.RenderPass,
-	device: Device,
-	swapchain: Swapchain,
-) -> vk.Result {
-	color_attachment := vk.AttachmentDescription {
-		format         = swapchain.format,
-		samples        = {._1},
-		loadOp         = .CLEAR,
-		storeOp        = .STORE,
-		stencilLoadOp  = .DONT_CARE,
-		stencilStoreOp = .DONT_CARE,
-		initialLayout  = .UNDEFINED,
-		finalLayout    = .PRESENT_SRC_KHR,
-	}
-	color_attachment_ref := vk.AttachmentReference {
-		attachment = 0,
-		layout     = .COLOR_ATTACHMENT_OPTIMAL,
-	}
-
-	subpass := vk.SubpassDescription {
-		pipelineBindPoint    = .GRAPHICS,
-		colorAttachmentCount = 1,
-		pColorAttachments    = &color_attachment_ref,
-	}
-
-	dependency := vk.SubpassDependency {
-		srcSubpass    = vk.SUBPASS_EXTERNAL,
-		dstSubpass    = 0,
-		srcStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
-		srcAccessMask = {},
-		dstStageMask  = {.COLOR_ATTACHMENT_OUTPUT},
-		dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-	}
-
-	create_info := vk.RenderPassCreateInfo {
-		sType           = .RENDER_PASS_CREATE_INFO,
-		attachmentCount = 1,
-		pAttachments    = &color_attachment,
-		subpassCount    = 1,
-		pSubpasses      = &subpass,
-		dependencyCount = 1,
-		pDependencies   = &dependency,
-	}
-
-	if result := vk.CreateRenderPass(device, &create_info, nil, render_pass); result != .SUCCESS {
-		return result
-	}
-	return .SUCCESS
 }
 
 required_extensions :: proc(allocator := context.allocator) -> []cstring {

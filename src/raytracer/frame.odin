@@ -4,7 +4,6 @@ import vk "vendor:vulkan"
 
 Frame :: struct {
 	command_buffer:            vk.CommandBuffer,
-	framebuffer:               Framebuffer,
 	image_index:               u32,
 	image_available_semaphore: vk.Semaphore,
 	render_finished_semaphore: vk.Semaphore,
@@ -27,9 +26,8 @@ frame_init :: proc(frame: ^Frame, device: Device, command_buffer: vk.CommandBuff
 	return fence_init(&frame.in_flight_fence, device)
 }
 
-frame_start :: proc(frame: ^Frame, framebuffer: Framebuffer, image_index: u32) {
+frame_start :: proc(frame: ^Frame, image_index: u32) {
 	frame.image_index = image_index
-	frame.framebuffer = framebuffer
 }
 
 frame_destroy :: proc(frame: Frame, device: Device) {

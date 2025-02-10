@@ -36,12 +36,35 @@ device_init :: proc(
 		}
 	}
 
+
+	query_vulkan13_features := vk.PhysicalDeviceVulkan13Features {
+		sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+	}
+
+	query_device_features := vk.PhysicalDeviceFeatures2 {
+		sType = .PHYSICAL_DEVICE_FEATURES_2,
+		pNext = &query_vulkan13_features,
+	}
+
+	vk.GetPhysicalDeviceFeatures2(physical_device, &query_device_features)
+
+	assert(
+		bool(query_vulkan13_features.dynamicRendering),
+		"Vulkan: GPU does not support dynamic rendering",
+	)
+
+	vk13_features := vk.PhysicalDeviceVulkan13Features {
+		sType            = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		dynamicRendering = true,
+	}
+
 	create_info := vk.DeviceCreateInfo {
 		sType                   = .DEVICE_CREATE_INFO,
 		queueCreateInfoCount    = u32(len(queue_create_infos)),
 		pQueueCreateInfos       = raw_data(queue_create_infos),
 		ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
 		enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
+		pNext                   = &vk13_features,
 	}
 
 	return vk.CreateDevice(physical_device, &create_info, nil, device)

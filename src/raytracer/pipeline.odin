@@ -11,8 +11,7 @@ Pipeline :: struct {
 pipeline_init :: proc(
 	pipeline: ^Pipeline,
 	device: Device,
-	swapchain: Swapchain,
-	render_pass: vk.RenderPass,
+	swapchain: ^Swapchain,
 	shaders: []Shader,
 ) -> vk.Result {
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
@@ -91,6 +90,12 @@ pipeline_init :: proc(
 			}
 		}
 
+		pipeline_rendering_info := vk.PipelineRenderingCreateInfo {
+			sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+			colorAttachmentCount    = 1,
+			pColorAttachmentFormats = &swapchain.format,
+		}
+
 		create_info := vk.GraphicsPipelineCreateInfo {
 			sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
 			stageCount          = u32(len(stages)),
@@ -103,8 +108,9 @@ pipeline_init :: proc(
 			pColorBlendState    = &color_blend_state,
 			pDynamicState       = &dynamic_state,
 			layout              = pipeline.layout,
-			renderPass          = render_pass,
 			subpass             = 0,
+			renderPass          = 0,
+			pNext               = &pipeline_rendering_info,
 		}
 
 		if result := vk.CreateGraphicsPipelines(device, 0, 1, &create_info, nil, &pipeline.handle);

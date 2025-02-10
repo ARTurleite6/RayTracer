@@ -54,22 +54,27 @@ command_buffer_start_recording :: proc(command_buffer: vk.CommandBuffer) -> vk.R
 
 command_buffer_start_rendering :: proc(
 	command_buffer: vk.CommandBuffer,
-	render_pass: vk.RenderPass,
-	framebuffer: Framebuffer,
+	image_view: vk.ImageView,
 	render_area: vk.Rect2D,
 ) {
-	render_info := vk.RenderPassBeginInfo {
-		sType           = .RENDER_PASS_BEGIN_INFO,
-		renderPass      = render_pass,
-		framebuffer     = framebuffer,
-		renderArea      = render_area,
-		clearValueCount = 1,
-		pClearValues    = raw_data(
-			[]vk.ClearValue{vk.ClearValue{color = vk.ClearColorValue{float32 = {0, 0, 0, 1}}}},
-		),
+	color_attachment := vk.RenderingAttachmentInfo {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = image_view,
+		imageLayout = .ATTACHMENT_OPTIMAL,
+		loadOp = .CLEAR,
+		storeOp = .STORE,
+		clearValue = vk.ClearValue{color = vk.ClearColorValue{float32 = {0, 0, 0, 1}}},
 	}
 
-	vk.CmdBeginRenderPass(command_buffer, &render_info, vk.SubpassContents.INLINE)
+	rendering_info := vk.RenderingInfo {
+		sType                = .RENDERING_INFO,
+		renderArea           = render_area,
+		layerCount           = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments    = &color_attachment,
+	}
+
+	vk.CmdBeginRendering(command_buffer, &rendering_info)
 }
 
 command_buffer_set_viewport :: proc(command_buffer: vk.CommandBuffer, viewport: vk.Viewport) {
@@ -117,7 +122,7 @@ command_buffer_submit :: proc(
 }
 
 command_buffer_stop_rendering :: proc(command_buffer: vk.CommandBuffer) {
-	vk.CmdEndRenderPass(command_buffer)
+	vk.CmdEndRendering(command_buffer)
 }
 
 @(require_results)

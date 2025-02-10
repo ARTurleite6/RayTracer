@@ -4,12 +4,11 @@ import "core:slice"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
-	handle:       vk.SwapchainKHR,
-	images:       []vk.Image,
-	image_views:  []vk.ImageView,
-	framebuffers: []Framebuffer,
-	format:       vk.Format,
-	extent:       vk.Extent2D,
+	handle:      vk.SwapchainKHR,
+	images:      []vk.Image,
+	image_views: []vk.ImageView,
+	format:      vk.Format,
+	extent:      vk.Extent2D,
 }
 
 Swapchain_Support_Details :: struct {
@@ -117,34 +116,7 @@ swapchain_init :: proc(
 	return .SUCCESS
 }
 
-swapchain_init_framebuffers :: proc(
-	swapchain: ^Swapchain,
-	device: Device,
-	render_pass: vk.RenderPass,
-	allocator := context.allocator,
-) -> vk.Result {
-	swapchain.framebuffers = make([]Framebuffer, len(swapchain.image_views), allocator)
-	for image, i in swapchain.image_views {
-		if result := framebuffer_init(
-			&swapchain.framebuffers[i],
-			device,
-			render_pass,
-			swapchain.extent,
-			image,
-		); result != .SUCCESS {
-			return result
-		}
-	}
-
-	return .SUCCESS
-}
-
 swapchain_destroy :: proc(swapchain: Swapchain, device: Device) {
-	for framebuffer in swapchain.framebuffers {
-		vk.DestroyFramebuffer(device, framebuffer, nil)
-	}
-	delete(swapchain.framebuffers)
-
 	for image_view in swapchain.image_views {
 		vk.DestroyImageView(device, image_view, nil)
 	}
