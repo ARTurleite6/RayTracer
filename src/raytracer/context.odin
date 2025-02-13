@@ -10,6 +10,9 @@ g_context: runtime.Context
 
 Context :: struct {
 	instance: Instance,
+	surface: vk.SurfaceKHR,
+	device: Device,
+	physical_device: Physical_Device_Info,
 	debugger: Debugger,
 }
 
@@ -19,7 +22,7 @@ Context_Error :: union #shared_nil {
 
 
 @(require_results)
-make_context :: proc() -> (ctx: Context, err: Context_Error) {
+make_context :: proc(window: Window) -> (ctx: Context, err: Context_Error) {
 	g_context = context
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
@@ -39,10 +42,15 @@ make_context :: proc() -> (ctx: Context, err: Context_Error) {
 	   ctx.debugger = make_debugger(ctx.instance) or_return
 	}
 
+	ctx.surface = window_make_surface(window, ctx.instance) or_return
+	ctx.physical_device = choose_physical_device(ctx.instance, ctx.surface) or_return
+	ctx.device = make_logical_device(ctx.physical_device) or_return
 	return
 }
 
 delete_context :: proc(ctx: Context) {
+    vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
+
     delete_debugger(ctx.debugger, ctx.instance)
     delete_instance(ctx.instance)
 }
