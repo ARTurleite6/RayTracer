@@ -15,7 +15,7 @@ Application :: struct {
 
 make_application :: proc(window_width, window_height: c.int, window_title: cstring) -> (app: Application, err: Error) {
     app.window = make_window(window_width, window_height, window_title) or_return
-    app.ctx = make_context() or_return
+    app.ctx = make_context(app.window) or_return
 
     return
 }
