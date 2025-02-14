@@ -3,9 +3,11 @@ package raytracer
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
-	handle: vk.SwapchainKHR,
-	format: vk.SurfaceFormatKHR,
-	extent: vk.Extent2D,
+	handle:      vk.SwapchainKHR,
+	images:      []vk.Image,
+	image_views: []vk.ImageView,
+	format:      vk.SurfaceFormatKHR,
+	extent:      vk.Extent2D,
 }
 
 Swapchain_Support_Details :: struct {
@@ -19,6 +21,7 @@ make_swapchain :: proc(
 	physical_device: vk.PhysicalDevice,
 	surface: vk.SurfaceKHR,
 	window: Window,
+	allocator := context.allocator,
 ) -> (
 	swapchain: Swapchain,
 	result: vk.Result,
@@ -56,13 +59,71 @@ make_swapchain :: proc(
 		oldSwapchain     = 0, // TODO: for resizing in here I need to set the old swapchain
 	}
 
+	vk.CreateSwapchainKHR(device.handle, &create_info, nil, &swapchain.handle) or_return
 
-	result = vk.CreateSwapchainKHR(device.handle, &create_info, nil, &swapchain.handle)
+	{ 	// get swapchain images
+		count: u32
+		vk.GetSwapchainImagesKHR(device.handle, swapchain.handle, &count, nil) or_return
+		swapchain.images = make([]vk.Image, count, allocator)
+		vk.GetSwapchainImagesKHR(
+			device.handle,
+			swapchain.handle,
+			&count,
+			raw_data(swapchain.images),
+		) or_return
+	}
+
+	swapchain.image_views = make_image_views(
+		device,
+		swapchain.images,
+		swapchain.format.format,
+		allocator,
+	) or_return
+
 	return
 }
 
 delete_swapchain :: proc(device: Device, swapchain: Swapchain) {
+	for img in swapchain.image_views {
+		vk.DestroyImageView(device.handle, img, nil)
+	}
+
 	vk.DestroySwapchainKHR(device.handle, swapchain.handle, nil)
+}
+
+@(private = "file")
+@(require_results)
+make_image_views :: proc(
+	device: Device,
+	images: []vk.Image,
+	format: vk.Format,
+	allocator := context.allocator,
+) -> (
+	image_views: []vk.ImageView,
+	result: vk.Result,
+) {
+	image_views = make([]vk.ImageView, len(images), allocator)
+
+	for img, i in images {
+		create_info := vk.ImageViewCreateInfo {
+			sType = .IMAGE_VIEW_CREATE_INFO,
+			image = img,
+			viewType = .D2,
+			format = format,
+			components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+			subresourceRange = {
+				aspectMask = {.COLOR},
+				baseMipLevel = 0,
+				levelCount = 1,
+				baseArrayLayer = 0,
+				layerCount = 1,
+			},
+		}
+
+		vk.CreateImageView(device.handle, &create_info, nil, &image_views[i]) or_return
+	}
+
+	return
 }
 
 @(private = "file")
