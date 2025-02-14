@@ -8,6 +8,13 @@ build_odin_commands = {
     'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -debug"
   }
 
+def build_shaders():
+    print("Building shaders...")
+    result = subprocess.run(["glslc", "shaders/simple.vert", "-o", "shaders/vert.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "shaders/simple.frag", "-o", "shaders/frag.spv"], capture_output=True, text=True)
+    print("Output:", result.stdout)
+    print("Error:", result.stderr)
+
 def main():
     parser = OptionParser()
     parser.add_option("-b", "--build-mode", dest="build_mode", default="release", help="Build in release or debug mode")
@@ -17,7 +24,10 @@ def main():
 
     (options, _) = parser.parse_args()
 
+    build_shaders()
+
     command = build_odin_commands[options.build_mode]
+    print("Building raytracer...")
     result = subprocess.run(command.split(), capture_output=True, text=True)
 
     print("Output:", result.stdout)

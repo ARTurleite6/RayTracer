@@ -9,21 +9,29 @@ _ :: slice
 g_context: runtime.Context
 
 Context :: struct {
+	device:          Device,
 	instance:        Instance,
 	surface:         vk.SurfaceKHR,
-	device:          Device,
 	swapchain:       Swapchain,
+	shaders:         []Shader_Module,
 	physical_device: Physical_Device_Info,
 	debugger:        Debugger,
 }
 
 Context_Error :: union #shared_nil {
+	Shader_Error,
 	vk.Result,
 }
 
 
 @(require_results)
-make_context :: proc(window: Window) -> (ctx: Context, err: Context_Error) {
+make_context :: proc(
+	window: Window,
+	allocator := context.allocator,
+) -> (
+	ctx: Context,
+	err: Context_Error,
+) {
 	g_context = context
 	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
 
@@ -51,10 +59,29 @@ make_context :: proc(window: Window) -> (ctx: Context, err: Context_Error) {
 		ctx.surface,
 		window,
 	) or_return
+
+	{ 	// create shaders
+		ctx.shaders = make([]Shader_Module, 2, allocator)
+
+		ctx.shaders[0] = make_vertex_shader_module(
+			ctx.device,
+			"shaders/frag.spv",
+			"main",
+		) or_return
+		ctx.shaders[1] = make_fragment_shader_module(
+			ctx.device,
+			"shaders/vert.spv",
+			"main",
+		) or_return
+	}
 	return
 }
 
 delete_context :: proc(ctx: Context) {
+	for shader in ctx.shaders {
+		delete_shader_module(ctx.device, shader)
+	}
+
 	delete_swapchain(ctx.device, ctx.swapchain)
 	delete_logical_device(ctx.device)
 	vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
