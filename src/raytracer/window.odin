@@ -51,3 +51,8 @@ window_make_surface :: proc(window: Window, instance: Instance) -> (surface: vk.
 
 	return
 }
+
+@(require_results)
+window_get_framebuffer_size :: proc(window: Window) -> (width, height: c.int) {
+        return glfw.GetFramebufferSize(window.handle)
+}

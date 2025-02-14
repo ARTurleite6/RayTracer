@@ -37,7 +37,9 @@ make_instance :: proc(
 		create_info.enabledLayerCount = 1
 	}
 
-	result = vk.CreateInstance(&create_info, nil, &instance)
+	vk.CreateInstance(&create_info, nil, &instance) or_return
+
+	vk.load_proc_addresses(instance)
 
 	return instance, result
 }
