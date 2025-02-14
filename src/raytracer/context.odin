@@ -9,11 +9,12 @@ _ :: slice
 g_context: runtime.Context
 
 Context :: struct {
-	instance: Instance,
-	surface: vk.SurfaceKHR,
-	device: Device,
+	instance:        Instance,
+	surface:         vk.SurfaceKHR,
+	device:          Device,
+	swapchain:       Swapchain,
 	physical_device: Physical_Device_Info,
-	debugger: Debugger,
+	debugger:        Debugger,
 }
 
 Context_Error :: union #shared_nil {
@@ -37,22 +38,29 @@ make_context :: proc(window: Window) -> (ctx: Context, err: Context_Error) {
 		debug_create_info,
 	) or_return
 
-	vk.load_proc_addresses(ctx.instance)
 	when ODIN_DEBUG {
-	   ctx.debugger = make_debugger(ctx.instance) or_return
+		ctx.debugger = make_debugger(ctx.instance) or_return
 	}
 
 	ctx.surface = window_make_surface(window, ctx.instance) or_return
 	ctx.physical_device = choose_physical_device(ctx.instance, ctx.surface) or_return
 	ctx.device = make_logical_device(ctx.physical_device) or_return
+	ctx.swapchain = make_swapchain(
+		ctx.device,
+		ctx.physical_device.handle,
+		ctx.surface,
+		window,
+	) or_return
 	return
 }
 
 delete_context :: proc(ctx: Context) {
-    vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
+	delete_swapchain(ctx.device, ctx.swapchain)
+	delete_logical_device(ctx.device)
+	vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
 
-    delete_debugger(ctx.debugger, ctx.instance)
-    delete_instance(ctx.instance)
+	delete_debugger(ctx.debugger, ctx.instance)
+	delete_instance(ctx.instance)
 }
 
 @(private = "file")

@@ -3,7 +3,10 @@ package raytracer
 import "core:container/small_array"
 import "core:log"
 import "core:slice"
+import "core:strings"
 import vk "vendor:vulkan"
+
+REQUIRED_EXTENSIONS :: []cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
 
 Physical_Device_Info :: struct {
 	handle:               vk.PhysicalDevice,
@@ -53,8 +56,6 @@ choose_physical_device :: proc(
 	}
 
 	assert(high_score > 0, "No suitable device was found")
-
-	log.infof("Vulkan: device %s selected", device.properties.deviceName)
 	return
 }
 
@@ -72,7 +73,8 @@ rate_device :: proc(
 	log.infof("Vulkan: rating device %s", result.properties.deviceName)
 
 	queue_family_indices, _ := get_queue_family_indices(device, surface)
-	if !is_device_suitable(device, queue_family_indices) do return {}
+	device_extensions := get_device_extensions(device, context.temp_allocator)
+	if !is_device_suitable(device, queue_family_indices, device_extensions, REQUIRED_EXTENSIONS) do return {}
 	result.queue_family_indices = queue_family_indices
 
 	switch result.properties.deviceType {
@@ -148,7 +150,7 @@ get_queue_family_indices :: proc(
 }
 
 @(require_results)
-queue_family_indices :: proc(q: Queue_Family_Indices) -> []u32 {
+queue_family_indices :: proc(q: Queue_Family_Indices, allocator := context.allocator) -> []u32 {
 	arr: small_array.Small_Array(2, u32)
 
 	if value, ok := q.graphics_family.?; ok {
@@ -159,7 +161,7 @@ queue_family_indices :: proc(q: Queue_Family_Indices) -> []u32 {
 		small_array.append(&arr, value)
 	}
 
-	return slice.unique(small_array.slice(&arr))
+	return slice.clone(slice.unique(small_array.slice(&arr)), allocator)
 }
 
 @(private = "file")
@@ -170,6 +172,75 @@ queue_family_indices_complete :: proc(q: Queue_Family_Indices) -> bool {
 
 @(private = "file")
 @(require_results)
-is_device_suitable :: proc(_device: vk.PhysicalDevice, q: Queue_Family_Indices) -> bool {
-	return queue_family_indices_complete(q)
+is_device_suitable :: proc(
+	device: vk.PhysicalDevice,
+	q: Queue_Family_Indices,
+	device_extensions: []vk.ExtensionProperties,
+	required_extensions: []cstring,
+) -> bool {
+	dynamic_state_feature := vk.PhysicalDeviceExtendedDynamicStateFeaturesEXT {
+		sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,
+	}
+	vulkan_features := vk.PhysicalDeviceVulkan13Features {
+		sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		pNext = &dynamic_state_feature,
+	}
+
+	features2 := vk.PhysicalDeviceFeatures2 {
+		sType = .PHYSICAL_DEVICE_FEATURES_2,
+		pNext = &vulkan_features,
+	}
+	vk.GetPhysicalDeviceFeatures2(device, &features2)
+
+	return(
+		queue_family_indices_complete(q) &&
+		vulkan_features.dynamicRendering &&
+		vulkan_features.synchronization2 &&
+		dynamic_state_feature.extendedDynamicState \
+	)
+}
+
+@(private = "file")
+@(require_results)
+validate_extensions :: proc(
+	device_extensions: []vk.ExtensionProperties,
+	required_extensions: []cstring,
+) -> bool {
+	for ext_name in required_extensions {
+		found: bool
+		for dev_ext in device_extensions {
+			dev_ext_name := dev_ext.extensionName
+			if strings.truncate_to_byte(string(dev_ext_name[:]), 0) ==
+			   strings.truncate_to_byte(string(ext_name), 0) {
+				found = true
+			}
+		}
+
+		if !found {
+			return false
+		}
+	}
+
+	return true
+}
+
+@(private = "file")
+@(require_results)
+get_device_extensions :: proc(
+	device: vk.PhysicalDevice,
+	allocator := context.allocator,
+) -> (
+	device_extensions: []vk.ExtensionProperties,
+) {
+	num_properties: u32
+	vk.EnumerateDeviceExtensionProperties(device, nil, &num_properties, nil)
+	device_extensions = make([]vk.ExtensionProperties, int(num_properties), allocator)
+	vk.EnumerateDeviceExtensionProperties(
+		device,
+		nil,
+		&num_properties,
+		raw_data(device_extensions),
+	)
+
+	return
 }
