@@ -16,6 +16,14 @@ Swapchain_Support_Details :: struct {
 	present_modes: []vk.PresentModeKHR,
 }
 
+Image_Acquisition :: struct {
+	index:         u32,
+	should_resize: bool,
+	image:         vk.Image,
+	image_view:    vk.ImageView,
+	extent:        vk.Extent2D,
+}
+
 make_swapchain :: proc(
 	device: Device,
 	physical_device: vk.PhysicalDevice,
@@ -79,6 +87,48 @@ make_swapchain :: proc(
 		swapchain.format.format,
 		allocator,
 	) or_return
+
+	return
+}
+
+@(require_results)
+swapchain_acquire_next_image :: proc(
+	swapchain: Swapchain,
+	device: Device,
+	semaphore: Semaphore,
+	timeout := max(u64),
+) -> (
+	acquisition: Image_Acquisition,
+	result: vk.Result,
+) {
+	acquire_result := vk.AcquireNextImageKHR(
+		device.handle,
+		swapchain.handle,
+		timeout,
+		semaphore,
+		0,
+		&acquisition.index,
+	)
+
+	acquisition.image = swapchain.images[acquisition.index]
+	acquisition.image_view = swapchain.image_views[acquisition.index]
+	acquisition.extent = swapchain.extent
+
+	#partial switch acquire_result {
+	case .SUCCESS:
+		return
+	case .SUBOPTIMAL_KHR:
+		acquisition.should_resize = true
+		return
+	case .ERROR_OUT_OF_DATE_KHR:
+		acquisition.index = 0
+		acquisition.should_resize = true
+		result = acquire_result
+		return
+	case:
+		result = acquire_result
+		return
+	}
 
 	return
 }
