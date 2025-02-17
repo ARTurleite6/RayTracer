@@ -74,7 +74,7 @@ make_context :: proc(
 }
 
 delete_context :: proc(ctx: Context) {
-	delete_pipeline(ctx.pipeline, ctx.device)
+    delete_pipeline(ctx.pipeline, ctx.device)
 	// for shader in ctx.shaders {
 	// 	delete_shader_module(ctx.device, shader)
 	// }
