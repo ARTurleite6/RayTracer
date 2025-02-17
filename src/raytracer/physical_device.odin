@@ -15,9 +15,13 @@ Physical_Device_Info :: struct {
 	properties:           vk.PhysicalDeviceProperties,
 }
 
+Queue_Family :: enum {
+	Present,
+	Graphics,
+}
+
 Queue_Family_Indices :: struct {
-	graphics_family: Maybe(u32),
-	present_family:  Maybe(u32),
+	families: [Queue_Family]Maybe(u32),
 }
 
 Rating_Device_Result :: struct {
@@ -136,13 +140,13 @@ get_queue_family_indices :: proc(
 	for q, i in queue_families_arr do if !queue_family_indices_complete(queue_families) {
 		u32_i := u32(i)
 		if .GRAPHICS in q.queueFlags {
-			queue_families.graphics_family = u32_i
+			queue_families.families[.Graphics] = u32_i
 		}
 
 		present_support: b32
 		vk.GetPhysicalDeviceSurfaceSupportKHR(device, u32_i, surface, &present_support) or_return
 		if present_support {
-			queue_families.present_family = u32_i
+			queue_families.families[.Present] = u32_i
 		}
 	}
 
@@ -153,12 +157,8 @@ get_queue_family_indices :: proc(
 queue_family_indices :: proc(q: Queue_Family_Indices, allocator := context.allocator) -> []u32 {
 	arr: small_array.Small_Array(2, u32)
 
-	if value, ok := q.graphics_family.?; ok {
-		small_array.append(&arr, value)
-	}
-
-	if value, ok := q.present_family.?; ok {
-		small_array.append(&arr, value)
+	for f in q.families {
+		small_array.append(&arr, f.?)
 	}
 
 	return slice.clone(slice.unique(small_array.slice(&arr)), allocator)
@@ -167,7 +167,9 @@ queue_family_indices :: proc(q: Queue_Family_Indices, allocator := context.alloc
 @(private = "file")
 @(require_results)
 queue_family_indices_complete :: proc(q: Queue_Family_Indices) -> bool {
-	return q.graphics_family != nil && q.present_family != nil
+	for f in q.families do if f == nil do return false
+
+	return true
 }
 
 @(private = "file")

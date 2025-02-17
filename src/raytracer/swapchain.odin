@@ -83,7 +83,7 @@ make_swapchain :: proc(
 	return
 }
 
-delete_swapchain :: proc(device: Device, swapchain: Swapchain) {
+delete_swapchain :: proc(swapchain: Swapchain, device: Device) {
 	for img in swapchain.image_views {
 		vk.DestroyImageView(device.handle, img, nil)
 	}

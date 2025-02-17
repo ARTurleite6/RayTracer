@@ -13,7 +13,8 @@ Context :: struct {
 	instance:        Instance,
 	surface:         vk.SurfaceKHR,
 	swapchain:       Swapchain,
-	shaders:         []Shader_Module,
+	pipeline:        Pipeline,
+	// shaders:         []Shader_Module,
 	physical_device: Physical_Device_Info,
 	debugger:        Debugger,
 }
@@ -60,29 +61,25 @@ make_context :: proc(
 		window,
 	) or_return
 
+	shaders: []Shader_Module
 	{ 	// create shaders
-		ctx.shaders = make([]Shader_Module, 2, allocator)
+		shaders = make([]Shader_Module, 2, allocator)
 
-		ctx.shaders[0] = make_vertex_shader_module(
-			ctx.device,
-			"shaders/frag.spv",
-			"main",
-		) or_return
-		ctx.shaders[1] = make_fragment_shader_module(
-			ctx.device,
-			"shaders/vert.spv",
-			"main",
-		) or_return
+		shaders[0] = make_vertex_shader_module(ctx.device, "shaders/vert.spv", "main") or_return
+		shaders[1] = make_fragment_shader_module(ctx.device, "shaders/frag.spv", "main") or_return
 	}
+
+	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
 	return
 }
 
 delete_context :: proc(ctx: Context) {
-	for shader in ctx.shaders {
-		delete_shader_module(ctx.device, shader)
-	}
+	delete_pipeline(ctx.pipeline, ctx.device)
+	// for shader in ctx.shaders {
+	// 	delete_shader_module(ctx.device, shader)
+	// }
 
-	delete_swapchain(ctx.device, ctx.swapchain)
+	delete_swapchain(ctx.swapchain, ctx.device)
 	delete_logical_device(ctx.device)
 	vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
 

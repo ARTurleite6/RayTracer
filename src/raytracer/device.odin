@@ -3,9 +3,10 @@ package raytracer
 import vk "vendor:vulkan"
 
 Device :: struct {
-	handle:         vk.Device,
-	graphics_queue: vk.Queue,
-	presents_queue: vk.Queue,
+	handle:               vk.Device,
+	graphics_queue:       vk.Queue,
+	presents_queue:       vk.Queue,
+	queue_family_indices: Queue_Family_Indices,
 }
 
 make_logical_device :: proc(
@@ -58,22 +59,28 @@ make_logical_device :: proc(
 
 	vk.CreateDevice(physical_device_info.handle, &create_info, nil, &device.handle) or_return
 
+	device.queue_family_indices = physical_device_info.queue_family_indices
+
 	vk.load_proc_addresses(device.handle)
 
 	vk.GetDeviceQueue(
 		device.handle,
-		physical_device_info.queue_family_indices.graphics_family.?,
+		physical_device_info.queue_family_indices.families[.Graphics].?,
 		0,
 		&device.graphics_queue,
 	)
 
 	vk.GetDeviceQueue(
 		device.handle,
-		physical_device_info.queue_family_indices.present_family.?,
+		physical_device_info.queue_family_indices.families[.Present].?,
 		0,
 		&device.presents_queue,
 	)
 	return
+}
+
+device_get_graphics_queue_index :: proc(device: Device) -> Maybe(u32) {
+    return device.queue_family_indices.families[.Graphics]
 }
 
 delete_logical_device :: proc(device: Device) {
