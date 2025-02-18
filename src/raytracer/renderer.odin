@@ -1,16 +1,14 @@
 package raytracer
 
 import "core:fmt"
-import "core:log"
 import vk "vendor:vulkan"
 _ :: fmt
 
 Renderer :: struct {
-	ctx:                 Context,
-	window:              ^Window,
-	frame_manager:       Frame_Manager,
-	current_frame:       ^Per_Frame,
-	framebuffer_resized: bool,
+	ctx:           Context,
+	window:        ^Window,
+	frame_manager: Frame_Manager,
+	current_frame: ^Per_Frame,
 }
 
 make_renderer :: proc(
@@ -105,7 +103,5 @@ renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 }
 
 renderer_handle_resize :: proc(renderer: ^Renderer, allocator := context.allocator) -> vk.Result {
-	log.debug("TRIGGERING RESIZE")
-	renderer.framebuffer_resized = false
 	return handle_resize(&renderer.ctx, renderer.window^, allocator)
 }

@@ -29,7 +29,7 @@ make_swapchain :: proc(
 	device: Device,
 	physical_device: vk.PhysicalDevice,
 	surface: vk.SurfaceKHR,
-	window: Window,
+	window_extent: vk.Extent2D,
 	allocator := context.allocator,
 ) -> (
 	swapchain: Swapchain,
@@ -44,7 +44,7 @@ make_swapchain :: proc(
 	capabilities := swapchain_support_info.capabilities
 
 	swapchain.format = choose_format(swapchain_support_info.formats)
-	swapchain.extent = choose_extent(capabilities, window)
+	swapchain.extent = choose_extent(capabilities, window_extent)
 
 	image_count := capabilities.minImageCount + 1
 	if capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount {
@@ -216,21 +216,21 @@ choose_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
 
 @(private = "file")
 @(require_results)
-choose_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, window: Window) -> vk.Extent2D {
+choose_extent :: proc(
+	capabilities: vk.SurfaceCapabilitiesKHR,
+	window_extent: vk.Extent2D,
+) -> vk.Extent2D {
 	if capabilities.currentExtent.width != max(u32) {
 		return capabilities.currentExtent
 	}
 
-	width, height := window_get_framebuffer_size(window)
+	width := window_extent.width
+	height := window_extent.height
 
 	return {
-		width = clamp(
-			u32(width),
-			capabilities.minImageExtent.width,
-			capabilities.maxImageExtent.width,
-		),
+		width = clamp(width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
 		height = clamp(
-			u32(height),
+			height,
 			capabilities.minImageExtent.height,
 			capabilities.maxImageExtent.height,
 		),

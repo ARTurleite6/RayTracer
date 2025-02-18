@@ -13,7 +13,9 @@ Window_Error :: enum {
 }
 
 Window :: struct {
-	handle:        glfw.WindowHandle,
+	handle:              glfw.WindowHandle,
+	framebuffer_resized: bool,
+	width, height:       c.int,
 }
 
 make_window :: proc(width, height: c.int, title: cstring) -> (window: Window, err: Window_Error) {
@@ -66,8 +68,8 @@ window_make_surface :: proc(
 }
 
 @(require_results)
-window_get_framebuffer_size :: proc(window: Window) -> (width, height: c.int) {
-	return glfw.GetFramebufferSize(window.handle)
+window_get_extent :: proc(window: Window) -> vk.Extent2D {
+	return {width = u32(window.width), height = u32(window.height)}
 }
 
 window_wait_events :: proc(window: Window) {
@@ -76,7 +78,9 @@ window_wait_events :: proc(window: Window) {
 
 framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
 	context = runtime.default_context()
-	renderer := cast(^Renderer)glfw.GetWindowUserPointer(window_handle)
+	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
 
-	renderer.framebuffer_resized = true
+	window.framebuffer_resized = true
+	window.width = width
+	window.height = height
 }

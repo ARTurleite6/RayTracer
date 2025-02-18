@@ -57,7 +57,7 @@ make_context :: proc(
 		ctx.device,
 		ctx.physical_device.handle,
 		ctx.surface,
-		window,
+		window_get_extent(window),
 	) or_return
 
 	shaders: []Shader_Module
@@ -72,6 +72,7 @@ make_context :: proc(
 	return
 }
 
+// TODO: make the recreation of the swapchain using the old_swapchain ptr so I can render and resize at the same time
 handle_resize :: proc(
 	ctx: ^Context,
 	window: Window,
@@ -79,9 +80,9 @@ handle_resize :: proc(
 ) -> (
 	result: vk.Result,
 ) {
-	width, height := window_get_framebuffer_size(window)
-	for width == 0 && height == 0 {
-		width, height = window_get_framebuffer_size(window)
+	window_extent := window_get_extent(window)
+	for window_extent.width == 0 && window_extent.height == 0 {
+		window_extent = window_get_extent(window)
 		window_wait_events(window)
 	}
 
@@ -92,7 +93,7 @@ handle_resize :: proc(
 		ctx.device,
 		ctx.physical_device.handle,
 		ctx.surface,
-		window,
+		window_extent,
 		allocator,
 	) or_return
 
