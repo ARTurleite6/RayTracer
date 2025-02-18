@@ -12,19 +12,26 @@ Frame_Manager :: struct {
 
 @(require_results)
 make_frame_manager :: proc(
-	device: Device,
+	ctx: Context,
 	allocator := context.allocator,
 ) -> (
 	frame_manager: Frame_Manager,
 	result: vk.Result,
 ) {
 	for &f, i in frame_manager.frames {
-		f = make_frame_data(device, i, allocator) or_return
+		f = make_frame_data(ctx.device, i, allocator) or_return
 	}
 
 	frame_manager.current_frame = 0
 
 	return
+}
+
+delete_frame_manager :: proc(ctx: ^Context) {
+	for frame in ctx.frame_manager.frames {
+		delete_frame_data(frame, ctx.device)
+	}
+	ctx.frame_manager.current_frame = 0
 }
 
 @(require_results)
@@ -33,17 +40,14 @@ frame_manager_get_frame :: proc(manager: ^Frame_Manager) -> ^Per_Frame {
 }
 
 @(require_results)
-frame_manager_acquire :: proc(
-	manager: ^Frame_Manager,
-	device: Device,
-	swapchain: Swapchain,
-) -> (
-	frame: ^Per_Frame,
-	result: vk.Result,
-) {
-	frame = frame_manager_get_frame(manager)
-	frame_wait(frame, device) or_return
-	image := swapchain_acquire_next_image(swapchain, device, frame.image_available) or_return
+frame_manager_acquire :: proc(ctx: ^Context) -> (result: vk.Result) {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+	frame_wait(frame, ctx.device) or_return
+	image := swapchain_acquire_next_image(
+		ctx.swapchain,
+		ctx.device,
+		frame.image_available,
+	) or_return
 	frame.image = {
 		index  = image.index,
 		handle = image.image,
@@ -53,7 +57,50 @@ frame_manager_acquire :: proc(
 	return
 }
 
-frame_manager_advance :: proc(manager: ^Frame_Manager) {
+@(require_results)
+frame_manager_frame_begin :: proc(ctx: ^Context) -> vk.Result {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+
+	return frame_begin(frame, ctx.device, ctx.swapchain)
+}
+
+// TODO: probably in the future remove this
+@(require_results)
+frame_manager_frame_get_command_buffer :: proc(ctx: ^Context) -> Command_Buffer {
+	return frame_manager_get_frame(&ctx.frame_manager).command_buffer
+}
+
+frame_manager_frame_begin_rendering :: proc(
+	ctx: ^Context,
+	extent: vk.Extent2D,
+	clear_color: vk.ClearValue,
+) {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+
+	frame_begin_rendering(frame, extent, clear_color)
+}
+
+frame_manager_frame_end_rendering :: proc(ctx: ^Context) {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+	frame_end_rendering(frame)
+}
+
+@(require_results)
+frame_manager_frame_submit :: proc(ctx: ^Context) -> vk.Result {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+
+	return frame_submit(frame, ctx.device, ctx.device.graphics_queue)
+}
+
+@(require_results)
+frame_manager_frame_present :: proc(ctx: ^Context) -> vk.Result {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+
+	return present_frame(frame, ctx.device.presents_queue, &ctx.swapchain)
+}
+
+frame_manager_advance :: proc(ctx: ^Context) {
+	manager := &ctx.frame_manager
 	manager.current_frame = (manager.current_frame + 1) % MAX_FRAMES_IN_FLIGHT
 }
 

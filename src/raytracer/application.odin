@@ -35,10 +35,12 @@ make_application :: proc(
 }
 
 delete_application :: proc(app: Application) {
+	delete_renderer(app.renderer)
+	free(app.renderer)
+
 	delete_window(app.window^)
 	free(app.window)
 
-	free(app.renderer)
 }
 
 application_run :: proc(app: ^Application, allocator := context.allocator) {
@@ -72,7 +74,7 @@ application_render :: proc(app: ^Application, allocator := context.allocator) {
 		return
 	}
 
-	renderer_draw(app.renderer^)
+	renderer_draw(app.renderer)
 
 	result = renderer_end_frame(app.renderer)
 

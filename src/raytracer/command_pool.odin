@@ -27,7 +27,7 @@ make_command_pool :: proc(
 	assert(graphics_index != nil, "Vulkan: graphics queue should not be nil")
 	create_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
-		flags            = {.TRANSIENT},
+		flags            = {},
 		queueFamilyIndex = graphics_index.?,
 	}
 
