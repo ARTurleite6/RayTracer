@@ -27,24 +27,22 @@ make_frame_manager :: proc(
 	return
 }
 
+@(require_results)
 frame_manager_get_frame :: proc(manager: ^Frame_Manager) -> ^Per_Frame {
 	return &manager.frames[manager.current_frame]
 }
 
-frame_manager_begin :: proc(
+@(require_results)
+frame_manager_acquire :: proc(
 	manager: ^Frame_Manager,
 	device: Device,
 	swapchain: Swapchain,
 ) -> (
 	frame: ^Per_Frame,
-	should_resize: bool,
 	result: vk.Result,
 ) {
 	frame = frame_manager_get_frame(manager)
-
 	frame_wait(frame, device) or_return
-	frame_reset(frame, device) or_return
-
 	image := swapchain_acquire_next_image(swapchain, device, frame.image_available) or_return
 	frame.image = {
 		index  = image.index,
@@ -52,9 +50,7 @@ frame_manager_begin :: proc(
 		view   = image.image_view,
 	}
 
-	frame_begin_commands(frame, device) or_return
-
-	return frame, should_resize, .SUCCESS
+	return
 }
 
 frame_manager_advance :: proc(manager: ^Frame_Manager) {
@@ -101,6 +97,19 @@ make_frame_data :: proc(
 
 	return
 }
+
+frame_begin :: proc(
+	frame: ^Per_Frame,
+	device: Device,
+	swapchain: Swapchain,
+) -> (
+	result: vk.Result,
+) {
+	frame_reset(frame, device) or_return
+	frame_begin_commands(frame, device) or_return
+	return
+}
+
 
 frame_wait :: proc(frame: ^Per_Frame, device: Device) -> (result: vk.Result) {
 	return fence_wait(&frame.in_flight_fence, device)

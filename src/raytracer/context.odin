@@ -24,7 +24,6 @@ Context_Error :: union #shared_nil {
 	vk.Result,
 }
 
-
 @(require_results)
 make_context :: proc(
 	window: Window,
@@ -73,8 +72,35 @@ make_context :: proc(
 	return
 }
 
+handle_resize :: proc(
+	ctx: ^Context,
+	window: Window,
+	allocator := context.allocator,
+) -> (
+	result: vk.Result,
+) {
+	width, height := window_get_framebuffer_size(window)
+	for width == 0 && height == 0 {
+		width, height = window_get_framebuffer_size(window)
+		window_wait_events(window)
+	}
+
+	vk.DeviceWaitIdle(ctx.device.handle)
+	delete_swapchain(ctx.swapchain, ctx.device)
+
+	ctx.swapchain = make_swapchain(
+		ctx.device,
+		ctx.physical_device.handle,
+		ctx.surface,
+		window,
+		allocator,
+	) or_return
+
+	return
+}
+
 delete_context :: proc(ctx: Context) {
-    delete_pipeline(ctx.pipeline, ctx.device)
+	delete_pipeline(ctx.pipeline, ctx.device)
 	// for shader in ctx.shaders {
 	// 	delete_shader_module(ctx.device, shader)
 	// }
