@@ -5,10 +5,8 @@ import vk "vendor:vulkan"
 _ :: fmt
 
 Renderer :: struct {
-	ctx:           Context,
-	window:        ^Window,
-	frame_manager: Frame_Manager,
-	current_frame: ^Per_Frame,
+	ctx:    Context,
+	window: ^Window,
 }
 
 make_renderer :: proc(
@@ -19,9 +17,12 @@ make_renderer :: proc(
 	result: Context_Error,
 ) {
 	renderer.ctx = make_context(window^, allocator) or_return
-	renderer.frame_manager = make_frame_manager(renderer.ctx.device, allocator) or_return
 	renderer.window = window
 	return
+}
+
+delete_renderer :: proc(renderer: ^Renderer) {
+	delete_context(&renderer.ctx)
 }
 
 @(require_results)
@@ -31,16 +32,12 @@ renderer_begin_frame :: proc(
 ) -> (
 	result: vk.Result,
 ) {
-	renderer.current_frame = frame_manager_acquire(
-		&renderer.frame_manager,
-		renderer.ctx.device,
-		renderer.ctx.swapchain,
-	) or_return
+	frame_manager_acquire(&renderer.ctx) or_return
 
-	frame_begin(renderer.current_frame, renderer.ctx.device, renderer.ctx.swapchain)
+	frame_manager_frame_begin(&renderer.ctx) or_return
 
-	frame_begin_rendering(
-		renderer.current_frame,
+	frame_manager_frame_begin_rendering(
+		&renderer.ctx,
 		renderer.ctx.swapchain.extent,
 		vk.ClearValue{color = {float32 = {0, 0, 0, 1}}},
 	)
@@ -48,10 +45,10 @@ renderer_begin_frame :: proc(
 	return
 }
 
-renderer_draw :: proc(renderer: Renderer) {
-	cmd := renderer.current_frame.command_buffer
+renderer_draw :: proc(renderer: ^Renderer) {
+	cmd_handle := frame_manager_frame_get_command_buffer(&renderer.ctx).handle
 
-	vk.CmdBindPipeline(cmd.handle, .GRAPHICS, renderer.ctx.pipeline.handle)
+	vk.CmdBindPipeline(cmd_handle, .GRAPHICS, renderer.ctx.pipeline.handle)
 
 	viewport := vk.Viewport {
 		x        = 0,
@@ -62,42 +59,35 @@ renderer_draw :: proc(renderer: Renderer) {
 		maxDepth = 1,
 	}
 
-	vk.CmdSetViewport(cmd.handle, 0, 1, &viewport)
+	vk.CmdSetViewport(cmd_handle, 0, 1, &viewport)
 
 	scissor := vk.Rect2D {
 		offset = {0, 0},
 		extent = renderer.ctx.swapchain.extent,
 	}
 
-	vk.CmdSetScissor(cmd.handle, 0, 1, &scissor)
+	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
 
-	vk.CmdDraw(cmd.handle, 3, 1, 0, 0)
+	vk.CmdDraw(cmd_handle, 3, 1, 0, 0)
 }
 
 @(require_results)
 renderer_end_frame :: proc(renderer: ^Renderer) -> (result: vk.Result) {
-	frame_end_rendering(renderer.current_frame)
+	frame_manager_frame_end_rendering(&renderer.ctx)
 
 	renderer_flush(renderer) or_return
-	frame_manager_advance(&renderer.frame_manager)
+	frame_manager_advance(&renderer.ctx)
 	return
 }
 
 @(require_results)
 renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
-	vk.EndCommandBuffer(renderer.current_frame.command_buffer.handle) or_return // TODO: probably clean this
+	cmd := frame_manager_frame_get_command_buffer(&renderer.ctx)
+	vk.EndCommandBuffer(cmd.handle) or_return // TODO: probably clean this
 
-	frame_submit(
-		renderer.current_frame,
-		renderer.ctx.device,
-		renderer.ctx.device.graphics_queue,
-	) or_return
+	frame_manager_frame_submit(&renderer.ctx) or_return
 
-	present_frame(
-		renderer.current_frame,
-		renderer.ctx.device.presents_queue,
-		&renderer.ctx.swapchain,
-	) or_return
+	frame_manager_frame_present(&renderer.ctx) or_return
 
 	return
 }

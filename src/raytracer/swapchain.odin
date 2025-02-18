@@ -30,6 +30,7 @@ make_swapchain :: proc(
 	physical_device: vk.PhysicalDevice,
 	surface: vk.SurfaceKHR,
 	window_extent: vk.Extent2D,
+	old_swapchain: Maybe(Swapchain) = nil,
 	allocator := context.allocator,
 ) -> (
 	swapchain: Swapchain,
@@ -65,7 +66,10 @@ make_swapchain :: proc(
 		compositeAlpha   = {.OPAQUE},
 		presentMode      = choose_present_mode(swapchain_support_info.present_modes),
 		clipped          = true,
-		oldSwapchain     = 0, // TODO: for resizing in here I need to set the old swapchain
+	}
+
+	if value, ok := old_swapchain.?; ok && value.handle != 0 {
+		create_info.oldSwapchain = value.handle
 	}
 
 	vk.CreateSwapchainKHR(device.handle, &create_info, nil, &swapchain.handle) or_return

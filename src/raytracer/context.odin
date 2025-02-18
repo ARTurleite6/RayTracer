@@ -16,6 +16,7 @@ Context :: struct {
 	pipeline:        Pipeline,
 	// shaders:         []Shader_Module,
 	physical_device: Physical_Device_Info,
+	frame_manager:   Frame_Manager,
 	debugger:        Debugger,
 }
 
@@ -69,6 +70,8 @@ make_context :: proc(
 	}
 
 	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
+
+	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
 	return
 }
 
@@ -87,20 +90,32 @@ handle_resize :: proc(
 	}
 
 	vk.DeviceWaitIdle(ctx.device.handle)
-	delete_swapchain(ctx.swapchain, ctx.device)
+
+	// old_swapchain := ctx.swapchain
+	old_swapchain := ctx.swapchain
+	defer if old_swapchain.handle != 0 {
+		delete_swapchain(old_swapchain, ctx.device)
+
+		delete_frame_manager(ctx)
+		ctx.frame_manager, result = make_frame_manager(ctx^)
+	}
 
 	ctx.swapchain = make_swapchain(
 		ctx.device,
 		ctx.physical_device.handle,
 		ctx.surface,
 		window_extent,
-		allocator,
+		old_swapchain,
+		allocator = allocator,
 	) or_return
 
 	return
 }
 
-delete_context :: proc(ctx: Context) {
+delete_context :: proc(ctx: ^Context) {
+	vk.DeviceWaitIdle(ctx.device.handle)
+
+	delete_frame_manager(ctx)
 	delete_pipeline(ctx.pipeline, ctx.device)
 	// for shader in ctx.shaders {
 	// 	delete_shader_module(ctx.device, shader)
