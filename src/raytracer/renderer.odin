@@ -1,41 +1,46 @@
 package raytracer
 
 import "core:fmt"
+import "core:log"
 import vk "vendor:vulkan"
 _ :: fmt
 
 Renderer :: struct {
-	ctx:           ^Context,
-	frame_manager: Frame_Manager,
-	current_frame: ^Per_Frame,
-	cmd:           Command_Buffer, // TODO: review this
+	ctx:                 Context,
+	window:              ^Window,
+	frame_manager:       Frame_Manager,
+	current_frame:       ^Per_Frame,
+	framebuffer_resized: bool,
 }
 
 make_renderer :: proc(
-	ctx: ^Context,
+	window: ^Window,
 	allocator := context.allocator,
 ) -> (
 	renderer: Renderer,
-	result: vk.Result,
+	result: Context_Error,
 ) {
-	renderer.ctx = ctx
-	renderer.frame_manager = make_frame_manager(ctx.device, allocator) or_return
+	renderer.ctx = make_context(window^, allocator) or_return
+	renderer.frame_manager = make_frame_manager(renderer.ctx.device, allocator) or_return
+	renderer.window = window
 	return
 }
 
 @(require_results)
-renderer_begin_frame :: proc(renderer: ^Renderer) -> (result: vk.Result) {
-	should_resize: bool
-	renderer.current_frame, should_resize = frame_manager_begin(
+renderer_begin_frame :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	result: vk.Result,
+) {
+	renderer.current_frame = frame_manager_acquire(
 		&renderer.frame_manager,
 		renderer.ctx.device,
 		renderer.ctx.swapchain,
 	) or_return
 
-	if should_resize {
-	}
+	frame_begin(renderer.current_frame, renderer.ctx.device, renderer.ctx.swapchain)
 
-	renderer.cmd = renderer.current_frame.command_buffer
 	frame_begin_rendering(
 		renderer.current_frame,
 		renderer.ctx.swapchain.extent,
@@ -82,7 +87,7 @@ renderer_end_frame :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 
 @(require_results)
 renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
-	vk.EndCommandBuffer(renderer.cmd.handle) or_return // TODO: probably clean this
+	vk.EndCommandBuffer(renderer.current_frame.command_buffer.handle) or_return // TODO: probably clean this
 
 	frame_submit(
 		renderer.current_frame,
@@ -97,4 +102,10 @@ renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 	) or_return
 
 	return
+}
+
+renderer_handle_resize :: proc(renderer: ^Renderer, allocator := context.allocator) -> vk.Result {
+	log.debug("TRIGGERING RESIZE")
+	renderer.framebuffer_resized = false
+	return handle_resize(&renderer.ctx, renderer.window^, allocator)
 }

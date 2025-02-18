@@ -1,6 +1,8 @@
 package raytracer
 
+import "core:fmt"
 import vk "vendor:vulkan"
+_ :: fmt
 
 Swapchain :: struct {
 	handle:      vk.SwapchainKHR,
@@ -17,11 +19,10 @@ Swapchain_Support_Details :: struct {
 }
 
 Image_Acquisition :: struct {
-	index:         u32,
-	should_resize: bool,
-	image:         vk.Image,
-	image_view:    vk.ImageView,
-	extent:        vk.Extent2D,
+	index:      u32,
+	image:      vk.Image,
+	image_view: vk.ImageView,
+	extent:     vk.Extent2D,
 }
 
 make_swapchain :: proc(
@@ -101,7 +102,7 @@ swapchain_acquire_next_image :: proc(
 	acquisition: Image_Acquisition,
 	result: vk.Result,
 ) {
-	acquire_result := vk.AcquireNextImageKHR(
+	result = vk.AcquireNextImageKHR(
 		device.handle,
 		swapchain.handle,
 		timeout,
@@ -113,22 +114,6 @@ swapchain_acquire_next_image :: proc(
 	acquisition.image = swapchain.images[acquisition.index]
 	acquisition.image_view = swapchain.image_views[acquisition.index]
 	acquisition.extent = swapchain.extent
-
-	#partial switch acquire_result {
-	case .SUCCESS:
-		return
-	case .SUBOPTIMAL_KHR:
-		acquisition.should_resize = true
-		return
-	case .ERROR_OUT_OF_DATE_KHR:
-		acquisition.index = 0
-		acquisition.should_resize = true
-		result = acquire_result
-		return
-	case:
-		result = acquire_result
-		return
-	}
 
 	return
 }
@@ -232,7 +217,7 @@ choose_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
 @(private = "file")
 @(require_results)
 choose_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR, window: Window) -> vk.Extent2D {
-	if capabilities.currentExtent.height != max(u32) {
+	if capabilities.currentExtent.width != max(u32) {
 		return capabilities.currentExtent
 	}
 
