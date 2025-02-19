@@ -54,6 +54,11 @@ window_update :: proc(window: Window) {
 	glfw.SwapBuffers(window.handle)
 }
 
+window_aspect_ratio :: proc(window: Window) -> f32 {
+	extent := window_get_extent(window)
+	return f32(extent.width) / f32(extent.height)
+}
+
 @(require_results)
 window_make_surface :: proc(
 	window: Window,

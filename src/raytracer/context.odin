@@ -1,10 +1,12 @@
 package raytracer
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+_ :: fmt
 _ :: slice
 
 g_context: runtime.Context
@@ -19,6 +21,7 @@ Context :: struct {
 	physical_device: Physical_Device_Info,
 	frame_manager:   Frame_Manager,
 	debugger:        Debugger,
+	descriptor_pool: vk.DescriptorPool,
 }
 
 Context_Error :: union #shared_nil {
@@ -70,9 +73,25 @@ make_context :: proc(
 		shaders[1] = make_fragment_shader_module(ctx.device, "shaders/frag.spv", "main") or_return
 	}
 
+	{ 	// Cteate descriptor pool be
+		pool_sizes := []vk.DescriptorPoolSize {
+			{type = .UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
+		}
+
+		pool_info := vk.DescriptorPoolCreateInfo {
+			sType         = .DESCRIPTOR_POOL_CREATE_INFO,
+			maxSets       = MAX_FRAMES_IN_FLIGHT,
+			poolSizeCount = u32(len(pool_sizes)),
+			pPoolSizes    = raw_data(pool_sizes),
+		}
+
+		vk.CreateDescriptorPool(ctx.device.handle, &pool_info, nil, &ctx.descriptor_pool) or_return
+	}
+
 	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
 
 	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
+
 	return
 }
 
@@ -136,6 +155,7 @@ delete_context :: proc(ctx: ^Context) {
 	vk.DeviceWaitIdle(ctx.device.handle)
 
 	delete_frame_manager(ctx)
+	vk.DestroyDescriptorPool(ctx.device.handle, ctx.descriptor_pool, nil)
 	delete_pipeline(ctx.pipeline, ctx.device)
 	// for shader in ctx.shaders {
 	// 	delete_shader_module(ctx.device, shader)

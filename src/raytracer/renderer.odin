@@ -5,9 +5,11 @@ import vk "vendor:vulkan"
 _ :: fmt
 
 Renderer :: struct {
-	ctx:    Context,
-	window: ^Window,
-	buffer: Buffer, // TODO: Try this out only
+	ctx:     Context,
+	window:  ^Window,
+	buffer:  Buffer, // TODO: Try this out only
+	uniform: Buffer, // TODO: Try this out only
+	camera:  Camera,
 }
 
 VERTICES := []Vertex {
@@ -16,22 +18,30 @@ VERTICES := []Vertex {
 	{{-0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}},
 }
 
-make_renderer :: proc(
+renderer_init :: proc(
+	renderer: ^Renderer,
 	window: ^Window,
 	allocator := context.allocator,
 ) -> (
-	renderer: Renderer,
 	result: Context_Error,
 ) {
 	renderer.ctx = make_context(window^, allocator) or_return
 	renderer.window = window
-	renderer.buffer = make_vertex_buffer_with_data(renderer.ctx, VERTICES) or_return
+	renderer.buffer = make_buffer_with_data(renderer.ctx, VERTICES, .Vertex) or_return
+	renderer.uniform = make_buffer(
+		renderer.ctx,
+		size_of(Uniform_Buffer_Object),
+		.Uniform,
+	) or_return
+
+	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
 	return
 }
 
 delete_renderer :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.handle)
 	delete_buffer(renderer.ctx, renderer.buffer)
+	delete_buffer(renderer.ctx, renderer.uniform)
 	delete_context(&renderer.ctx)
 }
 
@@ -56,9 +66,23 @@ renderer_begin_frame :: proc(
 }
 
 renderer_draw :: proc(renderer: ^Renderer) {
-	cmd_handle := frame_manager_frame_get_command_buffer(&renderer.ctx).handle
+	frame := frame_manager_get_frame(&renderer.ctx.frame_manager) // TODO: Improve this
+	cmd_handle := frame.command_buffer.handle
+
+	frame_manager_update_uniform(&renderer.ctx, camera_get_view_proj(renderer.camera))
 
 	vk.CmdBindPipeline(cmd_handle, .GRAPHICS, renderer.ctx.pipeline.handle)
+
+	vk.CmdBindDescriptorSets(
+		cmd_handle,
+		.GRAPHICS,
+		renderer.ctx.pipeline.layout,
+		0,
+		1,
+		&frame.descriptor_set,
+		0,
+		nil,
+	)
 
 	viewport := vk.Viewport {
 		x        = 0,
@@ -110,6 +134,15 @@ renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 	return
 }
 
-renderer_handle_resize :: proc(renderer: ^Renderer, allocator := context.allocator) -> vk.Result {
-	return handle_resize(&renderer.ctx, renderer.window^, allocator)
+renderer_handle_resize :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	result: vk.Result,
+) {
+	handle_resize(&renderer.ctx, renderer.window^, allocator) or_return
+
+	renderer.camera.aspect = window_aspect_ratio(renderer.window^)
+	camera_update_matrices(&renderer.camera)
+	return
 }
