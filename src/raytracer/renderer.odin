@@ -7,6 +7,13 @@ _ :: fmt
 Renderer :: struct {
 	ctx:    Context,
 	window: ^Window,
+	buffer: Buffer, // TODO: Try this out only
+}
+
+VERTICES := []Vertex {
+	{{0.0, -0.5, 0.0}, {1.0, 0.0, 0.0}},
+	{{0.5, 0.5, 0.0}, {0.0, 1.0, 0.0}},
+	{{-0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}},
 }
 
 make_renderer :: proc(
@@ -18,10 +25,13 @@ make_renderer :: proc(
 ) {
 	renderer.ctx = make_context(window^, allocator) or_return
 	renderer.window = window
+	renderer.buffer = make_vertex_buffer_with_data(renderer.ctx, VERTICES) or_return
 	return
 }
 
 delete_renderer :: proc(renderer: ^Renderer) {
+	vk.DeviceWaitIdle(renderer.ctx.device.handle)
+	delete_buffer(renderer.ctx, renderer.buffer)
 	delete_context(&renderer.ctx)
 }
 
@@ -68,7 +78,15 @@ renderer_draw :: proc(renderer: ^Renderer) {
 
 	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
 
-	vk.CmdDraw(cmd_handle, 3, 1, 0, 0)
+	vk.CmdBindVertexBuffers(
+		cmd_handle,
+		0,
+		1,
+		raw_data([]vk.Buffer{renderer.buffer.handle}),
+		raw_data([]vk.DeviceSize{0}),
+	)
+
+	vk.CmdDraw(cmd_handle, u32(len(VERTICES)), 1, 0, 0)
 }
 
 @(require_results)

@@ -1,6 +1,7 @@
 package raytracer
 
 import "base:runtime"
+import "core:log"
 import "core:slice"
 import "vendor:glfw"
 import vk "vendor:vulkan"
@@ -73,6 +74,25 @@ make_context :: proc(
 
 	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
 	return
+}
+
+find_memory_type :: proc(
+	ctx: Context,
+	type_filter: u32,
+	properties: vk.MemoryPropertyFlags,
+) -> u32 {
+	mem_properties: vk.PhysicalDeviceMemoryProperties
+	vk.GetPhysicalDeviceMemoryProperties(ctx.physical_device.handle, &mem_properties)
+
+	for i in 0 ..< mem_properties.memoryTypeCount {
+		if type_filter & (1 << i) != 0 &&
+		   mem_properties.memoryTypes[i].propertyFlags & properties == properties {
+			return i
+		}
+	}
+
+	log.fatalf("No memory type found with type %d and properties %v", type_filter, properties)
+	unreachable()
 }
 
 // TODO: make the recreation of the swapchain using the old_swapchain ptr so I can render and resize at the same time

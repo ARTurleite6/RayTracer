@@ -23,37 +23,12 @@ make_graphics_pipeline :: proc(
 		pDynamicStates    = raw_data(dynamic_states),
 	}
 
-	vertex_binding_info := vk.VertexInputBindingDescription {
-		binding   = 0,
-		stride    = size_of(Vertex),
-		inputRate = .VERTEX,
-	}
-
-	pos_vertex_attribute_info := vk.VertexInputAttributeDescription {
-		binding  = 0,
-		location = 0,
-		format   = .R32G32B32_SFLOAT,
-		offset   = u32(offset_of(Vertex, position)),
-	}
-
-	color_vertex_attribute_info := vk.VertexInputAttributeDescription {
-		binding  = 0,
-		location = 1,
-		format   = .R32G32B32_SFLOAT,
-		offset   = u32(offset_of(Vertex, color)),
-	}
-
 	vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
 		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		vertexBindingDescriptionCount   = 1,
-		pVertexBindingDescriptions      = &vertex_binding_info,
-		vertexAttributeDescriptionCount = 2,
-		pVertexAttributeDescriptions    = raw_data(
-			[]vk.VertexInputAttributeDescription {
-				pos_vertex_attribute_info,
-				color_vertex_attribute_info,
-			},
-		),
+		pVertexBindingDescriptions      = &VERTEX_INPUT_BINDING_DESCRIPTION,
+		vertexAttributeDescriptionCount = len(VERTEX_INPUT_ATTRIBUTE_DESCRIPTION),
+		pVertexAttributeDescriptions    = raw_data(VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:]),
 	}
 
 	input_assembly_info := vk.PipelineInputAssemblyStateCreateInfo {
