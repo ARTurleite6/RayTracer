@@ -19,7 +19,7 @@ make_frame_manager :: proc(
 	result: vk.Result,
 ) {
 	for &f, i in frame_manager.frames {
-		f = make_frame_data(ctx.device, i, allocator) or_return
+		f = make_frame_data(ctx, i, allocator) or_return
 	}
 
 	frame_manager.current_frame = 0
@@ -28,8 +28,8 @@ make_frame_manager :: proc(
 }
 
 delete_frame_manager :: proc(ctx: ^Context) {
-	for frame in ctx.frame_manager.frames {
-		delete_frame_data(frame, ctx.device)
+	for &frame in ctx.frame_manager.frames {
+		delete_frame_data(ctx^, &frame)
 	}
 	ctx.frame_manager.current_frame = 0
 }
@@ -104,6 +104,16 @@ frame_manager_advance :: proc(ctx: ^Context) {
 	manager.current_frame = (manager.current_frame + 1) % MAX_FRAMES_IN_FLIGHT
 }
 
+// TODO: Improve this
+frame_manager_update_uniform :: proc(ctx: ^Context, view_proj: Mat4) {
+	frame := frame_manager_get_frame(&ctx.frame_manager)
+
+	ubo := Uniform_Buffer_Object {
+		view_proj = view_proj,
+	}
+	buffer_upload_data(ctx^, &frame.uniform_buffer, []Uniform_Buffer_Object{ubo})
+}
+
 Per_Frame :: struct {
 	command_pool:    Command_Pool,
 	command_buffer:  Command_Buffer,
@@ -115,32 +125,64 @@ Per_Frame :: struct {
 	in_flight_fence: Fence,
 	image_available: Semaphore,
 	render_finished: Semaphore,
+	uniform_buffer:  Buffer,
+	descriptor_set:  vk.DescriptorSet,
 }
 
+// TODO: handle this function, only need to create new descriptor sets if the its not from resize(check if this is actually true)
 make_frame_data :: proc(
-	device: Device,
+	ctx: Context,
 	frame_index: int,
 	allocator := context.allocator,
 ) -> (
 	frame: Per_Frame,
 	result: vk.Result,
 ) {
+	frame.uniform_buffer = make_buffer(ctx, size_of(Uniform_Buffer_Object), .Uniform) or_return
+
+	descriptor_layout := ctx.pipeline.descriptor_set_layout
+	alloc_info := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = ctx.descriptor_pool,
+		descriptorSetCount = 1,
+		pSetLayouts        = &descriptor_layout,
+	}
+
+	vk.AllocateDescriptorSets(ctx.device.handle, &alloc_info, &frame.descriptor_set) or_return
+
+	buffer_info := vk.DescriptorBufferInfo {
+		buffer = frame.uniform_buffer.handle,
+		offset = 0,
+		range  = size_of(Uniform_Buffer_Object),
+	}
+
+	write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = frame.descriptor_set,
+		dstBinding      = 0,
+		descriptorCount = 1,
+		descriptorType  = .UNIFORM_BUFFER,
+		pBufferInfo     = &buffer_info,
+	}
+
+	vk.UpdateDescriptorSets(ctx.device.handle, 1, &write, 0, nil)
+
 	frame.command_pool = make_command_pool(
-		device,
+		ctx.device,
 		fmt.tprintf("Frame Command Pool %d", frame_index),
 		allocator,
 	) or_return
 
 	frame.command_buffer = command_pool_allocate_primary_buffer(
-		device,
+		ctx.device,
 		&frame.command_pool,
 		fmt.tprintf("Frame Command Buffer %d", frame_index),
 		allocator,
 	) or_return
 
-	frame.in_flight_fence = make_fence(device, signaled = true) or_return
-	frame.image_available = make_semaphore(device) or_return
-	frame.render_finished = make_semaphore(device) or_return
+	frame.in_flight_fence = make_fence(ctx.device, signaled = true) or_return
+	frame.image_available = make_semaphore(ctx.device) or_return
+	frame.render_finished = make_semaphore(ctx.device) or_return
 
 	return
 }
@@ -157,7 +199,6 @@ frame_begin :: proc(
 	return
 }
 
-
 frame_wait :: proc(frame: ^Per_Frame, device: Device) -> (result: vk.Result) {
 	return fence_wait(&frame.in_flight_fence, device)
 }
@@ -172,17 +213,16 @@ frame_begin_commands :: proc(frame: ^Per_Frame, device: Device) -> (result: vk.R
 	return command_buffer_begin(frame.command_buffer)
 }
 
-delete_frame_data :: proc(per_frame: Per_Frame, device: Device) {
-	delete_command_pool(per_frame.command_pool, device)
-	delete_fence(per_frame.in_flight_fence, device)
-	delete_semaphore(per_frame.image_available, device)
-	delete_semaphore(per_frame.render_finished, device)
+delete_frame_data :: proc(ctx: Context, per_frame: ^Per_Frame) {
+	vk.FreeDescriptorSets(ctx.device.handle, ctx.descriptor_pool, 1, &per_frame.descriptor_set)
+	delete_buffer(ctx, per_frame.uniform_buffer)
+	delete_command_pool(per_frame.command_pool, ctx.device)
+	delete_fence(per_frame.in_flight_fence, ctx.device)
+	delete_semaphore(per_frame.image_available, ctx.device)
+	delete_semaphore(per_frame.render_finished, ctx.device)
 }
 
 frame_begin_rendering :: proc(frame: ^Per_Frame, extent: vk.Extent2D, clear_color: vk.ClearValue) {
-	// image_transition(frame, {
-	//     image = sw
-	// })
 	image_transition(
 		frame.command_buffer,
 		{

@@ -4,8 +4,9 @@ import "core:strings"
 import vk "vendor:vulkan"
 
 Pipeline :: struct {
-	handle: vk.Pipeline,
-	layout: vk.PipelineLayout,
+	handle:                vk.Pipeline,
+	layout:                vk.PipelineLayout,
+	descriptor_set_layout: vk.DescriptorSetLayout,
 }
 
 make_graphics_pipeline :: proc(
@@ -16,6 +17,7 @@ make_graphics_pipeline :: proc(
 	pipeline: Pipeline,
 	result: vk.Result,
 ) {
+
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 	dynamic_state := vk.PipelineDynamicStateCreateInfo {
 		sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -70,9 +72,34 @@ make_graphics_pipeline :: proc(
 		pAttachments    = &color_blend_attachment,
 	}
 
+	{ 	//Uniforms setup
+		binding := vk.DescriptorSetLayoutBinding {
+			binding         = 0,
+			descriptorType  = .UNIFORM_BUFFER,
+			descriptorCount = 1,
+			stageFlags      = {.VERTEX},
+		}
+
+		layout_info := vk.DescriptorSetLayoutCreateInfo {
+			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			bindingCount = 1,
+			pBindings    = &binding,
+		}
+
+		vk.CreateDescriptorSetLayout(
+			device.handle,
+			&layout_info,
+			nil,
+			&pipeline.descriptor_set_layout,
+		) or_return
+	}
+
 	{ 	// create pipeline layout
+
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType = .PIPELINE_LAYOUT_CREATE_INFO,
+			sType          = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount = 1,
+			pSetLayouts    = &pipeline.descriptor_set_layout,
 		}
 
 		vk.CreatePipelineLayout(device.handle, &create_info, nil, &pipeline.layout) or_return

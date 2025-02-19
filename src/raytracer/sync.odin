@@ -1,6 +1,7 @@
 package raytracer
 
 import vk "vendor:vulkan"
+import "core:fmt"
 
 Fence :: vk.Fence
 
@@ -14,6 +15,7 @@ make_fence :: proc(device: Device, signaled := false) -> (fence: Fence, result: 
 
 	if signaled do create_info.flags = {.SIGNALED}
 
+	fmt.println("OLA")
 	vk.CreateFence(device.handle, &create_info, nil, &fence) or_return
 	return
 }
