@@ -38,7 +38,7 @@ make_application :: proc(
 }
 
 delete_application :: proc(app: Application) {
-	delete_renderer(app.renderer)
+	renderer_destroy(app.renderer)
 	free(app.renderer)
 
 	delete_window(app.window^)
@@ -69,13 +69,7 @@ application_update :: proc(app: ^Application, allocator := context.allocator) {
 application_render :: proc(app: ^Application, allocator := context.allocator) {
 	result: vk.Result
 
-	result = renderer_begin_frame(app.renderer)
-	if result == .ERROR_OUT_OF_DATE_KHR {
-		app.should_resize = true
-		return
-	} else if result != .SUCCESS {
-		return
-	}
+	if !renderer_begin_frame(app.renderer) do return
 
 	renderer_draw(app.renderer)
 

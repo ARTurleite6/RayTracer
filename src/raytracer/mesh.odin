@@ -1,9 +1,10 @@
 package raytracer
 
+import vma "external:odin-vma"
 import vk "vendor:vulkan"
 
-Position :: [3]f32
-Color :: [3]f32
+Position :: Vec3
+Color :: Vec3
 
 Vertex :: struct {
 	position: Position,
@@ -29,4 +30,13 @@ VERTEX_INPUT_ATTRIBUTE_DESCRIPTION := [?]vk.VertexInputAttributeDescription {
 		format = .R32G32B32_SFLOAT,
 		offset = u32(offset_of(Vertex, color)),
 	},
+}
+
+Mesh :: struct {
+	name:          string,
+	transform:     Mat4,
+	vertices:      []Vertex,
+	vertex_buffer: Buffer,
+	index_buffer:  Buffer,
+	allocator:     vma.Allocator,
 }

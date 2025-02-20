@@ -12,18 +12,17 @@ _ :: fmt
 _ :: slice
 
 Context :: struct {
-	device:          ^vkb.Device,
-	instance:        ^vkb.Instance,
-	surface:         vk.SurfaceKHR,
-	swapchain:       Swapchain,
-	pipeline:        Pipeline,
-	graphics_queue:  vk.Queue,
-	present_queue:   vk.Queue,
-	// shaders:         []Shader_Module,
-	physical_device: ^vkb.Physical_Device,
-	frame_manager:   Frame_Manager,
-	vma_functions:   vma.Vulkan_Functions,
-	allocator:       vma.Allocator,
+	device:                ^vkb.Device,
+	instance:              ^vkb.Instance,
+	surface:               vk.SurfaceKHR,
+	swapchain:             Swapchain,
+	pipeline:              Pipeline,
+	graphics_queue:        vk.Queue,
+	present_queue:         vk.Queue,
+	physical_device:       ^vkb.Physical_Device,
+	frame_manager:         Frame_Manager,
+	allocator:             vma.Allocator,
+	transfer_command_pool: Command_Pool,
 }
 
 Swapchain :: struct {
@@ -32,8 +31,7 @@ Swapchain :: struct {
 	image_views:     []vk.ImageView,
 }
 
-@(require_results)
-make_context :: proc(window: Window, allocator := context.allocator) -> (ctx: Context, ok: bool) {
+context_init :: proc(ctx: ^Context, window: Window, allocator := context.allocator) -> (ok: bool) {
 	{ 	// Create instance
 		builder := vkb.init_instance_builder() or_return
 		defer vkb.destroy_instance_builder(&builder)
@@ -69,7 +67,7 @@ make_context :: proc(window: Window, allocator := context.allocator) -> (ctx: Co
 		ctx.device = vkb.build_device(&builder, allocator) or_return
 	}
 
-	ctx.swapchain = make_swapchain(&ctx, window) or_return
+	ctx.swapchain = make_swapchain(ctx, window) or_return
 
 	{ 	// get queues
 		ctx.graphics_queue = vkb.device_get_queue(ctx.device, .Graphics) or_return
@@ -85,17 +83,17 @@ make_context :: proc(window: Window, allocator := context.allocator) -> (ctx: Co
 
 	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
 
-	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
+	ctx.frame_manager = make_frame_manager(ctx^, allocator) or_return
 
 	{
-		ctx.vma_functions = vma.create_vulkan_functions()
+		vma_functions := vma.create_vulkan_functions()
 		// create allocator
 		create_info := vma.Allocator_Create_Info {
-			vulkan_api_version = vk.API_VERSION_1_3,
+			vulkan_api_version = vkb.convert_vulkan_to_vma_version(ctx.instance.api_version),
 			physical_device    = ctx.physical_device.ptr,
 			device             = ctx.device.ptr,
 			instance           = ctx.instance.ptr,
-			vulkan_functions   = &ctx.vma_functions,
+			vulkan_functions   = &vma_functions,
 		}
 
 		vk_must(
@@ -104,7 +102,13 @@ make_context :: proc(window: Window, allocator := context.allocator) -> (ctx: Co
 		)
 	}
 
-	return ctx, true
+	ctx.transfer_command_pool = make_command_pool(
+		ctx.device,
+		"Transfer Command Pool",
+		{.TRANSIENT},
+	) or_return
+
+	return true
 }
 
 @(require_results)
@@ -125,6 +129,7 @@ make_swapchain :: proc(
 	vkb.swapchain_builder_set_desired_extent(&builder, extent.width, extent.height)
 	vkb.swapchain_builder_use_default_format_selection(&builder)
 	vkb.swapchain_builder_set_present_mode(&builder, .FIFO)
+	vkb.swapchain_builder_set_present_mode(&builder, .MAILBOX)
 
 	swapchain._internal = vkb.build_swapchain(&builder) or_return
 
@@ -181,6 +186,7 @@ delete_context :: proc(ctx: ^Context) {
 	// }
 
 	delete_swapchain(ctx.swapchain)
+	vma.destroy_allocator(ctx.allocator)
 	vkb.destroy_device(ctx.device)
 	vkb.destroy_surface(ctx.instance, ctx.surface)
 
@@ -209,8 +215,11 @@ vk_must :: proc(result: vk.Result, message: string) {
 }
 
 @(private)
-vk_check :: proc(result: vk.Result, message: string) {
+@(require_results)
+vk_check :: proc(result: vk.Result, message: string) -> bool {
 	if result != .SUCCESS {
 		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
+		return false
 	}
+	return true
 }

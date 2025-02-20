@@ -24,33 +24,30 @@ renderer_init :: proc(
 ) -> (
 	ok: bool,
 ) {
-	renderer.ctx = make_context(window^, allocator) or_return
+	context_init(&renderer.ctx, window^, allocator) or_return
 	renderer.window = window
 
-	{
-		result: vk.Result
-		renderer.buffer, result = make_buffer_with_data(renderer.ctx, VERTICES, .Vertex)
-		vk_must(result, "Failed to create Vertex Buffer")
-	}
+	renderer.buffer = make_buffer_with_data(
+		renderer.ctx.allocator,
+		VERTICES,
+		{.VERTEX_BUFFER},
+		.Auto,
+	) or_return
 
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
 	return true
 }
 
-delete_renderer :: proc(renderer: ^Renderer) {
+renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.ptr)
-	delete_buffer(renderer.ctx, renderer.buffer)
+	delete_buffer(&renderer.buffer)
 	delete_context(&renderer.ctx)
 }
 
 @(require_results)
-renderer_begin_frame :: proc(
-	renderer: ^Renderer,
-	allocator := context.allocator,
-) -> (
-	result: vk.Result,
-) {
+renderer_begin_frame :: proc(renderer: ^Renderer, allocator := context.allocator) -> (ok: bool) {
 	frame_manager_acquire(&renderer.ctx) or_return
+
 
 	frame_manager_frame_begin(&renderer.ctx) or_return
 
@@ -60,7 +57,7 @@ renderer_begin_frame :: proc(
 		vk.ClearValue{color = {float32 = {0, 0, 0, 1}}},
 	)
 
-	return
+	return true
 }
 
 renderer_draw :: proc(renderer: ^Renderer) {
@@ -119,12 +116,7 @@ renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 	return
 }
 
-renderer_handle_resize :: proc(
-	renderer: ^Renderer,
-	allocator := context.allocator,
-) -> (
-	ok: bool,
-) {
+renderer_handle_resize :: proc(renderer: ^Renderer, allocator := context.allocator) -> (ok: bool) {
 	handle_resize(&renderer.ctx, renderer.window^, allocator) or_return
 
 	renderer.camera.aspect = window_aspect_ratio(renderer.window^)
