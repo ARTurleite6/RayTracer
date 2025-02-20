@@ -28,13 +28,16 @@ make_fence :: proc(device: ^vkb.Device, signaled := false) -> (fence: Fence, ok:
 }
 
 @(require_results)
-fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> vk.Result {
-	return vk.WaitForFences(fence.device.ptr, 1, &fence.ptr, true, timeout)
+fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> bool {
+	return vk_check(
+		vk.WaitForFences(fence.device.ptr, 1, &fence.ptr, true, timeout),
+		"Error while waitign on fences",
+	)
 }
 
 @(require_results)
-fence_reset :: proc(fence: ^Fence) -> vk.Result {
-	return vk.ResetFences(fence.device.ptr, 1, &fence.ptr)
+fence_reset :: proc(fence: ^Fence) -> (ok: bool) {
+	return vk_check(vk.ResetFences(fence.device.ptr, 1, &fence.ptr), "Error while reseting fences")
 }
 
 @(require_results)
@@ -43,7 +46,10 @@ make_semaphore :: proc(device: ^vkb.Device) -> (semaphore: Semaphore, ok: bool) 
 		sType = .SEMAPHORE_CREATE_INFO,
 	}
 
-	vk_must(vk.CreateSemaphore(device.ptr, &create_info, nil, &semaphore.ptr), "Failed to create semaphore")
+	vk_must(
+		vk.CreateSemaphore(device.ptr, &create_info, nil, &semaphore.ptr),
+		"Failed to create semaphore",
+	)
 	semaphore.device = device
 	ok = true
 	return

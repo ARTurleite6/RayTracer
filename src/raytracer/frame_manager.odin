@@ -42,9 +42,9 @@ frame_manager_get_frame :: proc(manager: ^Frame_Manager) -> ^Per_Frame {
 }
 
 @(require_results)
-frame_manager_acquire :: proc(ctx: ^Context) -> (result: vk.Result) {
+frame_manager_acquire :: proc(ctx: ^Context) -> (ok: bool) {
 	frame := frame_manager_get_frame(&ctx.frame_manager)
-	frame_wait(frame, ctx.device) or_return
+	frame_wait(frame) or_return
 	image := swapchain_acquire_next_image(ctx.swapchain, frame.image_available) or_return
 	frame.image = {
 		index  = image.index,
@@ -52,14 +52,14 @@ frame_manager_acquire :: proc(ctx: ^Context) -> (result: vk.Result) {
 		view   = image.image_view,
 	}
 
-	return
+	return true
 }
 
 @(require_results)
-frame_manager_frame_begin :: proc(ctx: ^Context) -> vk.Result {
+frame_manager_frame_begin :: proc(ctx: ^Context) -> bool {
 	frame := frame_manager_get_frame(&ctx.frame_manager)
 
-	return frame_begin(frame, ctx.device, ctx.swapchain)
+	return frame_begin(frame)
 }
 
 // TODO: probably in the future remove this
@@ -127,11 +127,10 @@ make_frame_data :: proc(
 	frame.command_pool = make_command_pool(
 		ctx.device,
 		fmt.tprintf("Frame Command Pool %d", frame_index),
-		allocator,
+		allocator = allocator,
 	) or_return
 
 	frame.command_buffer = command_pool_allocate_primary_buffer(
-		ctx.device,
 		&frame.command_pool,
 		fmt.tprintf("Frame Command Buffer %d", frame_index),
 		allocator,
@@ -139,35 +138,27 @@ make_frame_data :: proc(
 
 	frame.in_flight_fence = make_fence(ctx.device, signaled = true) or_return
 	frame.image_available = make_semaphore(ctx.device) or_return
-	fmt.println("OLA")
 	frame.render_finished = make_semaphore(ctx.device) or_return
 
 	ok = true
 	return
 }
 
-frame_begin :: proc(
-	frame: ^Per_Frame,
-	device: ^vkb.Device,
-	swapchain: ^vkb.Swapchain,
-) -> (
-	result: vk.Result,
-) {
-	frame_reset(frame, device) or_return
-	frame_begin_commands(frame, device) or_return
-	return
+frame_begin :: proc(frame: ^Per_Frame) -> (ok: bool) {
+	frame_reset(frame) or_return
+	return frame_begin_commands(frame)
 }
 
-frame_wait :: proc(frame: ^Per_Frame, device: ^vkb.Device) -> (result: vk.Result) {
+frame_wait :: proc(frame: ^Per_Frame) -> (ok: bool) {
 	return fence_wait(&frame.in_flight_fence)
 }
 
-frame_reset :: proc(frame: ^Per_Frame, device: ^vkb.Device) -> (result: vk.Result) {
+frame_reset :: proc(frame: ^Per_Frame) -> (ok: bool) {
 	return fence_reset(&frame.in_flight_fence)
 }
 
-frame_begin_commands :: proc(frame: ^Per_Frame, device: ^vkb.Device) -> (result: vk.Result) {
-	command_pool_reset(frame.command_pool, device) or_return
+frame_begin_commands :: proc(frame: ^Per_Frame) -> (ok: bool) {
+	command_pool_reset(frame.command_pool) or_return
 
 	return command_buffer_begin(frame.command_buffer)
 }
@@ -264,19 +255,22 @@ swapchain_acquire_next_image :: proc(
 	semaphore: Semaphore,
 ) -> (
 	result: Image_Acquisition_Result,
-	err: vk.Result,
+	ok: bool,
 ) {
-	vk.AcquireNextImageKHR(
-		swapchain.device.ptr,
-		swapchain.ptr,
-		max(u64),
-		semaphore.ptr,
-		0,
-		&result.index,
-	) or_return
+	vk_must(
+		vk.AcquireNextImageKHR(
+			swapchain.device.ptr,
+			swapchain.ptr,
+			max(u64),
+			semaphore.ptr,
+			0,
+			&result.index,
+		),
+		"Error while acquiring next image",
+	)
 	result.image = swapchain.images[result.index]
 	result.image_view = swapchain.image_views[result.index]
 	result.extent = swapchain.extent
 
-	return
+	return result, true
 }
