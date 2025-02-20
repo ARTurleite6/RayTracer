@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:os"
+import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 
 Shader_Error :: union #shared_nil {
@@ -16,44 +17,44 @@ Shader_Module :: struct {
 
 @(require_results)
 make_vertex_shader_module :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	filepath: string,
 	entrypoint: string,
 ) -> (
 	shader_module: Shader_Module,
-	err: Shader_Error,
+	ok: bool,
 ) {
 	return _make_shader_module(device, filepath, entrypoint, {.VERTEX})
 }
 
 @(require_results)
 make_fragment_shader_module :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	filepath: string,
 	entrypoint: string,
 ) -> (
 	shader_module: Shader_Module,
-	err: Shader_Error,
+	ok: bool,
 ) {
 	return _make_shader_module(device, filepath, entrypoint, {.FRAGMENT})
 }
 
-delete_shader_module :: proc(device: Device, shader: Shader_Module) {
-	vk.DestroyShaderModule(device.handle, shader.handle, nil)
+delete_shader_module :: proc(device: ^vkb.Device, shader: Shader_Module) {
+	vk.DestroyShaderModule(device.ptr, shader.handle, nil)
 }
 
 @(private = "file")
 @(require_results)
 _make_shader_module :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	filepath: string,
 	entrypoint: string,
 	stage: vk.ShaderStageFlags,
 ) -> (
 	shader_module: Shader_Module,
-	err: Shader_Error,
+	ok: bool,
 ) {
-	content := string(os.read_entire_file_or_err(filepath) or_return)
+	content := string(os.read_entire_file(filepath) or_return)
 
 	code := transmute([]u32)content
 
@@ -63,9 +64,14 @@ _make_shader_module :: proc(
 		pCode    = &code[0],
 	}
 
-	vk.CreateShaderModule(device.handle, &create_info, nil, &shader_module.handle) or_return
+	vk_must(
+		vk.CreateShaderModule(device.ptr, &create_info, nil, &shader_module.handle),
+		"Failed to create shader module",
+	)
+
 	shader_module.entrypoint = entrypoint
 	shader_module.stage = stage
 
+	ok = true
 	return
 }

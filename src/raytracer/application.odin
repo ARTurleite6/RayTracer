@@ -2,13 +2,13 @@ package raytracer
 
 import "core:c"
 import "core:fmt"
+import "core:log"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 
 Error :: union #shared_nil {
 	Window_Error,
-	Context_Error,
 	vk.Result,
 }
 
@@ -28,7 +28,9 @@ make_application :: proc(
 ) {
 	app.window = new_clone(make_window(window_width, window_height, window_title) or_return)
 	app.renderer = new(Renderer, allocator)
-	renderer_init(app.renderer, app.window, allocator) or_return
+	if !renderer_init(app.renderer, app.window, allocator) {
+		return
+	}
 
 	window_set_window_user_pointer(app.window^, app.window)
 
@@ -58,8 +60,8 @@ application_update :: proc(app: ^Application, allocator := context.allocator) {
 
 	if app.should_resize {
 		app.should_resize = false
-		if result := application_handle_resize(app, allocator); result != .SUCCESS {
-			fmt.println("Error resizing window")
+		if !application_handle_resize(app, allocator) {
+			log.errorf("Error while resizing window")
 		}
 	}
 }
@@ -89,7 +91,7 @@ application_render :: proc(app: ^Application, allocator := context.allocator) {
 }
 
 @(private)
-application_handle_resize :: proc(app: ^Application, allocator := context.allocator) -> vk.Result {
+application_handle_resize :: proc(app: ^Application, allocator := context.allocator) -> bool {
 	app.window.framebuffer_resized = false
 	return renderer_handle_resize(app.renderer, allocator)
 }
