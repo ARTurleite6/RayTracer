@@ -1,21 +1,22 @@
 package raytracer
 
 import "core:strings"
+import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 
 Pipeline :: struct {
-	handle:                vk.Pipeline,
-	layout:                vk.PipelineLayout,
-	descriptor_set_layout: vk.DescriptorSetLayout,
+	handle: vk.Pipeline,
+	layout: vk.PipelineLayout,
 }
 
+@(require_results)
 make_graphics_pipeline :: proc(
-	device: Device,
-	swapchain: Swapchain,
+	device: ^vkb.Device,
+	swapchain: ^vkb.Swapchain,
 	shaders: []Shader_Module,
 ) -> (
 	pipeline: Pipeline,
-	result: vk.Result,
+	ok: bool,
 ) {
 
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
@@ -72,37 +73,17 @@ make_graphics_pipeline :: proc(
 		pAttachments    = &color_blend_attachment,
 	}
 
-	{ 	//Uniforms setup
-		binding := vk.DescriptorSetLayoutBinding {
-			binding         = 0,
-			descriptorType  = .UNIFORM_BUFFER,
-			descriptorCount = 1,
-			stageFlags      = {.VERTEX},
-		}
-
-		layout_info := vk.DescriptorSetLayoutCreateInfo {
-			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			bindingCount = 1,
-			pBindings    = &binding,
-		}
-
-		vk.CreateDescriptorSetLayout(
-			device.handle,
-			&layout_info,
-			nil,
-			&pipeline.descriptor_set_layout,
-		) or_return
-	}
-
 	{ 	// create pipeline layout
 
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-			setLayoutCount = 1,
-			pSetLayouts    = &pipeline.descriptor_set_layout,
+			sType = .PIPELINE_LAYOUT_CREATE_INFO,
 		}
 
-		vk.CreatePipelineLayout(device.handle, &create_info, nil, &pipeline.layout) or_return
+		if result := vk.CreatePipelineLayout(device.ptr, &create_info, nil, &pipeline.layout);
+		   result != .SUCCESS {
+			ok = false
+			return
+		}
 	}
 
 	shader_stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), context.temp_allocator)
@@ -116,11 +97,10 @@ make_graphics_pipeline :: proc(
 		}
 	}
 
-	swapchain_format := swapchain.format.format
 	pipeline_rendering_create_info := vk.PipelineRenderingCreateInfo {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,
-		pColorAttachmentFormats = &swapchain_format,
+		pColorAttachmentFormats = &swapchain.image_format,
 	}
 
 	create_info := vk.GraphicsPipelineCreateInfo {
@@ -138,16 +118,26 @@ make_graphics_pipeline :: proc(
 		layout              = pipeline.layout,
 	}
 
-	vk.CreateGraphicsPipelines(device.handle, 0, 1, &create_info, nil, &pipeline.handle) or_return
+	if result := vk.CreateGraphicsPipelines(
+		device.ptr,
+		0,
+		1,
+		&create_info,
+		nil,
+		&pipeline.handle,
+	); result != .SUCCESS {
+		ok = false
+		return
+	}
 
 	for s in shaders {
 		delete_shader_module(device, s)
 	}
 
-	return
+	return pipeline, true
 }
 
-delete_pipeline :: proc(pipeline: Pipeline, device: Device) {
-	vk.DestroyPipelineLayout(device.handle, pipeline.layout, nil)
-	vk.DestroyPipeline(device.handle, pipeline.handle, nil)
+delete_pipeline :: proc(pipeline: Pipeline, device: ^vkb.Device) {
+	vk.DestroyPipelineLayout(device.ptr, pipeline.layout, nil)
+	vk.DestroyPipeline(device.ptr, pipeline.handle, nil)
 }

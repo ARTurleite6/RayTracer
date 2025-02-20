@@ -5,6 +5,7 @@ package raytracer
 import "core:log"
 import "core:strings"
 import "core:sync"
+import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 
 
@@ -22,41 +23,41 @@ Command_Buffer :: struct {
 
 @(require_results)
 make_command_pool :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	name: string,
 	allocator := context.allocator,
 ) -> (
 	pool: Command_Pool,
-	result: vk.Result,
+	ok: bool,
 ) {
-	graphics_index := device_get_graphics_queue_index(device)
-	assert(graphics_index != nil, "Vulkan: graphics queue should not be nil")
+	graphics_index := vkb.device_get_queue_index(device, .Graphics)
 	create_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		flags            = {},
-		queueFamilyIndex = graphics_index.?,
+		queueFamilyIndex = graphics_index,
 	}
 
 	log.infof("Application: creating command pool for thread %d", sync.current_thread_id())
 
-	vk.CreateCommandPool(device.handle, &create_info, nil, &pool.handle) or_return
+	vk_must(vk.CreateCommandPool(device.ptr, &create_info, nil, &pool.handle), "Failed to create command pool:")
 	pool.name = strings.clone(name, allocator)
 
 	pool.primary_buffers = make([dynamic]Command_Buffer, allocator)
 	pool.secondary_buffers = make([dynamic]Command_Buffer, allocator)
 
+	ok = true
 	return
 }
 
 @(require_results)
 command_pool_allocate_primary_buffer :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	command_pool: ^Command_Pool,
 	name: string,
 	allocator := context.allocator,
 ) -> (
 	buffer: Command_Buffer,
-	result: vk.Result,
+	ok: bool,
 ) {
 	return _command_pool_allocate(
 		device,
@@ -69,13 +70,13 @@ command_pool_allocate_primary_buffer :: proc(
 
 @(require_results)
 command_pool_allocate_secondary_buffer :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	command_pool: ^Command_Pool,
 	name: string,
 	allocator := context.allocator,
 ) -> (
 	buffer: Command_Buffer,
-	result: vk.Result,
+	ok: bool,
 ) {
 	return _command_pool_allocate(
 		device,
@@ -87,17 +88,17 @@ command_pool_allocate_secondary_buffer :: proc(
 }
 
 @(require_results)
-command_pool_reset :: proc(command_pool: Command_Pool, device: Device) -> vk.Result {
+command_pool_reset :: proc(command_pool: Command_Pool, device: ^vkb.Device) -> vk.Result {
 	//TODO: Investigate the flags for release resources
-	return vk.ResetCommandPool(device.handle, command_pool.handle, {})
+	return vk.ResetCommandPool(device.ptr, command_pool.handle, {})
 }
 
-delete_command_pool :: proc(command_pool: Command_Pool, device: Device) {
+delete_command_pool :: proc(command_pool: Command_Pool, device: ^vkb.Device) {
 	_delete_buffers(command_pool.primary_buffers[:], command_pool, device)
 	_delete_buffers(command_pool.secondary_buffers[:], command_pool, device)
 
 	delete(command_pool.name)
-	vk.DestroyCommandPool(device.handle, command_pool.handle, nil)
+	vk.DestroyCommandPool(device.ptr, command_pool.handle, nil)
 }
 
 @(require_results)
@@ -143,17 +144,21 @@ command_buffer_reset :: proc(command_buffer: Command_Buffer) {
 }
 
 @(private = "file")
-_delete_buffers :: proc(buffers: []Command_Buffer, command_pool: Command_Pool, device: Device) {
+_delete_buffers :: proc(
+	buffers: []Command_Buffer,
+	command_pool: Command_Pool,
+	device: ^vkb.Device,
+) {
 	for &b in buffers {
 		delete(b.name)
-		vk.FreeCommandBuffers(device.handle, command_pool.handle, 1, &b.handle)
+		vk.FreeCommandBuffers(device.ptr, command_pool.handle, 1, &b.handle)
 	}
 }
 
 @(private = "file")
 @(require_results)
 _command_pool_allocate :: proc(
-	device: Device,
+	device: ^vkb.Device,
 	command_pool_handle: vk.CommandPool,
 	level: vk.CommandBufferLevel,
 	buffers_arr: ^[dynamic]Command_Buffer,
@@ -161,7 +166,7 @@ _command_pool_allocate :: proc(
 	allocator := context.allocator,
 ) -> (
 	buffer: Command_Buffer,
-	result: vk.Result,
+	ok: bool,
 ) {
 	allocate_info := vk.CommandBufferAllocateInfo {
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -170,10 +175,11 @@ _command_pool_allocate :: proc(
 		commandBufferCount = 1,
 	}
 
-	vk.AllocateCommandBuffers(device.handle, &allocate_info, &buffer.handle) or_return
+	vk_must(vk.AllocateCommandBuffers(device.ptr, &allocate_info, &buffer.handle), "Failed to allocate command buffers")
 	buffer.name = strings.clone(name, allocator)
 
 	append(buffers_arr, buffer)
 
+	ok = true
 	return
 }

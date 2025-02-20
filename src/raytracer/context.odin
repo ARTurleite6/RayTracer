@@ -1,117 +1,144 @@
 package raytracer
 
-import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:os"
 import "core:slice"
+import vkb "external:odin-vk-bootstrap"
+import vma "external:odin-vma"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: slice
 
-g_context: runtime.Context
-
 Context :: struct {
-	device:          Device,
-	instance:        Instance,
+	device:          ^vkb.Device,
+	instance:        ^vkb.Instance,
 	surface:         vk.SurfaceKHR,
 	swapchain:       Swapchain,
 	pipeline:        Pipeline,
+	graphics_queue:  vk.Queue,
+	present_queue:   vk.Queue,
 	// shaders:         []Shader_Module,
-	physical_device: Physical_Device_Info,
+	physical_device: ^vkb.Physical_Device,
 	frame_manager:   Frame_Manager,
-	debugger:        Debugger,
-	descriptor_pool: vk.DescriptorPool,
+	vma_functions:   vma.Vulkan_Functions,
+	allocator:       vma.Allocator,
 }
 
-Context_Error :: union #shared_nil {
-	Shader_Error,
-	vk.Result,
+Swapchain :: struct {
+	using _internal: ^vkb.Swapchain,
+	images:          []vk.Image,
+	image_views:     []vk.ImageView,
 }
 
 @(require_results)
-make_context :: proc(
-	window: Window,
-	allocator := context.allocator,
-) -> (
-	ctx: Context,
-	err: Context_Error,
-) {
-	g_context = context
-	vk.load_proc_addresses(rawptr(glfw.GetInstanceProcAddress))
+make_context :: proc(window: Window, allocator := context.allocator) -> (ctx: Context, ok: bool) {
+	{ 	// Create instance
+		builder := vkb.init_instance_builder() or_return
+		defer vkb.destroy_instance_builder(&builder)
 
-	debug_create_info: ^vk.DebugUtilsMessengerCreateInfoEXT
-	when ODIN_DEBUG {
-		util_debug_info := debugger_info()
-		debug_create_info = &util_debug_info
-	}
-	ctx.instance = make_instance(
-		"Raytracing",
-		required_extensions(context.temp_allocator),
-		debug_create_info,
-	) or_return
 
-	when ODIN_DEBUG {
-		ctx.debugger = make_debugger(ctx.instance) or_return
+		vkb.instance_set_minimum_version(&builder, vk.API_VERSION_1_3)
+
+		when ODIN_DEBUG {
+			vkb.instance_request_validation_layers(&builder)
+			vkb.instance_use_default_debug_messenger(&builder)
+		}
+
+		ctx.instance = vkb.build_instance(&builder) or_return
 	}
 
 	ctx.surface = window_make_surface(window, ctx.instance) or_return
-	ctx.physical_device = choose_physical_device(ctx.instance, ctx.surface) or_return
-	ctx.device = make_logical_device(ctx.physical_device) or_return
-	ctx.swapchain = make_swapchain(
-		ctx.device,
-		ctx.physical_device.handle,
-		ctx.surface,
-		window_get_extent(window),
-	) or_return
+
+	{ 	// choose physical device
+		selector := vkb.init_physical_device_selector(ctx.instance) or_return
+		defer vkb.destroy_physical_device_selector(&selector)
+
+		vkb.selector_set_minimum_version(&selector, vk.API_VERSION_1_3)
+		vkb.selector_set_required_features_13(&selector, {dynamicRendering = true})
+		vkb.selector_set_surface(&selector, ctx.surface)
+
+		ctx.physical_device = vkb.select_physical_device(&selector, allocator = allocator)
+	}
+
+	{ 	// logical device
+		builder := vkb.init_device_builder(ctx.physical_device) or_return
+		defer vkb.destroy_device_builder(&builder)
+
+		ctx.device = vkb.build_device(&builder, allocator) or_return
+	}
+
+	ctx.swapchain = make_swapchain(&ctx, window) or_return
+
+	{ 	// get queues
+		ctx.graphics_queue = vkb.device_get_queue(ctx.device, .Graphics) or_return
+		ctx.present_queue = vkb.device_get_queue(ctx.device, .Present) or_return
+	}
+
 
 	shaders: []Shader_Module
-	{ 	// create shaders
-		shaders = make([]Shader_Module, 2, allocator)
+	shaders = make([]Shader_Module, 2, allocator)
 
-		shaders[0] = make_vertex_shader_module(ctx.device, "shaders/vert.spv", "main") or_return
-		shaders[1] = make_fragment_shader_module(ctx.device, "shaders/frag.spv", "main") or_return
-	}
-
-	{ 	// Cteate descriptor pool be
-		pool_sizes := []vk.DescriptorPoolSize {
-			{type = .UNIFORM_BUFFER, descriptorCount = MAX_FRAMES_IN_FLIGHT},
-		}
-
-		pool_info := vk.DescriptorPoolCreateInfo {
-			sType         = .DESCRIPTOR_POOL_CREATE_INFO,
-			maxSets       = MAX_FRAMES_IN_FLIGHT,
-			poolSizeCount = u32(len(pool_sizes)),
-			pPoolSizes    = raw_data(pool_sizes),
-		}
-
-		vk.CreateDescriptorPool(ctx.device.handle, &pool_info, nil, &ctx.descriptor_pool) or_return
-	}
+	shaders[0] = make_vertex_shader_module(ctx.device, "shaders/vert.spv", "main") or_return
+	shaders[1] = make_fragment_shader_module(ctx.device, "shaders/frag.spv", "main") or_return
 
 	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
 
 	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
 
-	return
-}
-
-find_memory_type :: proc(
-	ctx: Context,
-	type_filter: u32,
-	properties: vk.MemoryPropertyFlags,
-) -> u32 {
-	mem_properties: vk.PhysicalDeviceMemoryProperties
-	vk.GetPhysicalDeviceMemoryProperties(ctx.physical_device.handle, &mem_properties)
-
-	for i in 0 ..< mem_properties.memoryTypeCount {
-		if type_filter & (1 << i) != 0 &&
-		   mem_properties.memoryTypes[i].propertyFlags & properties == properties {
-			return i
+	{
+		ctx.vma_functions = vma.create_vulkan_functions()
+		// create allocator
+		create_info := vma.Allocator_Create_Info {
+			vulkan_api_version = vk.API_VERSION_1_3,
+			physical_device    = ctx.physical_device.ptr,
+			device             = ctx.device.ptr,
+			instance           = ctx.instance.ptr,
+			vulkan_functions   = &ctx.vma_functions,
 		}
+
+		vk_must(
+			vma.create_allocator(create_info, &ctx.allocator),
+			"Failed to create VMA allocator",
+		)
 	}
 
-	log.fatalf("No memory type found with type %d and properties %v", type_filter, properties)
-	unreachable()
+	return ctx, true
+}
+
+@(require_results)
+make_swapchain :: proc(
+	ctx: ^Context,
+	window: Window,
+	allocator := context.allocator,
+) -> (
+	swapchain: Swapchain,
+	ok: bool,
+) {
+	// create swapchain
+	builder := vkb.init_swapchain_builder(ctx.device) or_return
+	defer vkb.destroy_swapchain_builder(&builder)
+
+	vkb.swapchain_builder_set_old_swapchain(&builder, ctx.swapchain)
+	extent := window_get_extent(window)
+	vkb.swapchain_builder_set_desired_extent(&builder, extent.width, extent.height)
+	vkb.swapchain_builder_use_default_format_selection(&builder)
+	vkb.swapchain_builder_set_present_mode(&builder, .FIFO)
+
+	swapchain._internal = vkb.build_swapchain(&builder) or_return
+
+	swapchain.images = vkb.swapchain_get_images(swapchain, allocator = allocator) or_return
+	swapchain.image_views = vkb.swapchain_get_image_views(swapchain, allocator = allocator)
+
+	return swapchain, true
+}
+
+delete_swapchain :: proc(swapchain: Swapchain) {
+	vkb.swapchain_destroy_image_views(swapchain, swapchain.image_views)
+	delete(swapchain.images)
+	delete(swapchain.image_views)
+	vkb.destroy_swapchain(swapchain)
 }
 
 // TODO: make the recreation of the swapchain using the old_swapchain ptr so I can render and resize at the same time
@@ -120,7 +147,7 @@ handle_resize :: proc(
 	window: Window,
 	allocator := context.allocator,
 ) -> (
-	result: vk.Result,
+	ok: bool,
 ) {
 	window_extent := window_get_extent(window)
 	for window_extent.width == 0 && window_extent.height == 0 {
@@ -128,45 +155,36 @@ handle_resize :: proc(
 		window_wait_events(window)
 	}
 
-	vk.DeviceWaitIdle(ctx.device.handle)
+	vk.DeviceWaitIdle(ctx.device.ptr)
 
 	// old_swapchain := ctx.swapchain
 	old_swapchain := ctx.swapchain
-	defer if old_swapchain.handle != 0 {
-		delete_swapchain(old_swapchain, ctx.device)
+	defer if old_swapchain._internal != nil {
+		delete_swapchain(old_swapchain)
 
 		delete_frame_manager(ctx)
-		ctx.frame_manager, result = make_frame_manager(ctx^)
+		ctx.frame_manager, ok = make_frame_manager(ctx^)
 	}
 
-	ctx.swapchain = make_swapchain(
-		ctx.device,
-		ctx.physical_device.handle,
-		ctx.surface,
-		window_extent,
-		old_swapchain,
-		allocator = allocator,
-	) or_return
+	ctx.swapchain, ok = make_swapchain(ctx, window, allocator = allocator)
 
 	return
 }
 
 delete_context :: proc(ctx: ^Context) {
-	vk.DeviceWaitIdle(ctx.device.handle)
+	vk.DeviceWaitIdle(ctx.device.ptr)
 
 	delete_frame_manager(ctx)
-	vk.DestroyDescriptorPool(ctx.device.handle, ctx.descriptor_pool, nil)
 	delete_pipeline(ctx.pipeline, ctx.device)
 	// for shader in ctx.shaders {
 	// 	delete_shader_module(ctx.device, shader)
 	// }
 
-	delete_swapchain(ctx.swapchain, ctx.device)
-	delete_logical_device(ctx.device)
-	vk.DestroySurfaceKHR(ctx.instance, ctx.surface, nil)
+	delete_swapchain(ctx.swapchain)
+	vkb.destroy_device(ctx.device)
+	vkb.destroy_surface(ctx.instance, ctx.surface)
 
-	delete_debugger(ctx.debugger, ctx.instance)
-	delete_instance(ctx.instance)
+	vkb.destroy_instance(ctx.instance)
 }
 
 @(private = "file")
@@ -180,4 +198,19 @@ required_extensions :: proc(allocator := context.allocator) -> []cstring {
 	}
 
 	return extensions
+}
+
+@(private)
+vk_must :: proc(result: vk.Result, message: string) {
+	if result != .SUCCESS {
+		log.fatalf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
+		os.exit(1)
+	}
+}
+
+@(private)
+vk_check :: proc(result: vk.Result, message: string) {
+	if result != .SUCCESS {
+		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
+	}
 }

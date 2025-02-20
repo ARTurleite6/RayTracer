@@ -1,7 +1,10 @@
 package raytracer
 
 import "base:runtime"
+import "core:fmt"
+import vma "external:odin-vma"
 import vk "vendor:vulkan"
+_ :: fmt
 
 Buffer_Kind :: enum {
 	Vertex,
@@ -13,11 +16,10 @@ Uniform_Buffer_Object :: struct {
 }
 
 Buffer :: struct {
-	handle:        vk.Buffer,
-	memory:        vk.DeviceMemory,
-	size:          vk.DeviceSize,
-	kind:          Buffer_Kind,
-	mapped_memory: rawptr,
+	handle:     vk.Buffer,
+	allocation: vma.Allocation,
+	size:       vk.DeviceSize,
+	kind:       Buffer_Kind,
 }
 
 make_buffer_with_data :: proc(
@@ -44,30 +46,23 @@ make_buffer :: proc(
 	result: vk.Result,
 ) {
 	create_info := vk.BufferCreateInfo {
-		sType       = .BUFFER_CREATE_INFO,
-		size        = vk.DeviceSize(size),
-		usage       = buffer_kind_to_usage_flags(kind),
-		sharingMode = .EXCLUSIVE,
+		sType = .BUFFER_CREATE_INFO,
+		size  = vk.DeviceSize(size),
+		usage = buffer_kind_to_usage_flags(kind),
 	}
 
-	vk.CreateBuffer(ctx.device.handle, &create_info, nil, &buffer.handle) or_return
-
-	mem_requirements: vk.MemoryRequirements
-	vk.GetBufferMemoryRequirements(ctx.device.handle, buffer.handle, &mem_requirements)
-
-	alloc_info := vk.MemoryAllocateInfo {
-		sType           = .MEMORY_ALLOCATE_INFO,
-		allocationSize  = mem_requirements.size,
-		memoryTypeIndex = find_memory_type(
-			ctx,
-			mem_requirements.memoryTypeBits,
-			{.HOST_VISIBLE, .HOST_COHERENT},
-		),
+	alloc_info := vma.Allocation_Create_Info {
+		usage = .Auto,
 	}
 
-	vk.AllocateMemory(ctx.device.handle, &alloc_info, nil, &buffer.memory) or_return
-
-	vk.BindBufferMemory(ctx.device.handle, buffer.handle, buffer.memory, 0) or_return
+	vma.create_buffer(
+		ctx.allocator,
+		create_info,
+		alloc_info,
+		&buffer.handle,
+		&buffer.allocation,
+		nil,
+	)
 
 	buffer.size = vk.DeviceSize(size)
 	buffer.kind = .Vertex
@@ -89,17 +84,16 @@ buffer_upload_data :: proc(ctx: Context, buffer: ^Buffer, data: []$T) -> (result
 @(require_results)
 buffer_map :: proc(ctx: Context, buffer: ^Buffer, mapped_data: ^rawptr) -> (result: vk.Result) {
 	assert(mapped_data != nil)
-	return vk.MapMemory(ctx.device.handle, buffer.memory, 0, buffer.size, {}, mapped_data)
+	return vma.map_memory(ctx.allocator, buffer.allocation, mapped_data)
 }
 
 buffer_unmap :: proc(ctx: Context, buffer: ^Buffer, mapped_data: ^rawptr) {
 	assert(mapped_data != nil)
-	vk.UnmapMemory(ctx.device.handle, buffer.memory)
+	vma.unmap_memory(ctx.allocator, buffer.allocation)
 }
 
 delete_buffer :: proc(ctx: Context, buffer: Buffer) {
-	vk.DestroyBuffer(ctx.device.handle, buffer.handle, nil)
-	vk.FreeMemory(ctx.device.handle, buffer.memory, nil)
+	vma.destroy_buffer(ctx.allocator, buffer.handle, buffer.allocation)
 }
 
 @(private = "file")

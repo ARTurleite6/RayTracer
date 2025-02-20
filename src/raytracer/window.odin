@@ -3,6 +3,7 @@ package raytracer
 import "base:runtime"
 import "core:c"
 import "core:log"
+import vkb "external:odin-vk-bootstrap"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
@@ -62,14 +63,18 @@ window_aspect_ratio :: proc(window: Window) -> f32 {
 @(require_results)
 window_make_surface :: proc(
 	window: Window,
-	instance: Instance,
+	instance: ^vkb.Instance,
 ) -> (
 	surface: vk.SurfaceKHR,
-	result: vk.Result,
+	ok: bool,
 ) {
-	result = glfw.CreateWindowSurface(instance, window.handle, nil, &surface)
+	result := glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &surface)
+	if result != .SUCCESS {
+		ok = false
+		return
+	}
 
-	return
+	return surface, true
 }
 
 @(require_results)
