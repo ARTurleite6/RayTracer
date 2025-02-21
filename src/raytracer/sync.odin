@@ -14,21 +14,20 @@ Semaphore :: struct {
 }
 
 @(require_results)
-make_fence :: proc(device: ^vkb.Device, signaled := false) -> (fence: Fence, ok: bool) {
+make_fence :: proc(device: ^vkb.Device, signaled := false) -> (fence: Fence, err: Backend_Error) {
 	create_info := vk.FenceCreateInfo {
 		sType = .FENCE_CREATE_INFO,
 	}
 
 	if signaled do create_info.flags = {.SIGNALED}
 
-	vk_must(vk.CreateFence(device.ptr, &create_info, nil, &fence.ptr), "Failed to create fence")
+	vk_check(vk.CreateFence(device.ptr, &create_info, nil, &fence.ptr), "Failed to create fence") or_return
 	fence.device = device
-	ok = true
-	return
+	return fence, nil
 }
 
 @(require_results)
-fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> bool {
+fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> Backend_Error {
 	return vk_check(
 		vk.WaitForFences(fence.device.ptr, 1, &fence.ptr, true, timeout),
 		"Error while waitign on fences",
@@ -36,12 +35,12 @@ fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> bool {
 }
 
 @(require_results)
-fence_reset :: proc(fence: ^Fence) -> (ok: bool) {
+fence_reset :: proc(fence: ^Fence) -> (Backend_Error) {
 	return vk_check(vk.ResetFences(fence.device.ptr, 1, &fence.ptr), "Error while reseting fences")
 }
 
 @(require_results)
-make_semaphore :: proc(device: ^vkb.Device) -> (semaphore: Semaphore, ok: bool) {
+make_semaphore :: proc(device: ^vkb.Device) -> (semaphore: Semaphore, err: Backend_Error) {
 	create_info := vk.SemaphoreCreateInfo {
 		sType = .SEMAPHORE_CREATE_INFO,
 	}
@@ -51,8 +50,7 @@ make_semaphore :: proc(device: ^vkb.Device) -> (semaphore: Semaphore, ok: bool) 
 		"Failed to create semaphore",
 	)
 	semaphore.device = device
-	ok = true
-	return
+	return semaphore, nil
 }
 
 delete_fence :: proc(fence: Fence) {

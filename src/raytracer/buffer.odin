@@ -106,7 +106,7 @@ buffer_copy_from :: proc(
 	cmd_pool: ^Command_Pool,
 	allocator := context.allocator,
 ) -> (
-	ok: bool,
+	err: Backend_Error,
 ) {
 	cmd := command_pool_allocate_primary_buffer(
 		cmd_pool,
@@ -134,7 +134,7 @@ make_buffer_with_data :: proc(
 	memory_usage: vma.Memory_Usage,
 ) -> (
 	buffer: Buffer,
-	ok: bool,
+	err: vk.Result,
 ) {
 	buffer = make_buffer(
 		allocator,
@@ -143,7 +143,7 @@ make_buffer_with_data :: proc(
 		memory_usage,
 	) or_return
 	buffer_upload(&buffer, data)
-	return buffer, true
+	return buffer, .SUCCESS
 }
 
 make_buffer :: proc(
@@ -153,7 +153,7 @@ make_buffer :: proc(
 	memory_usage: vma.Memory_Usage,
 ) -> (
 	buffer: Buffer,
-	ok: bool,
+	err: vk.Result,
 ) {
 	buffer.allocator = allocator
 	buffer.size = size
@@ -181,10 +181,10 @@ make_buffer :: proc(
 		"Failed to create buffer",
 	)
 
-	return buffer, true
+	return buffer, .SUCCESS
 }
 
-buffer_upload :: proc(buffer: ^Buffer, data: []$T) -> bool {
+buffer_upload :: proc(buffer: ^Buffer, data: []$T) -> Backend_Error {
 	size := size_of(T) * len(data)
 	assert(u64(size) <= u64(buffer.size), "Size exceeds allocated memory")
 	mapped_data: rawptr
@@ -195,7 +195,7 @@ buffer_upload :: proc(buffer: ^Buffer, data: []$T) -> bool {
 	runtime.mem_copy(mapped_data, raw_data(data), size)
 	vma.unmap_memory(buffer.allocator, buffer.allocation)
 
-	return true
+	return nil
 }
 
 make_staging_buffer :: proc(ctx: Context, vertices: []$T) -> (buffer: Buffer, ok: bool) {
