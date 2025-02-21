@@ -11,13 +11,18 @@ Frame_Manager :: struct {
 	current_frame: int,
 }
 
+Image_Aquiring_Error :: enum {
+	Success = 0,
+	NeedsResizing,
+}
+
 @(require_results)
 make_frame_manager :: proc(
 	ctx: Context,
 	allocator := context.allocator,
 ) -> (
 	frame_manager: Frame_Manager,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	for &f, i in frame_manager.frames {
 		f = make_frame_data(ctx, i, allocator) or_return
@@ -25,8 +30,7 @@ make_frame_manager :: proc(
 
 	frame_manager.current_frame = 0
 
-	ok = true
-	return
+	return frame_manager, nil
 }
 
 delete_frame_manager :: proc(ctx: ^Context) {
@@ -42,21 +46,25 @@ frame_manager_get_frame :: proc(manager: ^Frame_Manager) -> ^Per_Frame {
 }
 
 @(require_results)
-frame_manager_acquire :: proc(ctx: ^Context) -> (ok: bool) {
+frame_manager_acquire :: proc(ctx: ^Context) -> (err: Backend_Error) {
 	frame := frame_manager_get_frame(&ctx.frame_manager)
 	frame_wait(frame) or_return
-	image := swapchain_acquire_next_image(ctx.swapchain, frame.image_available) or_return
+	image, acquire_err := swapchain_acquire_next_image(ctx.swapchain, frame.image_available)
 	frame.image = {
 		index  = image.index,
 		handle = image.image,
 		view   = image.image_view,
 	}
 
-	return true
+	if acquire_err == .ERROR_OUT_OF_DATE_KHR {
+		return .NeedsResizing
+	}
+
+	return nil
 }
 
 @(require_results)
-frame_manager_frame_begin :: proc(ctx: ^Context) -> bool {
+frame_manager_frame_begin :: proc(ctx: ^Context) -> Backend_Error {
 	frame := frame_manager_get_frame(&ctx.frame_manager)
 
 	return frame_begin(frame)
@@ -122,7 +130,7 @@ make_frame_data :: proc(
 	allocator := context.allocator,
 ) -> (
 	frame: Per_Frame,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	frame.command_pool = make_command_pool(
 		ctx.device,
@@ -140,31 +148,30 @@ make_frame_data :: proc(
 	frame.image_available = make_semaphore(ctx.device) or_return
 	frame.render_finished = make_semaphore(ctx.device) or_return
 
-	ok = true
-	return
+	return frame, nil
 }
 
-frame_begin :: proc(frame: ^Per_Frame) -> (ok: bool) {
+frame_begin :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 	frame_reset(frame) or_return
 	return frame_begin_commands(frame)
 }
 
-frame_wait :: proc(frame: ^Per_Frame) -> (ok: bool) {
+frame_wait :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 	return fence_wait(&frame.in_flight_fence)
 }
 
-frame_reset :: proc(frame: ^Per_Frame) -> (ok: bool) {
+frame_reset :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 	return fence_reset(&frame.in_flight_fence)
 }
 
-frame_begin_commands :: proc(frame: ^Per_Frame) -> (ok: bool) {
+frame_begin_commands :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 	command_pool_reset(frame.command_pool) or_return
 
 	return command_buffer_begin(frame.command_buffer)
 }
 
 delete_frame_data :: proc(ctx: Context, per_frame: ^Per_Frame) {
-	delete_command_pool(per_frame.command_pool, ctx.device)
+	delete_command_pool(&per_frame.command_pool, ctx.device)
 	delete_fence(per_frame.in_flight_fence)
 	delete_semaphore(per_frame.image_available)
 	delete_semaphore(per_frame.render_finished)
@@ -255,9 +262,9 @@ swapchain_acquire_next_image :: proc(
 	semaphore: Semaphore,
 ) -> (
 	result: Image_Acquisition_Result,
-	ok: bool,
+	err: vk.Result,
 ) {
-	vk_must(
+	vk_check(
 		vk.AcquireNextImageKHR(
 			swapchain.device.ptr,
 			swapchain.ptr,
@@ -267,10 +274,10 @@ swapchain_acquire_next_image :: proc(
 			&result.index,
 		),
 		"Error while acquiring next image",
-	)
+	) or_return
 	result.image = swapchain.images[result.index]
 	result.image_view = swapchain.image_views[result.index]
 	result.extent = swapchain.extent
 
-	return result, true
+	return result, nil
 }

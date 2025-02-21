@@ -4,12 +4,11 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 import "vendor:glfw"
-import vk "vendor:vulkan"
 _ :: fmt
 
 Error :: union #shared_nil {
 	Window_Error,
-	vk.Result,
+	Backend_Error,
 }
 
 Application :: struct {
@@ -28,9 +27,7 @@ make_application :: proc(
 ) {
 	app.window = new_clone(make_window(window_width, window_height, window_title) or_return)
 	app.renderer = new(Renderer, allocator)
-	if !renderer_init(app.renderer, app.window, allocator) {
-		return
-	}
+	renderer_init(app.renderer, app.window, allocator) or_return
 
 	window_set_window_user_pointer(app.window^, app.window)
 
@@ -59,33 +56,37 @@ application_update :: proc(app: ^Application, allocator := context.allocator) {
 	window_update(app.window^)
 
 	if app.should_resize {
-		app.should_resize = false
-		if !application_handle_resize(app, allocator) {
+		if err := application_handle_resize(app, allocator); err != nil {
 			log.errorf("Error while resizing window")
 		}
+		app.should_resize = false
 	}
 }
 
 application_render :: proc(app: ^Application, allocator := context.allocator) {
-	result: vk.Result
+	err: Backend_Error
+	defer if value, ok := err.(Image_Aquiring_Error);
+	   ok && value == .NeedsResizing || app.window.framebuffer_resized {
+		app.should_resize = true
+	}
 
-	if !renderer_begin_frame(app.renderer) do return
+	if err = renderer_begin_frame(app.renderer); err != nil {
+		return
+	}
 
 	renderer_draw(app.renderer)
 
-	result = renderer_end_frame(app.renderer)
-
-	if result == .ERROR_OUT_OF_DATE_KHR ||
-	   result == .SUBOPTIMAL_KHR ||
-	   app.window.framebuffer_resized {
-		app.should_resize = true
-	} else if result != .SUCCESS {
+	if err = renderer_end_frame(app.renderer); err != nil {
 		return
 	}
+
 }
 
 @(private)
-application_handle_resize :: proc(app: ^Application, allocator := context.allocator) -> bool {
+application_handle_resize :: proc(
+	app: ^Application,
+	allocator := context.allocator,
+) -> Backend_Error {
 	app.window.framebuffer_resized = false
 	return renderer_handle_resize(app.renderer, allocator)
 }

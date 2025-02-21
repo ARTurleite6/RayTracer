@@ -16,7 +16,7 @@ make_graphics_pipeline :: proc(
 	shaders: []Shader_Module,
 ) -> (
 	pipeline: Pipeline,
-	ok: bool,
+	result: Backend_Error,
 ) {
 
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
@@ -79,11 +79,10 @@ make_graphics_pipeline :: proc(
 			sType = .PIPELINE_LAYOUT_CREATE_INFO,
 		}
 
-		if result := vk.CreatePipelineLayout(device.ptr, &create_info, nil, &pipeline.layout);
-		   result != .SUCCESS {
-			ok = false
-			return
-		}
+		vk_check(
+			vk.CreatePipelineLayout(device.ptr, &create_info, nil, &pipeline.layout),
+			"Failed to create Graphics Pipeline layout",
+		) or_return
 	}
 
 	shader_stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), context.temp_allocator)
@@ -118,23 +117,13 @@ make_graphics_pipeline :: proc(
 		layout              = pipeline.layout,
 	}
 
-	if result := vk.CreateGraphicsPipelines(
-		device.ptr,
-		0,
-		1,
-		&create_info,
-		nil,
-		&pipeline.handle,
-	); result != .SUCCESS {
-		ok = false
-		return
-	}
+	vk_check(vk.CreateGraphicsPipelines(device.ptr, 0, 1, &create_info, nil, &pipeline.handle), "Failed to create Graphics Pipeline") or_return
 
 	for s in shaders {
 		delete_shader_module(device, s)
 	}
 
-	return pipeline, true
+	return pipeline, nil
 }
 
 delete_pipeline :: proc(pipeline: Pipeline, device: ^vkb.Device) {

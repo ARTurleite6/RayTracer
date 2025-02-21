@@ -2,9 +2,11 @@ package raytracer
 
 // TODO: this module probably will need some refactor to be more automatic like Granite Renderer
 
+import "core:fmt"
 import "core:strings"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
+_ :: fmt
 
 
 Command_Pool :: struct {
@@ -28,7 +30,7 @@ make_command_pool :: proc(
 	allocator := context.allocator,
 ) -> (
 	pool: Command_Pool,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	graphics_index := vkb.device_get_queue_index(device, .Graphics)
 	create_info := vk.CommandPoolCreateInfo {
@@ -37,18 +39,17 @@ make_command_pool :: proc(
 		queueFamilyIndex = graphics_index,
 	}
 
-	vk_must(
+	vk_check(
 		vk.CreateCommandPool(device.ptr, &create_info, nil, &pool.handle),
 		"Failed to create command pool:",
-	)
+	) or_return
 	pool.name = strings.clone(name, allocator)
 
 	pool.primary_buffers = make([dynamic]Command_Buffer, allocator)
 	pool.secondary_buffers = make([dynamic]Command_Buffer, allocator)
 	pool.device = device
 
-	ok = true
-	return
+	return pool, nil
 }
 
 @(require_results)
@@ -58,7 +59,7 @@ command_pool_allocate_primary_buffer :: proc(
 	allocator := context.allocator,
 ) -> (
 	buffer: Command_Buffer,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	buffer = _command_pool_allocate(
 		command_pool.device,
@@ -68,8 +69,7 @@ command_pool_allocate_primary_buffer :: proc(
 		name,
 	) or_return
 
-	append(&command_pool.primary_buffers, buffer)
-	return buffer, true
+	return buffer, nil
 }
 
 @(require_results)
@@ -78,8 +78,8 @@ command_pool_allocate_secondary_buffer :: proc(
 	name: string,
 	allocator := context.allocator,
 ) -> (
-	buffer: Command_Buffer,
-	ok: bool,
+	Command_Buffer,
+	Backend_Error,
 ) {
 	return _command_pool_allocate(
 		command_pool.device,
@@ -91,7 +91,7 @@ command_pool_allocate_secondary_buffer :: proc(
 }
 
 @(require_results)
-command_pool_reset :: proc(command_pool: Command_Pool) -> bool {
+command_pool_reset :: proc(command_pool: Command_Pool) -> Backend_Error {
 	//TODO: Investigate the flags for release resources
 	return vk_check(
 		vk.ResetCommandPool(command_pool.device.ptr, command_pool.handle, {}),
@@ -99,12 +99,14 @@ command_pool_reset :: proc(command_pool: Command_Pool) -> bool {
 	)
 }
 
-delete_command_pool :: proc(command_pool: Command_Pool, device: ^vkb.Device) {
-	_delete_buffers(command_pool.primary_buffers[:], command_pool)
-	_delete_buffers(command_pool.secondary_buffers[:], command_pool)
+delete_command_pool :: proc(command_pool: ^Command_Pool, device: ^vkb.Device) {
+	_delete_buffers(command_pool.primary_buffers[:], command_pool^)
+	_delete_buffers(command_pool.secondary_buffers[:], command_pool^)
 
-	delete(command_pool.primary_buffers)
-	delete(command_pool.secondary_buffers)
+	clear(&command_pool.primary_buffers)
+	clear(&command_pool.secondary_buffers)
+	// delete(command_pool.primary_buffers)
+	// delete(command_pool.secondary_buffers)
 
 	delete(command_pool.name)
 	vk.DestroyCommandPool(device.ptr, command_pool.handle, nil)
@@ -114,7 +116,7 @@ delete_command_pool :: proc(command_pool: Command_Pool, device: ^vkb.Device) {
 command_buffer_begin :: proc(
 	command_buffer: Command_Buffer,
 	flags: vk.CommandBufferUsageFlags = {},
-) -> bool {
+) -> Backend_Error {
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 		flags = flags,
@@ -178,7 +180,7 @@ _command_pool_allocate :: proc(
 	allocator := context.allocator,
 ) -> (
 	buffer: Command_Buffer,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	allocate_info := vk.CommandBufferAllocateInfo {
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -195,6 +197,5 @@ _command_pool_allocate :: proc(
 
 	append(buffers_arr, buffer)
 
-	ok = true
-	return
+	return buffer, nil
 }

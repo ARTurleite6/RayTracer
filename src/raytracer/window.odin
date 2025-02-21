@@ -66,15 +66,10 @@ window_make_surface :: proc(
 	instance: ^vkb.Instance,
 ) -> (
 	surface: vk.SurfaceKHR,
-	ok: bool,
+	err: vk.Result,
 ) {
-	result := glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &surface)
-	if result != .SUCCESS {
-		ok = false
-		return
-	}
-
-	return surface, true
+	glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &surface) or_return
+	return surface, err
 }
 
 @(require_results)

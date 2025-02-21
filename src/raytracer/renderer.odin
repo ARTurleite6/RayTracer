@@ -22,7 +22,7 @@ renderer_init :: proc(
 	window: ^Window,
 	allocator := context.allocator,
 ) -> (
-	ok: bool,
+	err: Backend_Error,
 ) {
 	context_init(&renderer.ctx, window^, allocator) or_return
 	renderer.window = window
@@ -35,7 +35,7 @@ renderer_init :: proc(
 	) or_return
 
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
-	return true
+	return nil
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
@@ -45,7 +45,12 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 }
 
 @(require_results)
-renderer_begin_frame :: proc(renderer: ^Renderer, allocator := context.allocator) -> (ok: bool) {
+renderer_begin_frame :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
 	frame_manager_acquire(&renderer.ctx) or_return
 
 
@@ -57,7 +62,7 @@ renderer_begin_frame :: proc(renderer: ^Renderer, allocator := context.allocator
 		vk.ClearValue{color = {float32 = {0, 0, 0, 1}}},
 	)
 
-	return true
+	return nil
 }
 
 renderer_draw :: proc(renderer: ^Renderer) {
@@ -96,10 +101,15 @@ renderer_draw :: proc(renderer: ^Renderer) {
 }
 
 @(require_results)
-renderer_end_frame :: proc(renderer: ^Renderer) -> (result: vk.Result) {
+renderer_end_frame :: proc(renderer: ^Renderer) -> (err: Backend_Error) {
 	frame_manager_frame_end_rendering(&renderer.ctx)
 
-	renderer_flush(renderer) or_return
+	if result := renderer_flush(renderer); result != .SUCCESS {
+		if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
+			return .NeedsResizing
+		}
+		return result
+	}
 	frame_manager_advance(&renderer.ctx)
 	return
 }
@@ -116,12 +126,16 @@ renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
 	return
 }
 
-renderer_handle_resize :: proc(renderer: ^Renderer, allocator := context.allocator) -> (ok: bool) {
+renderer_handle_resize :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
 	handle_resize(&renderer.ctx, renderer.window^, allocator) or_return
 
 	renderer.camera.aspect = window_aspect_ratio(renderer.window^)
 	camera_update_matrices(&renderer.camera)
 
-	ok = true
-	return
+	return nil
 }

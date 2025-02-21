@@ -22,7 +22,7 @@ make_vertex_shader_module :: proc(
 	entrypoint: string,
 ) -> (
 	shader_module: Shader_Module,
-	ok: bool,
+	err: Shader_Error,
 ) {
 	return _make_shader_module(device, filepath, entrypoint, {.VERTEX})
 }
@@ -34,7 +34,7 @@ make_fragment_shader_module :: proc(
 	entrypoint: string,
 ) -> (
 	shader_module: Shader_Module,
-	ok: bool,
+	err: Shader_Error,
 ) {
 	return _make_shader_module(device, filepath, entrypoint, {.FRAGMENT})
 }
@@ -52,9 +52,9 @@ _make_shader_module :: proc(
 	stage: vk.ShaderStageFlags,
 ) -> (
 	shader_module: Shader_Module,
-	ok: bool,
+	err: Shader_Error,
 ) {
-	content := string(os.read_entire_file(filepath) or_return)
+	content := string(os.read_entire_file_or_err(filepath) or_return)
 
 	code := transmute([]u32)content
 
@@ -71,7 +71,5 @@ _make_shader_module :: proc(
 
 	shader_module.entrypoint = entrypoint
 	shader_module.stage = stage
-
-	ok = true
 	return
 }

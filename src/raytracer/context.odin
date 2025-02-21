@@ -11,6 +11,22 @@ import vk "vendor:vulkan"
 _ :: fmt
 _ :: slice
 
+Backend_Error :: union #shared_nil {
+	vk.Result,
+	Initialization_Error,
+	Shader_Error,
+	Image_Aquiring_Error,
+}
+
+Initialization_Error :: enum {
+	Success = 0,
+	CreatingInstance,
+	ChoosingDevice,
+	CreatingDevice,
+	CreatingSwapchain,
+	GettingQueue,
+}
+
 Context :: struct {
 	device:                ^vkb.Device,
 	instance:              ^vkb.Instance,
@@ -31,9 +47,18 @@ Swapchain :: struct {
 	image_views:     []vk.ImageView,
 }
 
-context_init :: proc(ctx: ^Context, window: Window, allocator := context.allocator) -> (ok: bool) {
+context_init :: proc(
+	ctx: ^Context,
+	window: Window,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
 	{ 	// Create instance
-		builder := vkb.init_instance_builder() or_return
+		builder, instance_ok := vkb.init_instance_builder()
+		if !instance_ok {
+			return .CreatingInstance
+		}
 		defer vkb.destroy_instance_builder(&builder)
 
 
@@ -44,34 +69,56 @@ context_init :: proc(ctx: ^Context, window: Window, allocator := context.allocat
 			vkb.instance_use_default_debug_messenger(&builder)
 		}
 
-		ctx.instance = vkb.build_instance(&builder) or_return
+		ok: bool
+		if ctx.instance, ok = vkb.build_instance(&builder); !ok {
+			return .CreatingInstance
+		}
 	}
 
 	ctx.surface = window_make_surface(window, ctx.instance) or_return
 
 	{ 	// choose physical device
-		selector := vkb.init_physical_device_selector(ctx.instance) or_return
+		selector, selector_ok := vkb.init_physical_device_selector(ctx.instance)
+		if !selector_ok {
+			return .ChoosingDevice
+		}
 		defer vkb.destroy_physical_device_selector(&selector)
 
 		vkb.selector_set_minimum_version(&selector, vk.API_VERSION_1_3)
 		vkb.selector_set_required_features_13(&selector, {dynamicRendering = true})
 		vkb.selector_set_surface(&selector, ctx.surface)
 
-		ctx.physical_device = vkb.select_physical_device(&selector, allocator = allocator)
+		ok: bool
+		if ctx.physical_device, ok = vkb.select_physical_device(&selector, allocator = allocator);
+		   !ok {
+			return .ChoosingDevice
+		}
 	}
 
 	{ 	// logical device
-		builder := vkb.init_device_builder(ctx.physical_device) or_return
+		builder, device_ok := vkb.init_device_builder(ctx.physical_device)
+		if !device_ok {
+			return .CreatingDevice
+		}
 		defer vkb.destroy_device_builder(&builder)
 
-		ctx.device = vkb.build_device(&builder, allocator) or_return
+		ok: bool
+		if ctx.device, ok = vkb.build_device(&builder, allocator); !ok {
+			return .CreatingDevice
+		}
 	}
 
 	ctx.swapchain = make_swapchain(ctx, window) or_return
 
 	{ 	// get queues
-		ctx.graphics_queue = vkb.device_get_queue(ctx.device, .Graphics) or_return
-		ctx.present_queue = vkb.device_get_queue(ctx.device, .Present) or_return
+		ok: bool
+		if ctx.graphics_queue, ok = vkb.device_get_queue(ctx.device, .Graphics); !ok {
+			return .GettingQueue
+
+		}
+		if ctx.present_queue, ok = vkb.device_get_queue(ctx.device, .Present); !ok {
+			return .GettingQueue
+		}
 	}
 
 
@@ -108,7 +155,7 @@ context_init :: proc(ctx: ^Context, window: Window, allocator := context.allocat
 		{.TRANSIENT},
 	) or_return
 
-	return true
+	return nil
 }
 
 @(require_results)
@@ -118,10 +165,13 @@ make_swapchain :: proc(
 	allocator := context.allocator,
 ) -> (
 	swapchain: Swapchain,
-	ok: bool,
+	err: Backend_Error,
 ) {
 	// create swapchain
-	builder := vkb.init_swapchain_builder(ctx.device) or_return
+	builder, swapchain_ok := vkb.init_swapchain_builder(ctx.device)
+	if !swapchain_ok {
+		return {}, .CreatingSwapchain
+	}
 	defer vkb.destroy_swapchain_builder(&builder)
 
 	vkb.swapchain_builder_set_old_swapchain(&builder, ctx.swapchain)
@@ -131,12 +181,20 @@ make_swapchain :: proc(
 	vkb.swapchain_builder_set_present_mode(&builder, .FIFO)
 	vkb.swapchain_builder_set_present_mode(&builder, .MAILBOX)
 
-	swapchain._internal = vkb.build_swapchain(&builder) or_return
+	ok: bool
+	if swapchain._internal, ok = vkb.build_swapchain(&builder); !ok {
+		return {}, .CreatingSwapchain
+	}
 
-	swapchain.images = vkb.swapchain_get_images(swapchain, allocator = allocator) or_return
-	swapchain.image_views = vkb.swapchain_get_image_views(swapchain, allocator = allocator)
+	if swapchain.images, ok = vkb.swapchain_get_images(swapchain, allocator = allocator); !ok {
+		return {}, .CreatingSwapchain
+	}
+	if swapchain.image_views, ok = vkb.swapchain_get_image_views(swapchain, allocator = allocator);
+	   !ok {
+		return {}, .CreatingSwapchain
+	}
 
-	return swapchain, true
+	return swapchain, nil
 }
 
 delete_swapchain :: proc(swapchain: Swapchain) {
@@ -152,7 +210,7 @@ handle_resize :: proc(
 	window: Window,
 	allocator := context.allocator,
 ) -> (
-	ok: bool,
+	err: Backend_Error,
 ) {
 	window_extent := window_get_extent(window)
 	for window_extent.width == 0 && window_extent.height == 0 {
@@ -168,12 +226,12 @@ handle_resize :: proc(
 		delete_swapchain(old_swapchain)
 
 		delete_frame_manager(ctx)
-		ctx.frame_manager, ok = make_frame_manager(ctx^)
+		ctx.frame_manager, err = make_frame_manager(ctx^)
 	}
 
-	ctx.swapchain, ok = make_swapchain(ctx, window, allocator = allocator)
+	ctx.swapchain = make_swapchain(ctx, window, allocator = allocator) or_return
 
-	return
+	return nil
 }
 
 delete_context :: proc(ctx: ^Context) {
@@ -216,10 +274,10 @@ vk_must :: proc(result: vk.Result, message: string) {
 
 @(private)
 @(require_results)
-vk_check :: proc(result: vk.Result, message: string) -> bool {
+vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 	if result != .SUCCESS {
 		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
-		return false
+		return result
 	}
-	return true
+	return nil
 }
