@@ -14,8 +14,8 @@ Uniform_Buffer_Object :: struct {
 // TODO: Implement a distinct type for each vertex type (Vertex, Index, Uniform)
 Buffer :: struct {
 	handle:         vk.Buffer,
-	allocation:     vma.Allocation,
 	allocator:      vma.Allocator,
+	allocation:     vma.Allocation,
 	size:           vk.DeviceSize,
 	instance_size:  vk.DeviceSize,
 	instance_count: u32,
@@ -24,7 +24,26 @@ Buffer :: struct {
 	mapped:         bool,
 }
 
-make_index_buffer :: proc(
+create_uniform_buffer :: proc(
+	ctx: ^Context,
+	count: u32 = 1,
+) -> (
+	uniform_buffer: Buffer,
+	err: Backend_Error,
+) {
+	min_alignment := ctx.physical_device.properties.limits.minUniformBufferOffsetAlignment
+
+	return create_buffer(
+		ctx^,
+		vk.DeviceSize(size_of(Uniform_Buffer_Object)),
+		count,
+		{.UNIFORM_BUFFER},
+		.Cpu_To_Gpu,
+		min_alignment,
+	)
+}
+
+create_index_buffer :: proc(
 	ctx: ^Context,
 	indices: []u16,
 	allocator := context.allocator,
@@ -37,7 +56,7 @@ make_index_buffer :: proc(
 
 	index_size := size_of(16)
 
-	return _make_buffer_with_staging(
+	return _create_buffer_with_staging(
 		ctx,
 		vk.DeviceSize(index_size),
 		index_count,
@@ -46,7 +65,7 @@ make_index_buffer :: proc(
 	)
 }
 
-make_vertex_buffer :: proc(
+create_vertex_buffer :: proc(
 	ctx: ^Context,
 	vertices: []Vertex,
 	allocator := context.allocator,
@@ -59,7 +78,7 @@ make_vertex_buffer :: proc(
 
 	vertex_size := size_of(Vertex)
 
-	return _make_buffer_with_staging(
+	return _create_buffer_with_staging(
 		ctx,
 		vk.DeviceSize(vertex_size),
 		vertex_count,
@@ -84,6 +103,21 @@ vertex_buffer_bind :: proc(buffer: Buffer, cmd: Command_Buffer, offset: vk.Devic
 	)
 }
 
+buffer_flush :: proc(
+	buffer: Buffer,
+	size: vk.DeviceSize,
+	offset: vk.DeviceSize = 0,
+) -> Backend_Error {
+	return vma.flush_allocation(buffer.allocator, buffer.allocation, offset, size)
+}
+
+buffer_flush_index :: proc(buffer: Buffer, index: int) -> Backend_Error {
+	return buffer_flush(
+		buffer,
+		buffer.alignment_size,
+		vk.DeviceSize(index) * buffer.alignment_size,
+	)
+}
 
 buffer_copy_from :: proc(
 	ctx: ^Context,
@@ -133,7 +167,7 @@ buffer_copy_from :: proc(
 }
 
 
-make_buffer :: proc(
+create_buffer :: proc(
 	ctx: Context,
 	instance_size: vk.DeviceSize,
 	instance_count: u32,
@@ -215,7 +249,7 @@ buffer_write_to_index :: proc(buffer: Buffer, data: rawptr, index: int) {
 	)
 }
 
-delete_buffer :: proc(buffer: ^Buffer) {
+buffer_destroy :: proc(buffer: ^Buffer) {
 	if buffer.mapped {
 		buffer_unmap(buffer)
 	}
@@ -224,7 +258,7 @@ delete_buffer :: proc(buffer: ^Buffer) {
 }
 
 @(private = "file")
-_make_buffer_with_staging :: proc(
+_create_buffer_with_staging :: proc(
 	ctx: ^Context,
 	instance_size: vk.DeviceSize,
 	instance_count: u32,
@@ -235,20 +269,20 @@ _make_buffer_with_staging :: proc(
 	buffer: Buffer,
 	err: Backend_Error,
 ) {
-	staging_buffer := make_buffer(
+	staging_buffer := create_buffer(
 		ctx^,
 		instance_size,
 		instance_count,
 		{.TRANSFER_SRC},
 		.Cpu_To_Gpu,
 	) or_return
-	defer delete_buffer(&staging_buffer)
+	defer buffer_destroy(&staging_buffer)
 
 	buffer_map(&staging_buffer) or_return
 	buffer_write(staging_buffer, data)
 	buffer_unmap(&staging_buffer)
 
-	buffer = make_buffer(
+	buffer = create_buffer(
 		ctx^,
 		vk.DeviceSize(instance_size),
 		instance_count,

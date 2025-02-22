@@ -29,6 +29,7 @@ Context :: struct {
 	instance:              ^vkb.Instance,
 	surface:               vk.SurfaceKHR,
 	swapchain:             Swapchain,
+	descriptor_set_layout: Descriptor_Set_Layout,
 	pipeline:              Pipeline,
 	graphics_queue:        vk.Queue,
 	present_queue:         vk.Queue,
@@ -36,6 +37,7 @@ Context :: struct {
 	frame_manager:         Frame_Manager,
 	allocator:             vma.Allocator,
 	transfer_command_pool: Command_Pool,
+	descriptor_pool:       Descriptor_Pool,
 }
 
 Swapchain :: struct {
@@ -125,9 +127,17 @@ context_init :: proc(
 	shaders[0] = make_vertex_shader_module(ctx.device, "shaders/vert.spv", "main") or_return
 	shaders[1] = make_fragment_shader_module(ctx.device, "shaders/frag.spv", "main") or_return
 
-	ctx.pipeline = make_graphics_pipeline(ctx.device, ctx.swapchain, shaders) or_return
+	{ 	// create descriptor set layout
+		builder := create_descriptor_set_layout_builder(ctx.device.ptr, allocator)
 
-	ctx.frame_manager = make_frame_manager(ctx^, allocator) or_return
+		descriptor_set_layout_add_binding(&builder, 0, .UNIFORM_BUFFER, {.VERTEX})
+
+		ctx.descriptor_set_layout = create_descriptor_set_layout(builder) or_return
+	}
+
+	ctx.pipeline = create_graphics_pipeline(ctx^, shaders) or_return
+
+	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
 
 	{
 		vma_functions := vma.create_vulkan_functions()
@@ -151,6 +161,17 @@ context_init :: proc(
 		"Transfer Command Pool",
 		{.TRANSIENT},
 	) or_return
+
+	{ 	// create descriptor pool
+		builder := create_descriptor_pool_builder(
+			ctx.device.ptr,
+			MAX_FRAMES_IN_FLIGHT,
+			allocator = allocator,
+		)
+		descriptor_pool_add_pool_size(&builder, .UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT)
+
+		ctx.descriptor_pool = create_descriptor_pool(builder) or_return
+	}
 
 	return nil
 }
@@ -223,7 +244,7 @@ handle_resize :: proc(
 		delete_swapchain(old_swapchain)
 
 		delete_frame_manager(ctx)
-		ctx.frame_manager, err = make_frame_manager(ctx^)
+		ctx.frame_manager, err = make_frame_manager(ctx)
 	}
 
 	ctx.swapchain = make_swapchain(ctx, window, allocator = allocator) or_return
@@ -234,8 +255,10 @@ handle_resize :: proc(
 delete_context :: proc(ctx: ^Context) {
 	vk.DeviceWaitIdle(ctx.device.ptr)
 
+	descriptor_pool_destroy(ctx.descriptor_pool)
 	delete_frame_manager(ctx)
-	delete_pipeline(ctx.pipeline, ctx.device)
+	pipeline_destroy(ctx.pipeline, ctx.device)
+	descriptor_set_layout_destroy(ctx.descriptor_set_layout)
 	delete_command_pool(&ctx.transfer_command_pool)
 
 	delete_swapchain(ctx.swapchain)

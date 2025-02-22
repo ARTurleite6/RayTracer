@@ -46,18 +46,20 @@ Mesh :: struct {
 	has_indices:   bool,
 }
 
-mesh_init :: proc {
-	mesh_init_without_indices,
-	mesh_init_with_indices,
+create_mesh :: proc {
+	create_mesh_without_indices,
+	create_mesh_with_indices,
 }
 
-quad_init :: proc(
-	mesh: ^Mesh,
+create_quad :: proc(
 	ctx: ^Context,
 	name: string,
 	transform: Mat4 = {},
 	allocator := context.allocator,
-) -> Backend_Error {
+) -> (
+	Mesh,
+	Backend_Error,
+) {
 	vertices := []Vertex {
 		{position = {-0.5, -0.5, 0}, color = {1.0, 0.0, 0.0}},
 		{position = {0.5, -0.5, 0}, color = {0.0, 1.0, 0.0}},
@@ -66,11 +68,10 @@ quad_init :: proc(
 	}
 
 	indices := []u16{0, 1, 2, 2, 3, 0}
-	return mesh_init(mesh, ctx, name, vertices, indices, transform, allocator)
+	return create_mesh(ctx, name, vertices, indices, transform, allocator)
 }
 
-mesh_init_with_indices :: proc(
-	mesh: ^Mesh,
+create_mesh_with_indices :: proc(
 	ctx: ^Context,
 	name: string,
 	vertices: []Vertex,
@@ -78,21 +79,22 @@ mesh_init_with_indices :: proc(
 	transform: Mat4 = {},
 	allocator := context.allocator,
 ) -> (
+	mesh: Mesh,
 	err: Backend_Error,
 ) {
 	mesh.name = strings.clone(name, allocator)
-	mesh.vertex_buffer = make_vertex_buffer(ctx, vertices) or_return
+	mesh.vertex_buffer = create_vertex_buffer(ctx, vertices) or_return
 	mesh.vertex_count = mesh.vertex_count
 
 	mesh.has_indices = true
 	mesh.indices_count = len(indices)
-	mesh.index_buffer = make_index_buffer(ctx, indices) or_return
+	mesh.index_buffer = create_index_buffer(ctx, indices) or_return
 	mesh.transform = transform
 
-	return nil
+	return mesh, nil
 }
 
-mesh_init_without_indices :: proc(
+create_mesh_without_indices :: proc(
 	mesh: ^Mesh,
 	ctx: ^Context,
 	name: string,
@@ -103,7 +105,7 @@ mesh_init_without_indices :: proc(
 	err: Backend_Error,
 ) {
 	mesh.name = strings.clone(name, allocator)
-	mesh.vertex_buffer = make_vertex_buffer(ctx, vertices) or_return
+	mesh.vertex_buffer = create_vertex_buffer(ctx, vertices) or_return
 	mesh.vertex_count = len(vertices)
 	mesh.transform = transform
 	return nil
@@ -127,9 +129,9 @@ mesh_draw :: proc(mesh: Mesh, cmd: Command_Buffer) {
 
 mesh_destroy :: proc(mesh: ^Mesh) {
 	delete(mesh.name)
-	delete_buffer(&mesh.vertex_buffer)
+	buffer_destroy(&mesh.vertex_buffer)
 
 	if mesh.has_indices {
-		delete_buffer(&mesh.vertex_buffer)
+		buffer_destroy(&mesh.vertex_buffer)
 	}
 }
