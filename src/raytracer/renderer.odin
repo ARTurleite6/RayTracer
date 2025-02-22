@@ -1,214 +1,170 @@
 package raytracer
 
-import "core:log"
-import "core:math/linalg"
-import "core:slice"
-import "core:thread"
-_ :: log
+import "core:fmt"
+import glm "core:math/linalg"
+import vk "vendor:vulkan"
+_ :: fmt
+_ :: glm
 
 Renderer :: struct {
-	camera:                                     ^Camera,
-	scene:                                      ^Scene,
-	image:                                      ^Image,
-	image_horizontal_iter, image_vertical_iter: [dynamic]u32,
-	accumulation_data:                          []Vec4,
-	image_data:                                 []u32,
-	frame_index:                                u32,
-	accumulate:                                 bool,
+	ctx:    Context,
+	window: ^Window,
+	mesh:   Mesh,
+	camera: Camera,
 }
 
-Hit_Payload :: struct {
-	hit_distance:                 f32,
-	world_position, world_normal: Vec3,
-	object_index:                 int,
-	front_face:                   bool,
+VERTICES := []Vertex {
+	{{0.0, -0.5, 0.0}, {1.0, 0.0, 0.0}},
+	{{0.5, 0.5, 0.0}, {0.0, 1.0, 0.0}},
+	{{-0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}},
 }
 
-renderer_render :: proc(renderer: ^Renderer) {
-	if renderer.frame_index == 1 {
-		slice.fill(renderer.accumulation_data, 0)
+renderer_init :: proc(
+	renderer: ^Renderer,
+	window: ^Window,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
+	context_init(&renderer.ctx, window^, allocator) or_return
+	renderer.window = window
+
+	// mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
+	renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
+
+	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
+	return nil
+}
+
+renderer_destroy :: proc(renderer: ^Renderer) {
+	vk.DeviceWaitIdle(renderer.ctx.device.ptr)
+	mesh_destroy(&renderer.mesh)
+	delete_context(&renderer.ctx)
+}
+
+@(require_results)
+renderer_begin_frame :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
+	frame_manager_acquire(&renderer.ctx) or_return
+
+	frame := renderer.ctx.frame_manager.frames[renderer.ctx.frame_manager.current_frame]
+
+	ubo := Uniform_Buffer_Object {
+		view_proj = glm.matrix4_rotate_f32(glm.to_radians(f32(90)), {0, 0, 1}),
+	}
+	buffer_write(frame.uniform_buffer, &ubo)
+
+	buffer_info := vk.DescriptorBufferInfo {
+		buffer = frame.uniform_buffer.handle,
+		offset = 0,
+		range  = size_of(Uniform_Buffer_Object),
 	}
 
-	pool: thread.Pool
-	thread.pool_init(&pool, context.temp_allocator, 16)
+	descriptor_write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = frame.descriptor_set,
+		dstBinding      = 0,
+		dstArrayElement = 0,
+		descriptorType  = .UNIFORM_BUFFER,
+		descriptorCount = 1,
+		pBufferInfo     = &buffer_info,
+	}
 
-	y_chunk_size := int(renderer.image.height / 16)
-	x_chunk_size := int(renderer.image.width / 16)
-	for y := 0; y < int(renderer.image.height); y += y_chunk_size {
-		for x := 0; x < int(renderer.image.height); x += x_chunk_size {
-			Task :: struct {
-				renderer:  ^Renderer,
-				outer_idx: int,
-				inner_idx: int,
-				outer_end: int,
-				inner_end: int,
-			}
-			task := new(Task, context.temp_allocator)
-			task.renderer = renderer
-			task.outer_idx = y
-			task.inner_idx = x
-			task.outer_end = min(int(y + y_chunk_size), int(renderer.image.height))
-			task.inner_end = min(int(x + x_chunk_size), int(renderer.image.width))
+	vk.UpdateDescriptorSets(renderer.ctx.device.ptr, 1, &descriptor_write, 0, nil)
 
-			thread.pool_add_task(&pool, context.allocator, proc(task: thread.Task) {
-					context.allocator = task.allocator
-					task_data := cast(^Task)task.data
-					renderer := task_data.renderer
+	frame_manager_frame_begin(&renderer.ctx) or_return
 
-					for y in task_data.outer_idx ..< task_data.outer_end {
-						for x in task_data.inner_idx ..< task_data.inner_end {
-							x := u32(x)
-							y := u32(y)
+	frame_manager_frame_begin_rendering(
+		&renderer.ctx,
+		renderer.ctx.swapchain.extent,
+		vk.ClearValue{color = {float32 = {0, 0, 0, 1}}},
+	)
 
-							color := renderer_per_pixel(renderer^, x, y)
-							renderer.accumulation_data[x + y * renderer.image.width] += color
+	return nil
+}
 
-							accumulated_color :=
-								renderer.accumulation_data[x + y * renderer.image.width]
-							accumulated_color /= f32(renderer.frame_index)
+renderer_draw :: proc(renderer: ^Renderer) {
+	frame := frame_manager_get_frame(&renderer.ctx.frame_manager) // TODO: Improve this
+	cmd_handle := frame.command_buffer.handle
 
-							accumulated_color = linalg.clamp(accumulated_color, 0, 1)
-							renderer.image_data[x + y * renderer.image.width] = convert_to_rgba(
-								accumulated_color,
-							)
+	vk.CmdBindPipeline(cmd_handle, .GRAPHICS, renderer.ctx.pipeline.handle)
 
-						}
-					}
-				}, task)
+	viewport := vk.Viewport {
+		x        = 0,
+		y        = 0,
+		width    = f32(renderer.ctx.swapchain.extent.width),
+		height   = f32(renderer.ctx.swapchain.extent.height),
+		minDepth = 0,
+		maxDepth = 1,
+	}
+
+	vk.CmdSetViewport(cmd_handle, 0, 1, &viewport)
+
+	scissor := vk.Rect2D {
+		offset = {0, 0},
+		extent = renderer.ctx.swapchain.extent,
+	}
+
+	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
+
+	mesh_bind(renderer.mesh, frame.command_buffer)
+
+	vk.CmdBindDescriptorSets(
+		cmd_handle,
+		.GRAPHICS,
+		renderer.ctx.pipeline.layout,
+		0,
+		1,
+		&frame.descriptor_set,
+		0,
+		nil,
+	)
+
+	mesh_draw(renderer.mesh, frame.command_buffer)
+
+	vk.CmdDraw(cmd_handle, u32(len(VERTICES)), 1, 0, 0)
+}
+
+@(require_results)
+renderer_end_frame :: proc(renderer: ^Renderer) -> (err: Backend_Error) {
+	frame_manager_frame_end_rendering(&renderer.ctx)
+
+	if result := renderer_flush(renderer); result != .SUCCESS {
+		if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
+			return .NeedsResizing
 		}
+		return result
 	}
-
-	thread.pool_start(&pool)
-	thread.pool_finish(&pool)
-
-	image_set_data(renderer.image^, raw_data(renderer.image_data[:]))
-
-	if renderer.accumulate {
-		renderer.frame_index += 1
-	}
+	frame_manager_advance(&renderer.ctx)
+	return
 }
 
-renderer_on_resize :: proc(renderer: ^Renderer, width, height: u32) {
+@(require_results)
+renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
+	cmd := frame_manager_frame_get_command_buffer(&renderer.ctx)
+	vk.EndCommandBuffer(cmd.handle) or_return // TODO: probably clean this
 
-	if renderer.image != nil {
-		if renderer.image.width == width && renderer.image.height == height {
-			return
-		}
+	frame_manager_frame_submit(&renderer.ctx) or_return
 
-		image_resize(renderer.image, width, height)
-	} else {
-		renderer.image = new(Image)
-		image_init(renderer.image, width, height)
-	}
+	frame_manager_frame_present(&renderer.ctx) or_return
 
-	delete(renderer.image_data)
-	renderer.image_data = make([]u32, width * height)
-
-	delete(renderer.accumulation_data)
-	renderer.accumulation_data = make([]Vec4, width * height)
-
-	resize(&renderer.image_horizontal_iter, width)
-	resize(&renderer.image_vertical_iter, height)
-
-	for i in 0 ..< width {
-		renderer.image_horizontal_iter[i] = i
-	}
-
-	for i in 0 ..< height {
-		renderer.image_vertical_iter[i] = i
-	}
-
-	renderer.frame_index = 1
+	return
 }
 
-renderer_per_pixel :: proc(renderer: Renderer, x, y: u32) -> Vec4 {
-	ray := Ray {
-		origin    = renderer.camera.position,
-		direction = renderer.camera.ray_directions[x + y * renderer.image.width],
-	}
-	light: Vec3
-	contribution := Vec3{1.0, 1.0, 1.0}
+renderer_handle_resize :: proc(
+	renderer: ^Renderer,
+	allocator := context.allocator,
+) -> (
+	err: Backend_Error,
+) {
+	handle_resize(&renderer.ctx, renderer.window^, allocator) or_return
 
-	bounces := 5
-	for _ in 0 ..< bounces {
-		payload := renderer_trace_ray(renderer, ray)
-		if payload.hit_distance < 0 {
-			sky_color := Vec3{0.6, 0.7, 0.9}
-			light += sky_color * contribution
-			break
-		}
+	renderer.camera.aspect = window_aspect_ratio(renderer.window^)
+	camera_update_matrices(&renderer.camera)
 
-		sphere := renderer.scene.spheres[payload.object_index]
-		context.user_index = payload.object_index
-		material := renderer.scene.materials[sphere.material_index]
-
-		light += material_get_emission(material)
-
-		onb: ONB
-		onb_init(&onb, payload.world_normal)
-		wo := onb_world_to_local(onb, -ray.direction)
-
-		f, pdf, wi := multi_brdf_sample(material, wo, random_vec2())
-		if pdf == 0 {
-			break
-		}
-		contribution *= f * wi.z / pdf
-		ray.origin = payload.world_position + payload.world_normal * 0.0001
-		ray.direction = onb_local_to_world(onb, wi)
-
-	}
-	return Vec4{light.x, light.y, light.z, 1.0}
-}
-
-renderer_trace_ray :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
-	closest_sphere := -1
-	interval := empty_interval()
-	hit_distance := interval.max
-
-	for &sphere, i in renderer.scene.spheres {
-		if distance, did_hit := sphere_hit(
-			sphere,
-			ray,
-			Interval{min = interval.min, max = hit_distance},
-		); did_hit {
-			hit_distance = distance
-			closest_sphere = i
-		}
-	}
-
-	if closest_sphere < 0 {
-		return renderer_miss(renderer, ray)
-	}
-	return renderer_closest_hit(renderer, ray, hit_distance, u32(closest_sphere))
-}
-
-renderer_closest_hit :: proc(
-	renderer: Renderer,
-	ray: Ray,
-	hit_distance: f32,
-	object_index: u32,
-) -> Hit_Payload {
-	payload := Hit_Payload {
-		hit_distance = hit_distance,
-		object_index = int(object_index),
-	}
-
-	sphere := renderer.scene.spheres[object_index]
-	origin := ray.origin - sphere.position
-	payload.world_position = origin + ray.direction * hit_distance
-	payload.world_normal = linalg.normalize(payload.world_position)
-	payload.front_face = linalg.dot(-ray.direction, payload.world_normal) > 0
-	payload.world_normal = payload.front_face ? payload.world_normal : -payload.world_normal
-
-	payload.world_position += sphere.position
-
-	return payload
-}
-
-renderer_miss :: proc(renderer: Renderer, ray: Ray) -> Hit_Payload {
-	return Hit_Payload{hit_distance = -1}
-}
-
-renderer_reset_frame_index :: proc(renderer: ^Renderer) {
-	renderer.frame_index = 1
+	return nil
 }

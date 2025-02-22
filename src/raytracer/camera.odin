@@ -1,153 +1,62 @@
 package raytracer
 
-import "core:log"
-import "core:math/linalg"
-import "vendor:glfw"
-_ :: log
+import "core:math"
+import glm "core:math/linalg"
 
-ROTATION_SPEED :: 0.5
+Vec3 :: glm.Vector3f32
+Mat4 :: glm.Matrix4f32
 
 Camera :: struct {
-	projection, view, inverse_projection, inverse_view: Mat4,
-	vertical_fov, near_clip, far_clip:                  f32,
-	position, forward_direction:                        Vec3,
-	ray_directions:                                     [dynamic]Vec3,
-	last_mouse_position:                                Vec2,
-	viewport_width, viewport_height:                    u32,
+	position: Vec3,
+	forward:  Vec3,
+	up:       Vec3,
+	right:    Vec3,
+	fov:      f32,
+	aspect:   f32,
+	near:     f32,
+	far:      f32,
+	view:     Mat4,
+	proj:     Mat4,
 }
 
-camera_init :: proc(camera: ^Camera, vertical_fov, near_clip, far_clip: f32) {
-	camera.vertical_fov = vertical_fov
-	camera.near_clip = near_clip
-	camera.far_clip = far_clip
-
-	camera.forward_direction = {0, 0, -1}
-	camera.position = {0, 0, 6}
-
-	camera_recalculate_projections(camera)
-	camera_recalculate_view(camera)
-	camera_recalculate_ray_directions(camera)
+camera_init :: proc(
+	camera: ^Camera,
+	position: Vec3 = {0, 0, -3},
+	target: Vec3 = {0, 0, 0},
+	up: Vec3 = {0, 1, 0},
+	fov: f32 = 45,
+	aspect: f32 = 16.0 / 9.0,
+	near: f32 = 0.1,
+	far: f32 = 100,
+) {
+	camera^ = {
+		position = position,
+		fov      = fov,
+		aspect   = aspect,
+		near     = near,
+		far      = far,
+	}
+	camera_look_at(camera, target, up)
+	camera_update_matrices(camera)
 }
 
-camera_update :: proc(camera: ^Camera, window: glfw.WindowHandle, ts: f32) -> (moved: bool) {
-	mouse_position := get_mouse_position(window)
-	delta := (mouse_position - camera.last_mouse_position) * 0.002
-	camera.last_mouse_position = mouse_position
-
-	if !is_mouse_button_down(window, glfw.MOUSE_BUTTON_RIGHT) {
-		set_cursor_mode(window, .Normal)
-		return false
-	}
-
-	set_cursor_mode(window, .Locked)
-
-	up_direction :: Vec3{0, 1, 0}
-	right_direction := linalg.cross(camera.forward_direction, up_direction)
-
-	speed :: 5
-
-	if is_key_down(window, glfw.KEY_W) {
-		camera.position += camera.forward_direction * speed * ts
-		moved = true
-	}
-
-	if is_key_down(window, glfw.KEY_S) {
-		camera.position += -camera.forward_direction * speed * ts
-		moved = true
-	}
-
-	if is_key_down(window, glfw.KEY_D) {
-		camera.position += right_direction * speed * ts
-		moved = true
-	}
-
-	if is_key_down(window, glfw.KEY_A) {
-		camera.position += -right_direction * speed * ts
-		moved = true
-	}
-
-	if delta.x != 0 || delta.y != 0 {
-		pitch_delta := delta.y * ROTATION_SPEED
-		yaw_delta := delta.x * ROTATION_SPEED
-
-		q := linalg.normalize(
-			linalg.cross(
-				linalg.quaternion_angle_axis(-pitch_delta, right_direction),
-				linalg.quaternion_angle_axis(-yaw_delta, up_direction),
-			),
-		)
-
-		camera.forward_direction = linalg.quaternion_mul_vector3(q, camera.forward_direction)
-
-		moved = true
-	}
-
-	if moved {
-		camera_recalculate_view(camera)
-		camera_recalculate_ray_directions(camera)
-	}
-
-	return
+camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
+	camera.forward = glm.normalize(target - camera.position)
+	camera.right = glm.normalize(glm.cross(camera.forward, up))
+	camera.up = glm.normalize(glm.cross(camera.right, camera.forward))
 }
 
-camera_recalculate_view :: proc(camera: ^Camera) {
-	camera.view = linalg.matrix4_look_at(
-		camera.position,
-		camera.position + camera.forward_direction,
-		Vec3{0, 1, 0},
+camera_update_matrices :: proc(camera: ^Camera) {
+	camera.view = glm.matrix4_look_at(camera.position, camera.position + camera.forward, camera.up)
+
+	camera.proj = glm.matrix4_perspective(
+		math.to_radians(camera.fov),
+		camera.aspect,
+		camera.near,
+		camera.far,
 	)
-	camera.inverse_view = linalg.inverse(camera.view)
 }
 
-camera_on_resize :: proc(camera: ^Camera, width, height: u32) {
-	if width == camera.viewport_width && height == camera.viewport_height {
-		return
-	}
-
-	log.debugf(
-		"Resizing camera on from (%d, %d) to (%d, %d)",
-		camera.viewport_width,
-		camera.viewport_height,
-		width,
-		height,
-	)
-
-	camera.viewport_width = width
-	camera.viewport_height = height
-
-	camera_recalculate_projections(camera)
-	camera_recalculate_ray_directions(camera)
-}
-
-camera_recalculate_projections :: proc(camera: ^Camera) {
-	aspect := f32(camera.viewport_width) / f32(camera.viewport_height)
-	camera.projection = linalg.matrix4_perspective(
-		linalg.to_radians(camera.vertical_fov),
-		aspect,
-		camera.near_clip,
-		camera.far_clip,
-	)
-
-	camera.inverse_projection = linalg.inverse(camera.projection)
-}
-
-camera_recalculate_ray_directions :: proc(camera: ^Camera) {
-	resize(&camera.ray_directions, camera.viewport_width * camera.viewport_height)
-
-	for y in 0 ..< camera.viewport_height {
-		for x in 0 ..< camera.viewport_width {
-			jitter := random_vec2(-0.5, 0.5)
-			coord := Vec2 {
-				(f32(x) + jitter.x) / f32(camera.viewport_width),
-				(f32(y) + jitter.y) / f32(camera.viewport_height),
-			}
-			coord = coord * 2 - 1
-
-			target := camera.inverse_projection * Vec4{coord.x, coord.y, 1, 1}
-			target_normalized := linalg.normalize(target.xyz / target.w)
-			ray_direction :=
-				(camera.inverse_view * Vec4{target_normalized.x, target_normalized.y, target_normalized.z, 0}).xyz
-			camera.ray_directions[x + y * camera.viewport_width] = ray_direction
-		}
-	}
+camera_get_view_proj :: proc(camera: Camera) -> Mat4 {
+	return camera.proj * camera.view
 }
