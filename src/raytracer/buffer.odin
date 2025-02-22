@@ -7,7 +7,7 @@ import vk "vendor:vulkan"
 _ :: runtime
 _ :: fmt
 
-Uniform_Buffer_Object :: struct {
+Uniform_Buffer_Object :: struct #align (16) {
 	view_proj: Mat4,
 }
 

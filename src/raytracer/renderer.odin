@@ -51,6 +51,30 @@ renderer_begin_frame :: proc(
 ) {
 	frame_manager_acquire(&renderer.ctx) or_return
 
+	frame := renderer.ctx.frame_manager.frames[renderer.ctx.frame_manager.current_frame]
+
+	ubo := Uniform_Buffer_Object {
+		view_proj = glm.matrix4_rotate_f32(glm.to_radians(f32(90)), {0, 0, 1}),
+	}
+	buffer_write(frame.uniform_buffer, &ubo)
+
+	buffer_info := vk.DescriptorBufferInfo {
+		buffer = frame.uniform_buffer.handle,
+		offset = 0,
+		range  = size_of(Uniform_Buffer_Object),
+	}
+
+	descriptor_write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = frame.descriptor_set,
+		dstBinding      = 0,
+		dstArrayElement = 0,
+		descriptorType  = .UNIFORM_BUFFER,
+		descriptorCount = 1,
+		pBufferInfo     = &buffer_info,
+	}
+
+	vk.UpdateDescriptorSets(renderer.ctx.device.ptr, 1, &descriptor_write, 0, nil)
 
 	frame_manager_frame_begin(&renderer.ctx) or_return
 
@@ -86,7 +110,20 @@ renderer_draw :: proc(renderer: ^Renderer) {
 	}
 
 	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
+
 	mesh_bind(renderer.mesh, frame.command_buffer)
+
+	vk.CmdBindDescriptorSets(
+		cmd_handle,
+		.GRAPHICS,
+		renderer.ctx.pipeline.layout,
+		0,
+		1,
+		&frame.descriptor_set,
+		0,
+		nil,
+	)
+
 	mesh_draw(renderer.mesh, frame.command_buffer)
 
 	vk.CmdDraw(cmd_handle, u32(len(VERTICES)), 1, 0, 0)
