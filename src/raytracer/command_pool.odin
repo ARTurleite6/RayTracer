@@ -10,11 +10,9 @@ _ :: fmt
 
 
 Command_Pool :: struct {
-	name:              string,
-	handle:            vk.CommandPool,
-	device:            ^vkb.Device,
-	primary_buffers:   [dynamic]Command_Buffer,
-	secondary_buffers: [dynamic]Command_Buffer,
+	name:   string,
+	handle: vk.CommandPool,
+	device: ^vkb.Device,
 }
 
 Command_Buffer :: struct {
@@ -45,8 +43,6 @@ make_command_pool :: proc(
 	) or_return
 	pool.name = strings.clone(name, allocator)
 
-	pool.primary_buffers = make([dynamic]Command_Buffer, allocator)
-	pool.secondary_buffers = make([dynamic]Command_Buffer, allocator)
 	pool.device = device
 
 	return pool, nil
@@ -65,7 +61,6 @@ command_pool_allocate_primary_buffer :: proc(
 		command_pool.device,
 		command_pool.handle,
 		.PRIMARY,
-		&command_pool.primary_buffers,
 		name,
 	) or_return
 
@@ -81,13 +76,7 @@ command_pool_allocate_secondary_buffer :: proc(
 	Command_Buffer,
 	Backend_Error,
 ) {
-	return _command_pool_allocate(
-		command_pool.device,
-		command_pool.handle,
-		.SECONDARY,
-		&command_pool.primary_buffers,
-		name,
-	)
+	return _command_pool_allocate(command_pool.device, command_pool.handle, .SECONDARY, name)
 }
 
 @(require_results)
@@ -99,17 +88,9 @@ command_pool_reset :: proc(command_pool: Command_Pool) -> Backend_Error {
 	)
 }
 
-delete_command_pool :: proc(command_pool: ^Command_Pool, device: ^vkb.Device) {
-	_delete_buffers(command_pool.primary_buffers[:], command_pool^)
-	_delete_buffers(command_pool.secondary_buffers[:], command_pool^)
-
-	clear(&command_pool.primary_buffers)
-	clear(&command_pool.secondary_buffers)
-	// delete(command_pool.primary_buffers)
-	// delete(command_pool.secondary_buffers)
-
+delete_command_pool :: proc(command_pool: ^Command_Pool) {
 	delete(command_pool.name)
-	vk.DestroyCommandPool(device.ptr, command_pool.handle, nil)
+	vk.DestroyCommandPool(command_pool.device.ptr, command_pool.handle, nil)
 }
 
 @(require_results)
@@ -161,12 +142,8 @@ command_buffer_reset :: proc(command_buffer: Command_Buffer) {
 	vk.ResetCommandBuffer(command_buffer.handle, {.RELEASE_RESOURCES})
 }
 
-@(private = "file")
-_delete_buffers :: proc(buffers: []Command_Buffer, command_pool: Command_Pool) {
-	for &b in buffers {
-		delete(b.name)
-		vk.FreeCommandBuffers(command_pool.device.ptr, command_pool.handle, 1, &b.handle)
-	}
+command_pool_delete_buffer :: proc(pool: Command_Pool, cmd: ^Command_Buffer) {
+	vk.FreeCommandBuffers(pool.device.ptr, pool.handle, 1, &cmd.handle)
 }
 
 @(private = "file")
@@ -175,7 +152,6 @@ _command_pool_allocate :: proc(
 	device: ^vkb.Device,
 	command_pool_handle: vk.CommandPool,
 	level: vk.CommandBufferLevel,
-	buffers_arr: ^[dynamic]Command_Buffer,
 	name: string,
 	allocator := context.allocator,
 ) -> (
@@ -194,8 +170,6 @@ _command_pool_allocate :: proc(
 		"Failed to allocate command buffers",
 	)
 	buffer.name = strings.clone(name, allocator)
-
-	append(buffers_arr, buffer)
 
 	return buffer, nil
 }

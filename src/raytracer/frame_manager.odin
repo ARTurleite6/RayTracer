@@ -171,7 +171,8 @@ frame_begin_commands :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 }
 
 delete_frame_data :: proc(ctx: Context, per_frame: ^Per_Frame) {
-	delete_command_pool(&per_frame.command_pool, ctx.device)
+	command_pool_delete_buffer(per_frame.command_pool, &per_frame.command_buffer)
+	delete_command_pool(&per_frame.command_pool)
 	delete_fence(per_frame.in_flight_fence)
 	delete_semaphore(per_frame.image_available)
 	delete_semaphore(per_frame.render_finished)
