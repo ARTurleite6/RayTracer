@@ -44,7 +44,6 @@ delete_application :: proc(app: Application) {
 }
 
 application_run :: proc(app: ^Application, allocator := context.allocator) {
-	// TODO: buffer_map(&app.renderer.uniform_buffer)
 	for !window_should_close(app.window^) {
 		application_update(app, allocator)
 		application_render(app, allocator)

@@ -7,11 +7,10 @@ _ :: fmt
 _ :: glm
 
 Renderer :: struct {
-	ctx:            Context,
-	window:         ^Window,
-	mesh:           Mesh,
-	uniform_buffer: Buffer,
-	camera:         Camera,
+	ctx:    Context,
+	window: ^Window,
+	mesh:   Mesh,
+	camera: Camera,
 }
 
 VERTICES := []Vertex {
@@ -31,19 +30,7 @@ renderer_init :: proc(
 	renderer.window = window
 
 	// mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
-	quad_init(&renderer.mesh, &renderer.ctx, "Triangle") or_return
-	renderer.uniform_buffer = make_buffer(
-		renderer.ctx,
-		size_of(Uniform_Buffer_Object),
-		MAX_FRAMES_IN_FLIGHT,
-		{.UNIFORM_BUFFER},
-		.Auto,
-	) or_return
-	// renderer.uniform_buffer = make_uniform_buffer(
-	// 	&renderer.ctx,
-	// 	Uniform_Buffer_Object,
-	// 	MAX_FRAMES_IN_FLIGHT,
-	// ) or_return
+	renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
 	return nil
@@ -52,7 +39,6 @@ renderer_init :: proc(
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.ptr)
 	mesh_destroy(&renderer.mesh)
-	delete_buffer(&renderer.uniform_buffer)
 	delete_context(&renderer.ctx)
 }
 
@@ -100,11 +86,6 @@ renderer_draw :: proc(renderer: ^Renderer) {
 	}
 
 	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
-	// ubo := Uniform_Buffer_Object {
-	// 	view_proj = glm.matrix4_rotate(90, Vec3{0, 0, 1}),
-	// }
-	// TODO: buffer_write_to_index(renderer.uniform_buffer, &ubo, renderer.ctx.frame_manager.current_frame)
-
 	mesh_bind(renderer.mesh, frame.command_buffer)
 	mesh_draw(renderer.mesh, frame.command_buffer)
 

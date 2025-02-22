@@ -10,9 +10,8 @@ Pipeline :: struct {
 }
 
 @(require_results)
-make_graphics_pipeline :: proc(
-	device: ^vkb.Device,
-	swapchain: ^vkb.Swapchain,
+create_graphics_pipeline :: proc(
+	ctx: Context,
 	shaders: []Shader_Module,
 ) -> (
 	pipeline: Pipeline,
@@ -75,12 +74,15 @@ make_graphics_pipeline :: proc(
 
 	{ 	// create pipeline layout
 
+		set_layout := ctx.descriptor_set_layout.handle
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType = .PIPELINE_LAYOUT_CREATE_INFO,
+			sType          = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount = 1,
+			pSetLayouts    = &set_layout,
 		}
 
 		vk_check(
-			vk.CreatePipelineLayout(device.ptr, &create_info, nil, &pipeline.layout),
+			vk.CreatePipelineLayout(ctx.device.ptr, &create_info, nil, &pipeline.layout),
 			"Failed to create Graphics Pipeline layout",
 		) or_return
 	}
@@ -99,7 +101,7 @@ make_graphics_pipeline :: proc(
 	pipeline_rendering_create_info := vk.PipelineRenderingCreateInfo {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,
-		pColorAttachmentFormats = &swapchain.image_format,
+		pColorAttachmentFormats = &ctx.swapchain.image_format,
 	}
 
 	create_info := vk.GraphicsPipelineCreateInfo {
@@ -117,16 +119,19 @@ make_graphics_pipeline :: proc(
 		layout              = pipeline.layout,
 	}
 
-	vk_check(vk.CreateGraphicsPipelines(device.ptr, 0, 1, &create_info, nil, &pipeline.handle), "Failed to create Graphics Pipeline") or_return
+	vk_check(
+		vk.CreateGraphicsPipelines(ctx.device.ptr, 0, 1, &create_info, nil, &pipeline.handle),
+		"Failed to create Graphics Pipeline",
+	) or_return
 
 	for s in shaders {
-		delete_shader_module(device, s)
+		delete_shader_module(ctx.device, s)
 	}
 
 	return pipeline, nil
 }
 
-delete_pipeline :: proc(pipeline: Pipeline, device: ^vkb.Device) {
+pipeline_destroy :: proc(pipeline: Pipeline, device: ^vkb.Device) {
 	vk.DestroyPipelineLayout(device.ptr, pipeline.layout, nil)
 	vk.DestroyPipeline(device.ptr, pipeline.handle, nil)
 }

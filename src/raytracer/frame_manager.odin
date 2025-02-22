@@ -4,11 +4,25 @@ import "core:fmt"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 
-MAX_FRAMES_IN_FLIGHT :: 1
+MAX_FRAMES_IN_FLIGHT :: 3
 
 Frame_Manager :: struct {
 	frames:        [MAX_FRAMES_IN_FLIGHT]Per_Frame,
 	current_frame: int,
+}
+
+Per_Frame :: struct {
+	command_pool:    Command_Pool,
+	command_buffer:  Command_Buffer,
+	image:           struct {
+		index:  u32,
+		handle: vk.Image,
+		view:   vk.ImageView,
+	},
+	in_flight_fence: Fence,
+	image_available: Semaphore,
+	render_finished: Semaphore,
+	uniform_buffer:  Buffer,
 }
 
 Image_Aquiring_Error :: enum {
@@ -18,7 +32,7 @@ Image_Aquiring_Error :: enum {
 
 @(require_results)
 make_frame_manager :: proc(
-	ctx: Context,
+	ctx: ^Context,
 	allocator := context.allocator,
 ) -> (
 	frame_manager: Frame_Manager,
@@ -29,7 +43,6 @@ make_frame_manager :: proc(
 	}
 
 	frame_manager.current_frame = 0
-
 	return frame_manager, nil
 }
 
@@ -110,22 +123,9 @@ frame_manager_advance :: proc(ctx: ^Context) {
 	manager.current_frame = (manager.current_frame + 1) % MAX_FRAMES_IN_FLIGHT
 }
 
-Per_Frame :: struct {
-	command_pool:    Command_Pool,
-	command_buffer:  Command_Buffer,
-	image:           struct {
-		index:  u32,
-		handle: vk.Image,
-		view:   vk.ImageView,
-	},
-	in_flight_fence: Fence,
-	image_available: Semaphore,
-	render_finished: Semaphore,
-}
-
 // TODO: handle this function, only need to create new descriptor sets if the its not from resize(check if this is actually true)
 make_frame_data :: proc(
-	ctx: Context,
+	ctx: ^Context,
 	frame_index: int,
 	allocator := context.allocator,
 ) -> (
@@ -147,6 +147,7 @@ make_frame_data :: proc(
 	frame.in_flight_fence = make_fence(ctx.device, signaled = true) or_return
 	frame.image_available = make_semaphore(ctx.device) or_return
 	frame.render_finished = make_semaphore(ctx.device) or_return
+	frame.uniform_buffer = create_uniform_buffer(ctx) or_return
 
 	return frame, nil
 }
