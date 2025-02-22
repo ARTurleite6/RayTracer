@@ -3,13 +3,10 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import "core:os"
-import "core:slice"
 import vkb "external:odin-vk-bootstrap"
 import vma "external:odin-vma"
-import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
-_ :: slice
 
 Backend_Error :: union #shared_nil {
 	vk.Result,
@@ -239,9 +236,7 @@ delete_context :: proc(ctx: ^Context) {
 
 	delete_frame_manager(ctx)
 	delete_pipeline(ctx.pipeline, ctx.device)
-	// for shader in ctx.shaders {
-	// 	delete_shader_module(ctx.device, shader)
-	// }
+	delete_command_pool(&ctx.transfer_command_pool)
 
 	delete_swapchain(ctx.swapchain)
 	vma.destroy_allocator(ctx.allocator)
@@ -249,19 +244,6 @@ delete_context :: proc(ctx: ^Context) {
 	vkb.destroy_surface(ctx.instance, ctx.surface)
 
 	vkb.destroy_instance(ctx.instance)
-}
-
-@(private = "file")
-required_extensions :: proc(allocator := context.allocator) -> []cstring {
-	extensions := glfw.GetRequiredInstanceExtensions()
-
-	when ODIN_DEBUG {
-		extensions_dyn := slice.to_dynamic(extensions, allocator)
-		append(&extensions_dyn, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
-		extensions = extensions_dyn[:]
-	}
-
-	return extensions
 }
 
 @(private)

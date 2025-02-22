@@ -4,112 +4,98 @@ import "base:runtime"
 import "core:fmt"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
-_ :: fmt
 _ :: runtime
+_ :: fmt
 
 Uniform_Buffer_Object :: struct {
 	view_proj: Mat4,
 }
 
+// TODO: Implement a distinct type for each vertex type (Vertex, Index, Uniform)
 Buffer :: struct {
-	handle:     vk.Buffer,
-	allocation: vma.Allocation,
-	allocator:  vma.Allocator,
-	size:       vk.DeviceSize,
-}
-
-Vertex_Buffer :: Buffer
-Index_Buffer :: Buffer
-Uniform_Buffer :: Buffer
-
-make_uniform_buffer :: proc(
-	type: $T,
-	allocator: vma.Allocator,
-) -> (
-	buffer: Uniform_Buffer,
-	ok: bool,
-) {
-	assert(len(vertices) >= 0, "You must create a vertex buffer with at least three vertices")
-
-	return make_buffer(allocator, size_of(T), {.UNIFORM_BUFFER}, .Cpu_To_Gpu)
+	handle:         vk.Buffer,
+	allocation:     vma.Allocation,
+	allocator:      vma.Allocator,
+	size:           vk.DeviceSize,
+	instance_size:  vk.DeviceSize,
+	instance_count: u32,
+	alignment_size: vk.DeviceSize,
+	mapped_memory:  rawptr,
+	mapped:         bool,
 }
 
 make_index_buffer :: proc(
-	allocator: vma.Allocator,
-	vertices: []$T,
+	ctx: ^Context,
+	indices: []u16,
+	allocator := context.allocator,
 ) -> (
-	buffer: Vertex_Buffer,
-	ok: bool,
+	index_buffer: Buffer,
+	err: Backend_Error,
 ) {
-	assert(len(vertices) >= 0, "You must create a vertex buffer with at least three vertices")
+	index_count := u32(len(indices))
+	assert(index_count >= 3, "Indices count must be at least 3")
 
-	return make_buffer_with_staging(allocator, vertices, {.INDEX_BUFFER})
+	index_size := size_of(16)
+
+	return _make_buffer_with_staging(
+		ctx,
+		vk.DeviceSize(index_size),
+		index_count,
+		{.INDEX_BUFFER},
+		raw_data(indices),
+	)
 }
 
 make_vertex_buffer :: proc(
-	allocator: vma.Allocator,
-	vertices: []$T,
+	ctx: ^Context,
+	vertices: []Vertex,
+	allocator := context.allocator,
 ) -> (
-	buffer: Vertex_Buffer,
-	ok: bool,
+	vertex_buffer: Buffer,
+	err: Backend_Error,
 ) {
-	assert(len(vertices) >= 0, "You must create a vertex buffer with at least three vertices")
+	vertex_count := u32(len(vertices))
+	assert(vertex_count >= 3, "Vertex count must be at least 3")
 
-	return make_buffer_with_staging(allocator, vertices, {.VERTEX_BUFFER})
+	vertex_size := size_of(Vertex)
+
+	return _make_buffer_with_staging(
+		ctx,
+		vk.DeviceSize(vertex_size),
+		vertex_count,
+		{.VERTEX_BUFFER},
+		raw_data(vertices),
+	)
 }
 
-vertex_buffer_bind :: proc(
-	buffer: ^Vertex_Buffer,
-	cmd: Command_Buffer,
-	offset: vk.DeviceSize = 0,
-) {
+index_buffer_bind :: proc(buffer: Buffer, cmd: Command_Buffer, offset: vk.DeviceSize = 0) {
+	vk.CmdBindIndexBuffer(cmd.handle, buffer.handle, offset, .UINT16)
+}
+
+vertex_buffer_bind :: proc(buffer: Buffer, cmd: Command_Buffer, offset: vk.DeviceSize = 0) {
+	offset := offset
+	buffer_handle := buffer.handle
 	vk.CmdBindVertexBuffers(
 		cmd.handle,
 		0,
 		1,
-		raw_data([]vk.Buffer{buffer.handle}),
+		raw_data([]vk.Buffer{buffer_handle}),
 		raw_data([]vk.DeviceSize{offset}),
 	)
 }
 
-make_buffer_with_staging :: proc(
-	allocator: vma.Allocator,
-	data: []$T,
-	usage: vk.BufferUsageFlags,
-) -> (
-	buffer: Buffer,
-	ok: bool,
-) {
-	staging_buffer := make_buffer_with_data(
-		allocator,
-		data,
-		{.TRANSFER_SRC},
-		.Cpu_To_Gpu,
-	) or_return
-	defer delete_buffer(&staging_buffer)
-
-	buffer = make_buffer(
-		allocator,
-		vk.DeviceSize(size_of(T) * len(data)),
-		usage | {.TRANSFER_DST},
-		.Gpu_Only,
-	) or_return
-
-	buffer_copy_from(buffer, staging_buffer)
-
-	return buffer, true
-}
 
 buffer_copy_from :: proc(
+	ctx: ^Context,
 	dst: Buffer,
 	src: Buffer,
-	cmd_pool: ^Command_Pool,
+	size: vk.DeviceSize,
 	allocator := context.allocator,
 ) -> (
 	err: Backend_Error,
 ) {
 	cmd := command_pool_allocate_primary_buffer(
-		cmd_pool,
+		&ctx.transfer_command_pool,
 		"Transfer command buffer",
 		allocator = allocator,
 	) or_return
@@ -117,61 +103,67 @@ buffer_copy_from :: proc(
 	command_buffer_begin(cmd, {.ONE_TIME_SUBMIT}) or_return
 
 	copy_region := vk.BufferCopy {
-		size = src.size,
+		size = size,
 	}
 
 	vk.CmdCopyBuffer(cmd.handle, src.handle, dst.handle, 1, &copy_region)
 
-
 	vk_check(vk.EndCommandBuffer(cmd.handle), "Error while ending command buffer") or_return
-	unimplemented()
+
+	submit_info := vk.SubmitInfo {
+		sType              = .SUBMIT_INFO,
+		commandBufferCount = 1,
+		pCommandBuffers    = &cmd.handle,
+	}
+
+	vk_check(
+		vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, 0),
+		"Failed to submit transfer",
+	) or_return
+	vk_check(vk.QueueWaitIdle(ctx.graphics_queue), "Failed to wait for transfer") or_return
+
+	vk.FreeCommandBuffers(
+		ctx.transfer_command_pool.device.ptr,
+		ctx.transfer_command_pool.handle,
+		1,
+		&cmd.handle,
+	)
+
+	return nil
 }
 
-make_buffer_with_data :: proc(
-	allocator: vma.Allocator,
-	data: []$T,
-	usage: vk.BufferUsageFlags,
-	memory_usage: vma.Memory_Usage,
-) -> (
-	buffer: Buffer,
-	err: vk.Result,
-) {
-	buffer = make_buffer(
-		allocator,
-		vk.DeviceSize(size_of(T) * len(data)),
-		usage,
-		memory_usage,
-	) or_return
-	buffer_upload(&buffer, data)
-	return buffer, .SUCCESS
-}
 
 make_buffer :: proc(
-	allocator: vma.Allocator,
-	size: vk.DeviceSize,
+	ctx: Context,
+	instance_size: vk.DeviceSize,
+	instance_count: u32,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
+	min_offset_alignment: vk.DeviceSize = 1,
 ) -> (
 	buffer: Buffer,
 	err: vk.Result,
 ) {
-	buffer.allocator = allocator
-	buffer.size = size
+	buffer.instance_count = instance_count
+	buffer.instance_size = instance_size
+	buffer.alignment_size = get_alignment(instance_size, min_offset_alignment)
+	buffer.size = buffer.alignment_size * vk.DeviceSize(instance_count)
+	buffer.allocator = ctx.allocator
+
 	create_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
-		size        = size,
+		size        = buffer.size,
 		usage       = usage,
 		sharingMode = .EXCLUSIVE,
 	}
 
 	alloc_info := vma.Allocation_Create_Info {
-		usage          = memory_usage,
-		required_flags = {.HOST_COHERENT, .HOST_VISIBLE},
+		usage = memory_usage,
 	}
 
-	vk_must(
+	vk_check(
 		vma.create_buffer(
-			allocator,
+			ctx.allocator,
 			create_info,
 			alloc_info,
 			&buffer.handle,
@@ -179,56 +171,104 @@ make_buffer :: proc(
 			nil,
 		),
 		"Failed to create buffer",
-	)
+	) or_return
+
 
 	return buffer, .SUCCESS
 }
 
-buffer_upload :: proc(buffer: ^Buffer, data: []$T) -> Backend_Error {
-	size := size_of(T) * len(data)
-	assert(u64(size) <= u64(buffer.size), "Size exceeds allocated memory")
-	mapped_data: rawptr
+buffer_map :: proc(buffer: ^Buffer) -> Backend_Error {
+	assert(!buffer.mapped, "Buffer was already mapped")
 	vk_check(
-		vma.map_memory(buffer.allocator, buffer.allocation, &mapped_data),
+		vma.map_memory(buffer.allocator, buffer.allocation, &buffer.mapped_memory),
 		"Failed to map buffer",
 	) or_return
-	runtime.mem_copy(mapped_data, raw_data(data), size)
-	vma.unmap_memory(buffer.allocator, buffer.allocation)
-
+	buffer.mapped = true
 	return nil
 }
 
-make_staging_buffer :: proc(ctx: Context, vertices: []$T) -> (buffer: Buffer, ok: bool) {
-	buffer_size := len(vertices) * size_of(T)
+buffer_unmap :: proc(buffer: ^Buffer) {
+	assert(buffer.mapped, "Buffer was not previously mapped")
+	vma.unmap_memory(buffer.allocator, buffer.allocation)
+	buffer.mapped = false
+}
 
-	create_info := vk.BufferCreateInfo {
-		sType = .BUFFER_CREATE_INFO,
-		size  = buffer_size,
-		usage = {.TRANSFER_SRC},
+buffer_write :: proc(
+	buffer: Buffer,
+	data: rawptr,
+	size: u64 = vk.WHOLE_SIZE,
+	offset: vk.DeviceSize = 0,
+) {
+	if size == vk.WHOLE_SIZE {
+		runtime.mem_copy(buffer.mapped_memory, data, int(buffer.size))
+	} else {
+		runtime.mem_copy(rawptr(uintptr(buffer.mapped_memory) + uintptr(offset)), data, int(size))
 	}
+}
 
-	alloc_info := vma.Allocation_Create_Info {
-		usage = .Cpu_To_Gpu,
-		flags = {.Mapped},
-	}
-
-	vk_must(
-		vma.create_buffer(
-			ctx.allocator,
-			create_info,
-			alloc_info,
-			&buffer.handle,
-			&buffer.allocation,
-		),
-		"Failed to allocate staging buffer",
+buffer_write_to_index :: proc(buffer: Buffer, data: rawptr, index: int) {
+	buffer_write(
+		buffer,
+		data,
+		u64(buffer.instance_size),
+		vk.DeviceSize(index) * buffer.alignment_size,
 	)
-
-	vk_must(buffer_upload_data(ctx, &buffer, vertices), "Failed to copy data")
 }
 
 delete_buffer :: proc(buffer: ^Buffer) {
+	if buffer.mapped {
+		buffer_unmap(buffer)
+	}
 	vma.destroy_buffer(buffer.allocator, buffer.handle, buffer.allocation)
+	buffer^ = {}
+}
 
-	buffer.size = 0
-	buffer.handle = 0
+@(private = "file")
+_make_buffer_with_staging :: proc(
+	ctx: ^Context,
+	instance_size: vk.DeviceSize,
+	instance_count: u32,
+	buffer_usage: vk.BufferUsageFlags,
+	data: rawptr,
+	allocator := context.allocator,
+) -> (
+	buffer: Buffer,
+	err: Backend_Error,
+) {
+	staging_buffer := make_buffer(
+		ctx^,
+		instance_size,
+		instance_count,
+		{.TRANSFER_SRC},
+		.Cpu_To_Gpu,
+	) or_return
+	defer delete_buffer(&staging_buffer)
+
+	buffer_map(&staging_buffer) or_return
+	buffer_write(staging_buffer, data)
+	buffer_unmap(&staging_buffer)
+
+	buffer = make_buffer(
+		ctx^,
+		vk.DeviceSize(instance_size),
+		instance_count,
+		buffer_usage | {.TRANSFER_DST},
+		.Gpu_Only,
+	) or_return
+
+	buffer_size := u32(instance_size) * instance_count
+	buffer_copy_from(ctx, buffer, staging_buffer, vk.DeviceSize(buffer_size), allocator) or_return
+	return buffer, nil
+}
+
+@(private = "file")
+get_alignment :: proc(
+	instance_size: vk.DeviceSize,
+	min_offset_alignment: vk.DeviceSize,
+) -> vk.DeviceSize {
+	if min_offset_alignment > 0 {
+		return (instance_size + min_offset_alignment - 1) & ~(min_offset_alignment - 1)
+	}
+
+	return instance_size
 }
