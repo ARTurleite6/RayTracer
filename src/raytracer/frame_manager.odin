@@ -23,6 +23,7 @@ Per_Frame :: struct {
 	image_available: Semaphore,
 	render_finished: Semaphore,
 	uniform_buffer:  Buffer,
+	descriptor_set:  vk.DescriptorSet,
 }
 
 Image_Aquiring_Error :: enum {
@@ -33,17 +34,35 @@ Image_Aquiring_Error :: enum {
 @(require_results)
 make_frame_manager :: proc(
 	ctx: ^Context,
+	resizing := false,
 	allocator := context.allocator,
 ) -> (
 	frame_manager: Frame_Manager,
 	err: Backend_Error,
 ) {
 	for &f, i in frame_manager.frames {
-		f = make_frame_data(ctx, i, allocator) or_return
+		f = make_frame_data(ctx, i, resizing, allocator) or_return
 	}
 
 	frame_manager.current_frame = 0
 	return frame_manager, nil
+}
+
+frame_manager_handle_resize :: proc(ctx: ^Context) -> (err: Backend_Error) {
+	manager := &ctx.frame_manager
+
+	for &frame, i in manager.frames {
+		descriptor_set := frame.descriptor_set
+		delete_frame_data(ctx^, &frame)
+		new_frame := make_frame_data(ctx, i, true) or_return
+
+		new_frame.descriptor_set = descriptor_set
+		frame = new_frame
+	}
+
+	manager.current_frame = 0
+
+	return nil
 }
 
 delete_frame_manager :: proc(ctx: ^Context) {
@@ -127,6 +146,7 @@ frame_manager_advance :: proc(ctx: ^Context) {
 make_frame_data :: proc(
 	ctx: ^Context,
 	frame_index: int,
+	resizing: bool,
 	allocator := context.allocator,
 ) -> (
 	frame: Per_Frame,
@@ -148,6 +168,24 @@ make_frame_data :: proc(
 	frame.image_available = make_semaphore(ctx.device) or_return
 	frame.render_finished = make_semaphore(ctx.device) or_return
 	frame.uniform_buffer = create_uniform_buffer(ctx) or_return
+	buffer_map(&frame.uniform_buffer) or_return
+
+	if !resizing {
+		fmt.println("Creating descriptor sets")
+		{ 	// create descriptor set
+			alloc_info := vk.DescriptorSetAllocateInfo {
+				sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+				descriptorPool     = ctx.descriptor_pool.handle,
+				descriptorSetCount = 1,
+				pSetLayouts        = &ctx.descriptor_set_layout.handle,
+			}
+
+			vk_check(
+				vk.AllocateDescriptorSets(ctx.device.ptr, &alloc_info, &frame.descriptor_set),
+				"Failed to allocated descriptor set",
+			) or_return
+		}
+	}
 
 	return frame, nil
 }
@@ -172,6 +210,7 @@ frame_begin_commands :: proc(frame: ^Per_Frame) -> (err: Backend_Error) {
 }
 
 delete_frame_data :: proc(ctx: Context, per_frame: ^Per_Frame) {
+	buffer_destroy(&per_frame.uniform_buffer)
 	command_pool_delete_buffer(per_frame.command_pool, &per_frame.command_buffer)
 	delete_command_pool(&per_frame.command_pool)
 	delete_fence(per_frame.in_flight_fence)

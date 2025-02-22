@@ -137,8 +137,6 @@ context_init :: proc(
 
 	ctx.pipeline = create_graphics_pipeline(ctx^, shaders) or_return
 
-	ctx.frame_manager = make_frame_manager(ctx, allocator) or_return
-
 	{
 		vma_functions := vma.create_vulkan_functions()
 		// create allocator
@@ -172,6 +170,8 @@ context_init :: proc(
 
 		ctx.descriptor_pool = create_descriptor_pool(builder) or_return
 	}
+
+	ctx.frame_manager = make_frame_manager(ctx, allocator = allocator) or_return
 
 	return nil
 }
@@ -243,8 +243,8 @@ handle_resize :: proc(
 	defer if old_swapchain._internal != nil {
 		delete_swapchain(old_swapchain)
 
-		delete_frame_manager(ctx)
-		ctx.frame_manager, err = make_frame_manager(ctx)
+		frame_manager_handle_resize(ctx)
+		// ctx.frame_manager, err = make_frame_manager(ctx, resizing = true)
 	}
 
 	ctx.swapchain = make_swapchain(ctx, window, allocator = allocator) or_return
