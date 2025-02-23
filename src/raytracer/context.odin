@@ -276,13 +276,3 @@ vk_must :: proc(result: vk.Result, message: string) {
 		os.exit(1)
 	}
 }
-
-@(private)
-@(require_results)
-vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
-	if result != .SUCCESS {
-		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
-		return result
-	}
-	return nil
-}

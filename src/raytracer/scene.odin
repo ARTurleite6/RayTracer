@@ -1,0 +1,4 @@
+package raytracer
+
+Scene :: struct {
+}

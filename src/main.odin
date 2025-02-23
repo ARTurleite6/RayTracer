@@ -14,5 +14,5 @@ main :: proc() {
 	_ = app
 	defer raytracer.delete_application(app)
 
-	// raytracer.application_run(&app)
+	raytracer.application_run(&app)
 }

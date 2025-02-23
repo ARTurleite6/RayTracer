@@ -7,10 +7,6 @@ import vk "vendor:vulkan"
 _ :: runtime
 _ :: fmt
 
-Uniform_Buffer_Object :: struct #align (16) {
-	view_proj: Mat4,
-}
-
 // TODO: Implement a distinct type for each vertex type (Vertex, Index, Uniform)
 Buffer :: struct {
 	handle:         vk.Buffer,
@@ -22,25 +18,6 @@ Buffer :: struct {
 	alignment_size: vk.DeviceSize,
 	mapped_memory:  rawptr,
 	mapped:         bool,
-}
-
-create_uniform_buffer :: proc(
-	ctx: ^Context,
-	count: u32 = 1,
-) -> (
-	uniform_buffer: Buffer,
-	err: Backend_Error,
-) {
-	min_alignment := ctx.physical_device.properties.limits.minUniformBufferOffsetAlignment
-
-	return create_buffer(
-		ctx^,
-		vk.DeviceSize(size_of(Uniform_Buffer_Object)),
-		count,
-		{.UNIFORM_BUFFER},
-		.Cpu_To_Gpu,
-		min_alignment,
-	)
 }
 
 create_index_buffer :: proc(

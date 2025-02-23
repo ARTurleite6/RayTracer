@@ -21,7 +21,10 @@ make_fence :: proc(device: ^vkb.Device, signaled := false) -> (fence: Fence, err
 
 	if signaled do create_info.flags = {.SIGNALED}
 
-	vk_check(vk.CreateFence(device.ptr, &create_info, nil, &fence.ptr), "Failed to create fence") or_return
+	vk_check(
+		vk.CreateFence(device.ptr, &create_info, nil, &fence.ptr),
+		"Failed to create fence",
+	) or_return
 	fence.device = device
 	return fence, nil
 }
@@ -35,7 +38,7 @@ fence_wait :: proc(fence: ^Fence, timeout := max(u64)) -> Backend_Error {
 }
 
 @(require_results)
-fence_reset :: proc(fence: ^Fence) -> (Backend_Error) {
+fence_reset :: proc(fence: ^Fence) -> Backend_Error {
 	return vk_check(vk.ResetFences(fence.device.ptr, 1, &fence.ptr), "Error while reseting fences")
 }
 
@@ -71,7 +74,7 @@ Image_Transition :: struct {
 	dst_access: vk.AccessFlags2,
 }
 
-image_transition :: proc(cmd: Command_Buffer, transition: Image_Transition) {
+image_transition :: proc(cmd: vk.CommandBuffer, transition: Image_Transition) {
 	barrier := vk.ImageMemoryBarrier2 {
 		sType = .IMAGE_MEMORY_BARRIER_2,
 		srcStageMask = transition.src_stage,
@@ -95,5 +98,5 @@ image_transition :: proc(cmd: Command_Buffer, transition: Image_Transition) {
 		imageMemoryBarrierCount = 1,
 		pImageMemoryBarriers    = &barrier,
 	}
-	vk.CmdPipelineBarrier2(cmd.handle, &dependency_info)
+	vk.CmdPipelineBarrier2(cmd, &dependency_info)
 }

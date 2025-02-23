@@ -1,9 +1,11 @@
 package raytracer
 
+import "core:fmt"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
+_ :: fmt
 
-MAX_FRAMES_IN_FLIGHT :: 3
+MAX_FRAMES_IN_FLIGHT :: 1
 
 Frame_Manager :: struct {
 	device:        ^Device,
@@ -74,11 +76,9 @@ frame_init :: proc(frame: ^Frame, device: ^Device) -> Frame_Error {
 			queueFamilyIndex = vkb.device_get_queue_index(device.logical_device, .Graphics),
 		}
 
-		if result := vk.CreateCommandPool(
-			device.logical_device.ptr,
-			&pool_info,
-			nil,
-			&frame.commands.pool,
+		if result := vk_check(
+			vk.CreateCommandPool(device.logical_device.ptr, &pool_info, nil, &frame.commands.pool),
+			"Failed to create command pool",
 		); result != .SUCCESS {
 			return .Command_Pool_Creation_Failed
 		}
@@ -90,10 +90,13 @@ frame_init :: proc(frame: ^Frame, device: ^Device) -> Frame_Error {
 			commandBufferCount = 1,
 		}
 
-		if result := vk.AllocateCommandBuffers(
-			device.logical_device.ptr,
-			&buffer_info,
-			&frame.commands.primary_buffer,
+		if result := vk_check(
+			vk.AllocateCommandBuffers(
+				device.logical_device.ptr,
+				&buffer_info,
+				&frame.commands.primary_buffer,
+			),
+			"Failed to Allocate command buffer",
 		); result != .SUCCESS {
 			return .Command_Buffer_Creation_Failed
 		}
@@ -105,11 +108,14 @@ frame_init :: proc(frame: ^Frame, device: ^Device) -> Frame_Error {
 				sType = .FENCE_CREATE_INFO,
 				flags = {.SIGNALED},
 			}
-			if result := vk.CreateFence(
-				device.logical_device.ptr,
-				&create_info,
-				nil,
-				&frame.sync.in_flight_fence,
+			if result := vk_check(
+				vk.CreateFence(
+					device.logical_device.ptr,
+					&create_info,
+					nil,
+					&frame.sync.in_flight_fence,
+				),
+				"Failed to create fence",
 			); result != .SUCCESS {
 				return .Sync_Creation_Failed
 			}
@@ -118,20 +124,26 @@ frame_init :: proc(frame: ^Frame, device: ^Device) -> Frame_Error {
 			create_info := vk.SemaphoreCreateInfo {
 				sType = .SEMAPHORE_CREATE_INFO,
 			}
-			if result := vk.CreateSemaphore(
-				device.logical_device.ptr,
-				&create_info,
-				nil,
-				&frame.sync.image_available,
+			if result := vk_check(
+				vk.CreateSemaphore(
+					device.logical_device.ptr,
+					&create_info,
+					nil,
+					&frame.sync.image_available,
+				),
+				"Failed to create semaphore",
 			); result != .SUCCESS {
 				return .Sync_Creation_Failed
 			}
 
-			if result := vk.CreateSemaphore(
-				device.logical_device.ptr,
-				&create_info,
-				nil,
-				&frame.sync.render_finished,
+			if result := vk_check(
+				vk.CreateSemaphore(
+					device.logical_device.ptr,
+					&create_info,
+					nil,
+					&frame.sync.render_finished,
+				),
+				"Failed to create semaphore",
 			); result != .SUCCESS {
 				return .Sync_Creation_Failed
 			}
@@ -154,6 +166,25 @@ frame_destroy :: proc(frame: ^Frame, device: ^Device) {
 	vk.DestroySemaphore(device.logical_device.ptr, frame.sync.render_finished, nil)
 }
 
+frame_manager_handle_resize :: proc(manager: ^Frame_Manager) -> Frame_Error {
+	manager.current_frame = 0
+	for &frame in manager.frames {
+		// TODO: this needs to be refactored in the future
+		frame_destroy(&frame, manager.device)
+		frame_init(&frame, manager.device) or_return
+	}
+	return .None
+}
+
 frame_wait :: proc(frame: ^Frame, device: ^Device) {
-	vk.WaitForFences(device.logical_device.ptr, 1, &frame.sync.in_flight_fence, true, max(u64))
+	_ = vk_check(
+		vk.WaitForFences(
+			device.logical_device.ptr,
+			1,
+			&frame.sync.in_flight_fence,
+			true,
+			max(u64),
+		),
+		"Failed to wait on fences",
+	)
 }

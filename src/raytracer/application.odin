@@ -2,7 +2,6 @@ package raytracer
 
 import "core:c"
 import "core:fmt"
-import "core:log"
 import "vendor:glfw"
 _ :: fmt
 
@@ -12,9 +11,8 @@ Error :: union #shared_nil {
 }
 
 Application :: struct {
-	window:        ^Window,
-	renderer:      ^Renderer,
-	should_resize: bool,
+	window:   ^Window,
+	renderer: ^Renderer,
 }
 
 make_application :: proc(
@@ -30,7 +28,7 @@ make_application :: proc(
 
 	renderer_init(app.renderer, app.window, allocator) or_return
 
-	// window_set_window_user_pointer(app.window^, app.window)
+	window_set_window_user_pointer(app.window^, app.window)
 
 	return
 }
@@ -55,22 +53,10 @@ application_run :: proc(app: ^Application, allocator := context.allocator) {
 application_update :: proc(app: ^Application, allocator := context.allocator) {
 	glfw.PollEvents()
 	window_update(app.window^)
-
-	if app.should_resize {
-		if err := application_handle_resize(app, allocator); err != nil {
-			log.errorf("Error while resizing window")
-		}
-		app.should_resize = false
-	}
 }
 
 application_render :: proc(app: ^Application, allocator := context.allocator) {
-	// err: Backend_Error
-	// defer if value, ok := err.(Image_Aquiring_Error);
-	//    ok && value == .NeedsResizing || app.window.framebuffer_resized {
-	// 	app.should_resize = true
-	// }
-
+	renderer_render(app.renderer)
 }
 
 @(private)
