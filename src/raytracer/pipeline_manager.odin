@@ -12,7 +12,7 @@ Pipeline_Type :: enum {
 
 Pipeline_Manager :: struct {
 	device:             ^Device,
-	pipelines:          map[string]Pipeline2,
+	pipelines:          map[string]Pipeline,
 	descriptor_layouts: map[string]vk.DescriptorSetLayout,
 	pipeline_cache:     vk.PipelineCache, // TODO: this for now is not to be used
 }
@@ -25,7 +25,7 @@ Pipeline_Error :: enum {
 	Shader_Creation_Failed,
 }
 
-Pipeline2 :: struct {
+Pipeline :: struct {
 	handle: vk.Pipeline,
 	layout: vk.PipelineLayout,
 	type:   Pipeline_Type,
@@ -51,7 +51,7 @@ pipeline_manager_init :: proc(
 	err: Pipeline_Error,
 ) {
 	manager.device = device
-	manager.pipelines = make(map[string]Pipeline2)
+	manager.pipelines = make(map[string]Pipeline)
 	manager.descriptor_layouts = make(map[string]vk.DescriptorSetLayout)
 
 	cache_info := vk.PipelineCacheCreateInfo {
@@ -82,6 +82,14 @@ pipeline_manager_destroy :: proc(manager: ^Pipeline_Manager) {
 	vk.DestroyPipelineCache(manager.device.logical_device.ptr, manager.pipeline_cache, nil)
 }
 
+pipeline_manager_bind_pipeline :: proc(
+	manager: Pipeline_Manager,
+	name: string,
+	cmd: vk.CommandBuffer,
+) {pipeline := manager.pipelines[name]
+	vk.CmdBindPipeline(cmd, pipeline_type_bind_point(pipeline.type), pipeline.handle)
+}
+
 @(require_results)
 create_graphics_pipeline2 :: proc(
 	manager: ^Pipeline_Manager,
@@ -91,7 +99,7 @@ create_graphics_pipeline2 :: proc(
 ) -> (
 	result: Pipeline_Error,
 ) {
-	pipeline: Pipeline2
+	pipeline: Pipeline
 
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 	dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -251,4 +259,17 @@ create_shader_module :: proc(
 	}
 
 	return shader, .None
+}
+
+pipeline_type_bind_point :: proc(type: Pipeline_Type) -> vk.PipelineBindPoint {
+	switch type {
+	case .Compute:
+		return .COMPUTE
+	case .Graphics:
+		return .GRAPHICS
+	case .Ray_Tracing:
+		return .RAY_TRACING_NV
+	}
+
+	return {}
 }

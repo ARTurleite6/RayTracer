@@ -39,6 +39,16 @@ Swapchain_Specific_Error :: enum {
 	Suboptimal_Surface,
 }
 
+Image_Transition :: struct {
+	image:      vk.Image,
+	old_layout: vk.ImageLayout,
+	new_layout: vk.ImageLayout,
+	src_stage:  vk.PipelineStageFlags2,
+	dst_stage:  vk.PipelineStageFlags2,
+	src_access: vk.AccessFlags2,
+	dst_access: vk.AccessFlags2,
+}
+
 swapchain_manager_init :: proc(
 	manager: ^Swapchain_Manager,
 	device: ^Device,
@@ -263,4 +273,31 @@ swapchain_acquire_next_image :: proc(
 	}
 
 	return
+}
+
+image_transition :: proc(cmd: vk.CommandBuffer, transition: Image_Transition) {
+	barrier := vk.ImageMemoryBarrier2 {
+		sType = .IMAGE_MEMORY_BARRIER_2,
+		srcStageMask = transition.src_stage,
+		srcAccessMask = transition.src_access,
+		dstStageMask = transition.dst_stage,
+		dstAccessMask = transition.dst_access,
+		oldLayout = transition.old_layout,
+		newLayout = transition.new_layout,
+		image = transition.image,
+		subresourceRange = {
+			aspectMask = {.COLOR},
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+	}
+
+	dependency_info := vk.DependencyInfo {
+		sType                   = .DEPENDENCY_INFO,
+		imageMemoryBarrierCount = 1,
+		pImageMemoryBarriers    = &barrier,
+	}
+	vk.CmdPipelineBarrier2(cmd, &dependency_info)
 }

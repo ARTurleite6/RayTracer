@@ -15,25 +15,29 @@ Renderer :: struct {
 	device:            ^Device,
 	swapchain_manager: Swapchain_Manager,
 	pipeline_manager:  Pipeline_Manager,
-	ctx:               Context,
 	window:            ^Window,
 	mesh:              Mesh,
 	camera:            Camera,
 }
 
 VERTICES := []Vertex {
-	{{0.0, -0.5, 0.0}, {1.0, 0.0, 0.0}},
-	{{0.5, 0.5, 0.0}, {0.0, 1.0, 0.0}},
-	{{-0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}},
+	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
+	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
+	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
+	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
 }
 
-renderer_init :: proc(
-	renderer: ^Renderer,
-	window: ^Window,
-	allocator := context.allocator,
-) -> (
-	err: Backend_Error,
-) {
+// Indices for two triangles making up the quad
+INDICES := []u32 {
+	0,
+	1,
+	2, // First triangle (bottom-right)
+	2,
+	3,
+	0, // Second triangle (top-left)
+}
+
+renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
 	renderer.device = new(Device)
@@ -42,10 +46,11 @@ renderer_init :: proc(
 		return
 	}
 
+	surface, _ := window_get_surface(renderer.window, renderer.device.instance)
 	swapchain_manager_init(
 		&renderer.swapchain_manager,
 		renderer.device,
-		window_get_surface(renderer.window, renderer.device.instance) or_return,
+		surface,
 		{extent = window_get_extent(window^), vsync = true},
 	)
 
@@ -63,16 +68,16 @@ renderer_init :: proc(
 		},
 	)
 
+	mesh_init(&renderer.mesh, renderer.device, VERTICES, INDICES, "triangle")
 	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
 	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
-	return nil
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
-	// mesh_destroy(&renderer.mesh)
+	mesh_destroy(&renderer.mesh, renderer.device)
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
@@ -87,6 +92,10 @@ renderer_render :: proc(renderer: ^Renderer) {
 	}
 
 	begin_render_pass(renderer, cmd)
+
+	pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
+
+	mesh_draw(&renderer.mesh, cmd)
 
 	end_render_pass(renderer, cmd)
 
