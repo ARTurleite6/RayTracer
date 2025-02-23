@@ -12,7 +12,7 @@ Backend_Error :: union #shared_nil {
 	vk.Result,
 	Initialization_Error,
 	Shader_Error,
-	Image_Aquiring_Error,
+	// Image_Aquiring_Error,
 }
 
 Initialization_Error :: enum {
@@ -48,7 +48,7 @@ Swapchain :: struct {
 
 context_init :: proc(
 	ctx: ^Context,
-	window: Window,
+	window: ^Window,
 	allocator := context.allocator,
 ) -> (
 	err: Backend_Error,
@@ -74,7 +74,7 @@ context_init :: proc(
 		}
 	}
 
-	ctx.surface = window_make_surface(window, ctx.instance) or_return
+	ctx.surface = window_get_surface(window, ctx.instance) or_return
 
 	{ 	// choose physical device
 		selector, selector_ok := vkb.init_physical_device_selector(ctx.instance)
@@ -107,7 +107,7 @@ context_init :: proc(
 		}
 	}
 
-	ctx.swapchain = make_swapchain(ctx, window) or_return
+	ctx.swapchain = make_swapchain(ctx, window^) or_return
 
 	{ 	// get queues
 		ok: bool
@@ -171,7 +171,7 @@ context_init :: proc(
 		ctx.descriptor_pool = create_descriptor_pool(builder) or_return
 	}
 
-	ctx.frame_manager = make_frame_manager(ctx, allocator = allocator) or_return
+	// ctx.frame_manager = make_frame_manager(ctx, allocator = allocator) or_return
 
 	return nil
 }
@@ -243,7 +243,7 @@ handle_resize :: proc(
 	defer if old_swapchain._internal != nil {
 		delete_swapchain(old_swapchain)
 
-		frame_manager_handle_resize(ctx)
+		// frame_manager_handle_resize(ctx)
 		// ctx.frame_manager, err = make_frame_manager(ctx, resizing = true)
 	}
 
@@ -256,7 +256,7 @@ delete_context :: proc(ctx: ^Context) {
 	vk.DeviceWaitIdle(ctx.device.ptr)
 
 	descriptor_pool_destroy(ctx.descriptor_pool)
-	delete_frame_manager(ctx)
+	// delete_frame_manager(ctx)
 	pipeline_destroy(ctx.pipeline, ctx.device)
 	descriptor_set_layout_destroy(ctx.descriptor_set_layout)
 	delete_command_pool(&ctx.transfer_command_pool)

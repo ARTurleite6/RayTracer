@@ -11,7 +11,8 @@ main :: proc() {
 		log.errorf("Application: Error launching application %v", err)
 		return
 	}
+	_ = app
 	defer raytracer.delete_application(app)
 
-	raytracer.application_run(&app)
+	// raytracer.application_run(&app)
 }

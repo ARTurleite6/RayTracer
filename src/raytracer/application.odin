@@ -27,19 +27,20 @@ make_application :: proc(
 ) {
 	app.window = new_clone(make_window(window_width, window_height, window_title) or_return)
 	app.renderer = new(Renderer, allocator)
+
 	renderer_init(app.renderer, app.window, allocator) or_return
 
-	window_set_window_user_pointer(app.window^, app.window)
+	// window_set_window_user_pointer(app.window^, app.window)
 
 	return
 }
 
 delete_application :: proc(app: Application) {
 	renderer_destroy(app.renderer)
-	free(app.renderer)
+	// free(app.renderer)
 
-	delete_window(app.window^)
-	free(app.window)
+	// delete_window(app.window^)
+	// free(app.window)
 
 }
 
@@ -64,21 +65,11 @@ application_update :: proc(app: ^Application, allocator := context.allocator) {
 }
 
 application_render :: proc(app: ^Application, allocator := context.allocator) {
-	err: Backend_Error
-	defer if value, ok := err.(Image_Aquiring_Error);
-	   ok && value == .NeedsResizing || app.window.framebuffer_resized {
-		app.should_resize = true
-	}
-
-	if err = renderer_begin_frame(app.renderer); err != nil {
-		return
-	}
-
-	renderer_draw(app.renderer)
-
-	if err = renderer_end_frame(app.renderer); err != nil {
-		return
-	}
+	// err: Backend_Error
+	// defer if value, ok := err.(Image_Aquiring_Error);
+	//    ok && value == .NeedsResizing || app.window.framebuffer_resized {
+	// 	app.should_resize = true
+	// }
 
 }
 
@@ -88,5 +79,5 @@ application_handle_resize :: proc(
 	allocator := context.allocator,
 ) -> Backend_Error {
 	app.window.framebuffer_resized = false
-	return renderer_handle_resize(app.renderer, allocator)
+	unimplemented()
 }
