@@ -15,6 +15,7 @@ Window_Error :: enum {
 
 Window :: struct {
 	handle:              glfw.WindowHandle,
+	surface:             vk.SurfaceKHR,
 	framebuffer_resized: bool,
 	width, height:       c.int,
 }
@@ -61,15 +62,19 @@ window_aspect_ratio :: proc(window: Window) -> f32 {
 }
 
 @(require_results)
-window_make_surface :: proc(
-	window: Window,
+window_get_surface :: proc(
+	window: ^Window,
 	instance: ^vkb.Instance,
 ) -> (
 	surface: vk.SurfaceKHR,
 	err: vk.Result,
 ) {
-	glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &surface) or_return
-	return surface, err
+	if window.surface != 0 {
+		return window.surface, .SUCCESS
+	}
+	glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &window.surface) or_return
+
+	return window.surface, .SUCCESS
 }
 
 @(require_results)

@@ -1,170 +1,242 @@
 package raytracer
 
 import "core:fmt"
+import "core:log"
 import glm "core:math/linalg"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
 
+Render_Error :: union {
+	Swapchain_Error,
+}
+
 Renderer :: struct {
-	ctx:    Context,
-	window: ^Window,
-	mesh:   Mesh,
-	camera: Camera,
+	device:            ^Device,
+	swapchain_manager: Swapchain_Manager,
+	pipeline_manager:  Pipeline_Manager,
+	window:            ^Window,
+	mesh:              Mesh,
+	camera:            Camera,
 }
 
 VERTICES := []Vertex {
-	{{0.0, -0.5, 0.0}, {1.0, 0.0, 0.0}},
-	{{0.5, 0.5, 0.0}, {0.0, 1.0, 0.0}},
-	{{-0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}},
+	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
+	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
+	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
+	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
 }
 
-renderer_init :: proc(
-	renderer: ^Renderer,
-	window: ^Window,
-	allocator := context.allocator,
-) -> (
-	err: Backend_Error,
-) {
-	context_init(&renderer.ctx, window^, allocator) or_return
-	renderer.window = window
+// Indices for two triangles making up the quad
+INDICES := []u32 {
+	0,
+	1,
+	2, // First triangle (bottom-right)
+	2,
+	3,
+	0, // Second triangle (top-left)
+}
 
-	// mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
-	renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
+renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
+	// context_init(&renderer.ctx, window, allocator) or_return
+	renderer.window = window
+	renderer.device = new(Device)
+	if err := device_init(renderer.device, renderer.window); err != .None {
+		fmt.println("Error on device: %v", err)
+		return
+	}
+
+	surface, _ := window_get_surface(renderer.window, renderer.device.instance)
+	swapchain_manager_init(
+		&renderer.swapchain_manager,
+		renderer.device,
+		surface,
+		{extent = window_get_extent(window^), vsync = true},
+	)
+
+	pipeline_manager_init(&renderer.pipeline_manager, renderer.device)
+
+	_ = create_graphics_pipeline2(
+		&renderer.pipeline_manager,
+		"main",
+		{
+			color_attachment = renderer.swapchain_manager.format,
+			shader_stages = []Shader_Stage_Info {
+				{stage = {.VERTEX}, entry = "main", file_path = "shaders/vert.spv"},
+				{stage = {.FRAGMENT}, entry = "main", file_path = "shaders/frag.spv"},
+			},
+		},
+	)
+
+	mesh_init(&renderer.mesh, renderer.device, VERTICES, INDICES, "triangle")
+	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
+	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
-	return nil
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
-	vk.DeviceWaitIdle(renderer.ctx.device.ptr)
-	mesh_destroy(&renderer.mesh)
-	delete_context(&renderer.ctx)
+	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
+	mesh_destroy(&renderer.mesh, renderer.device)
+
+	pipeline_manager_destroy(&renderer.pipeline_manager)
+	swapchain_manager_destroy(&renderer.swapchain_manager)
+	device_destroy(renderer.device)
+	// delete_context(&renderer.ctx)
 }
 
-@(require_results)
-renderer_begin_frame :: proc(
-	renderer: ^Renderer,
-	allocator := context.allocator,
-) -> (
-	err: Backend_Error,
-) {
-	frame_manager_acquire(&renderer.ctx) or_return
-
-	frame := renderer.ctx.frame_manager.frames[renderer.ctx.frame_manager.current_frame]
-
-	ubo := Uniform_Buffer_Object {
-		view_proj = glm.matrix4_rotate_f32(glm.to_radians(f32(90)), {0, 0, 1}),
-	}
-	buffer_write(frame.uniform_buffer, &ubo)
-
-	buffer_info := vk.DescriptorBufferInfo {
-		buffer = frame.uniform_buffer.handle,
-		offset = 0,
-		range  = size_of(Uniform_Buffer_Object),
+renderer_render :: proc(renderer: ^Renderer) {
+	cmd, err := begin_frame(renderer)
+	if err != nil {
+		return
 	}
 
-	descriptor_write := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = frame.descriptor_set,
-		dstBinding      = 0,
-		dstArrayElement = 0,
-		descriptorType  = .UNIFORM_BUFFER,
-		descriptorCount = 1,
-		pBufferInfo     = &buffer_info,
-	}
+	begin_render_pass(renderer, cmd)
 
-	vk.UpdateDescriptorSets(renderer.ctx.device.ptr, 1, &descriptor_write, 0, nil)
+	pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
 
-	frame_manager_frame_begin(&renderer.ctx) or_return
+	mesh_draw(&renderer.mesh, cmd)
 
-	frame_manager_frame_begin_rendering(
-		&renderer.ctx,
-		renderer.ctx.swapchain.extent,
-		vk.ClearValue{color = {float32 = {0, 0, 0, 1}}},
+	end_render_pass(renderer, cmd)
+
+	end_frame(renderer, cmd)
+}
+
+@(private = "file")
+begin_frame :: proc(renderer: ^Renderer) -> (cmd: vk.CommandBuffer, err: Render_Error) {
+	frame := frame_manager_get_frame(&renderer.swapchain_manager.frame_manager)
+
+	frame_wait(frame, renderer.device)
+
+	_, acquire_err := swapchain_acquire_next_image(
+		&renderer.swapchain_manager,
+		frame.sync.image_available,
 	)
 
-	return nil
+	if acquire_err != nil {
+		if acquire_err == .Out_Of_Date {
+			// TODO handle resize in this
+			renderer_handle_resizing(renderer)
+		}
+		return {}, acquire_err
+	}
+
+	_ = vk_check(
+		vk.ResetFences(renderer.device.logical_device.ptr, 1, &frame.sync.in_flight_fence),
+		"Error reseting in_flight_fence",
+	)
+
+	cmd = frame.commands.primary_buffer
+	_ = vk_check(vk.ResetCommandBuffer(cmd, {}), "Error reseting command buffer")
+
+
+	_ = vk_check(
+		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
+		"Failed to begin command buffer",
+	)
+
+	return cmd, nil
 }
 
-renderer_draw :: proc(renderer: ^Renderer) {
-	frame := frame_manager_get_frame(&renderer.ctx.frame_manager) // TODO: Improve this
-	cmd_handle := frame.command_buffer.handle
+@(private = "file")
+end_frame :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
+	image, _ := swapchain_manager_get_current_image_info(renderer.swapchain_manager)
+	image_transition(
+		cmd,
+		{
+			image = image,
+			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			new_layout = .PRESENT_SRC_KHR,
+			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			dst_stage = {.BOTTOM_OF_PIPE},
+			src_access = {.COLOR_ATTACHMENT_WRITE},
+			dst_access = {},
+		},
+	)
 
-	vk.CmdBindPipeline(cmd_handle, .GRAPHICS, renderer.ctx.pipeline.handle)
+	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
+
+	if result := swapchain_manager_submit_command_buffers(&renderer.swapchain_manager, {cmd});
+	   result != nil {
+		if result == .Suboptimal_Surface || result == .Out_Of_Date {
+			// TODO: handle resizing
+			renderer_handle_resizing(renderer)
+		}
+	}
+}
+
+@(private = "file")
+begin_render_pass :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
+	image, image_view := swapchain_manager_get_current_image_info(renderer.swapchain_manager)
+
+	image_transition(
+		cmd,
+		{
+			image = image,
+			old_layout = .UNDEFINED,
+			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			src_stage = {.TOP_OF_PIPE},
+			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			src_access = {},
+			dst_access = {.COLOR_ATTACHMENT_WRITE},
+		},
+	)
+
+	color_attachment := vk.RenderingAttachmentInfo {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = image_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp = .CLEAR,
+		storeOp = .STORE,
+		clearValue = vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
+	}
+
+	extent := renderer.swapchain_manager.extent
+	rendering_info := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &color_attachment,
+	}
+
+	vk.CmdBeginRendering(cmd, &rendering_info)
 
 	viewport := vk.Viewport {
-		x        = 0,
-		y        = 0,
-		width    = f32(renderer.ctx.swapchain.extent.width),
-		height   = f32(renderer.ctx.swapchain.extent.height),
 		minDepth = 0,
 		maxDepth = 1,
+		width    = f32(extent.width),
+		height   = f32(extent.height),
 	}
-
-	vk.CmdSetViewport(cmd_handle, 0, 1, &viewport)
 
 	scissor := vk.Rect2D {
-		offset = {0, 0},
-		extent = renderer.ctx.swapchain.extent,
+		extent = extent,
 	}
 
-	vk.CmdSetScissor(cmd_handle, 0, 1, &scissor)
-
-	mesh_bind(renderer.mesh, frame.command_buffer)
-
-	vk.CmdBindDescriptorSets(
-		cmd_handle,
-		.GRAPHICS,
-		renderer.ctx.pipeline.layout,
-		0,
-		1,
-		&frame.descriptor_set,
-		0,
-		nil,
-	)
-
-	mesh_draw(renderer.mesh, frame.command_buffer)
-
-	vk.CmdDraw(cmd_handle, u32(len(VERTICES)), 1, 0, 0)
+	vk.CmdSetViewport(cmd, 0, 1, &viewport)
+	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 }
 
-@(require_results)
-renderer_end_frame :: proc(renderer: ^Renderer) -> (err: Backend_Error) {
-	frame_manager_frame_end_rendering(&renderer.ctx)
-
-	if result := renderer_flush(renderer); result != .SUCCESS {
-		if result == .ERROR_OUT_OF_DATE_KHR || result == .SUBOPTIMAL_KHR {
-			return .NeedsResizing
-		}
-		return result
-	}
-	frame_manager_advance(&renderer.ctx)
-	return
+@(private = "file")
+end_render_pass :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
+	vk.CmdEndRendering(cmd)
 }
 
-@(require_results)
-renderer_flush :: proc(renderer: ^Renderer) -> (result: vk.Result) {
-	cmd := frame_manager_frame_get_command_buffer(&renderer.ctx)
-	vk.EndCommandBuffer(cmd.handle) or_return // TODO: probably clean this
-
-	frame_manager_frame_submit(&renderer.ctx) or_return
-
-	frame_manager_frame_present(&renderer.ctx) or_return
-
-	return
-}
-
-renderer_handle_resize :: proc(
+@(private = "file")
+renderer_handle_resizing :: proc(
 	renderer: ^Renderer,
 	allocator := context.allocator,
-) -> (
-	err: Backend_Error,
-) {
-	handle_resize(&renderer.ctx, renderer.window^, allocator) or_return
+) -> Swapchain_Error {
+	extent := window_get_extent(renderer.window^)
+	return swapchain_recreate(&renderer.swapchain_manager, extent.width, extent.height, allocator)
+}
 
-	renderer.camera.aspect = window_aspect_ratio(renderer.window^)
-	camera_update_matrices(&renderer.camera)
-
+@(private)
+@(require_results)
+vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
+	if result != .SUCCESS {
+		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
+		return result
+	}
 	return nil
 }
