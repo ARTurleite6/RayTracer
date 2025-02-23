@@ -16,26 +16,10 @@ Renderer :: struct {
 	swapchain_manager: Swapchain_Manager,
 	pipeline_manager:  Pipeline_Manager,
 	window:            ^Window,
-	mesh:              Mesh,
+	scene:             Scene,
 	camera:            Camera,
 }
 
-VERTICES := []Vertex {
-	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
-	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
-	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
-	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
-}
-
-// Indices for two triangles making up the quad
-INDICES := []u32 {
-	0,
-	1,
-	2, // First triangle (bottom-right)
-	2,
-	3,
-	0, // Second triangle (top-left)
-}
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
@@ -68,7 +52,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		},
 	)
 
-	mesh_init(&renderer.mesh, renderer.device, VERTICES, INDICES, "triangle")
+	renderer.scene = create_scene(renderer.device)
 	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
 	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
@@ -77,7 +61,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
-	mesh_destroy(&renderer.mesh, renderer.device)
+	scene_destroy(&renderer.scene, renderer.device)
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
@@ -95,7 +79,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 	pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
 
-	mesh_draw(&renderer.mesh, cmd)
+	scene_draw(&renderer.scene, cmd)
 
 	end_render_pass(renderer, cmd)
 
