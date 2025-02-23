@@ -35,6 +35,7 @@ Pipeline_Config :: struct {
 	descriptor_layouts: []vk.DescriptorSetLayout,
 	shader_stages:      []Shader_Stage_Info,
 	color_attachment:   vk.Format,
+	push_contant_range: vk.PushConstantRange,
 }
 
 Shader_Stage_Info :: struct {
@@ -86,12 +87,15 @@ pipeline_manager_bind_pipeline :: proc(
 	manager: Pipeline_Manager,
 	name: string,
 	cmd: vk.CommandBuffer,
-) {pipeline := manager.pipelines[name]
+) -> Pipeline {
+	pipeline := manager.pipelines[name]
 	vk.CmdBindPipeline(cmd, pipeline_type_bind_point(pipeline.type), pipeline.handle)
+
+	return pipeline
 }
 
 @(require_results)
-create_graphics_pipeline2 :: proc(
+create_graphics_pipeline :: proc(
 	manager: ^Pipeline_Manager,
 	name: string,
 	config: Pipeline_Config,
@@ -155,13 +159,23 @@ create_graphics_pipeline2 :: proc(
 		pAttachments    = &color_blend_attachment,
 	}
 
+	// TODO: its possible for this to be changed in the future
+	push_constant_range := vk.PushConstantRange {
+		stageFlags = {.VERTEX},
+		offset     = 0,
+		size       = size_of(Push_Constants),
+	}
+
+	descriptor_layouts := config.descriptor_layouts
+
 	{ 	// create pipeline layout
 
-		descriptor_layouts := config.descriptor_layouts
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-			setLayoutCount = u32(len(descriptor_layouts)),
-			pSetLayouts    = raw_data(descriptor_layouts),
+			sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount         = u32(len(descriptor_layouts)),
+			pSetLayouts            = raw_data(descriptor_layouts),
+			pushConstantRangeCount = 1,
+			pPushConstantRanges    = &push_constant_range,
 		}
 
 		vk.CreatePipelineLayout(

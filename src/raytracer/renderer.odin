@@ -40,7 +40,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	pipeline_manager_init(&renderer.pipeline_manager, renderer.device)
 
-	_ = create_graphics_pipeline2(
+	_ = create_graphics_pipeline(
 		&renderer.pipeline_manager,
 		"main",
 		{
@@ -77,9 +77,9 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 	begin_render_pass(renderer, cmd)
 
-	pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
+	pipeline := pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
 
-	scene_draw(&renderer.scene, cmd)
+	scene_draw(&renderer.scene, cmd, pipeline.layout)
 
 	end_render_pass(renderer, cmd)
 

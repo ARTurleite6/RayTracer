@@ -1,6 +1,6 @@
 package raytracer
 
-// import glm "core:math/linalg"
+import glm "core:math/linalg"
 import vk "vendor:vulkan"
 
 Vertex :: struct {
@@ -55,6 +55,15 @@ Mesh_Error :: union {
 	Buffer_Error,
 }
 
+Scene_UBO :: struct {
+	view:       Mat4,
+	projection: Mat4,
+}
+
+Push_Constants :: struct {
+	model_matrix: Mat4,
+}
+
 scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
 	scene.meshes = make([dynamic]Mesh, allocator)
 	scene.objects = make([dynamic]Object, allocator)
@@ -97,8 +106,22 @@ scene_add_object :: proc(
 	return len(scene.objects) - 1
 }
 
-scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer) {
+// TODO: probably in the future would it be nice to change this, to not pass the pipeline_layout
+scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.PipelineLayout) {
 	for &object in scene.objects {
+
+		push_constant := Push_Constants {
+			model_matrix = glm.matrix4_rotate_f32(glm.to_radians(f32(45)), {0, 1, 0}),
+		}
+
+		vk.CmdPushConstants(
+			cmd,
+			pipeline_layout,
+			{.VERTEX},
+			0,
+			size_of(Push_Constants),
+			&push_constant,
+		)
 
 		mesh := &scene.meshes[object.mesh_index]
 
