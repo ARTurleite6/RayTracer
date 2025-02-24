@@ -11,10 +11,9 @@ Pipeline_Type :: enum {
 }
 
 Pipeline_Manager :: struct {
-	device:             ^Device,
-	pipelines:          map[string]Pipeline,
-	descriptor_layouts: map[string]vk.DescriptorSetLayout,
-	pipeline_cache:     vk.PipelineCache, // TODO: this for now is not to be used
+	device:         ^Device,
+	pipelines:      map[string]Pipeline,
+	pipeline_cache: vk.PipelineCache, // TODO: this for now is not to be used
 }
 
 Pipeline_Error :: enum {
@@ -22,6 +21,8 @@ Pipeline_Error :: enum {
 	Cache_Creation_Failed,
 	Layout_Creation_Failed,
 	Pipeline_Creation_Failed,
+	Descriptor_Set_Creation_Failed,
+	Pool_Creation_Failed,
 	Shader_Creation_Failed,
 }
 
@@ -53,7 +54,6 @@ pipeline_manager_init :: proc(
 ) {
 	manager.device = device
 	manager.pipelines = make(map[string]Pipeline)
-	manager.descriptor_layouts = make(map[string]vk.DescriptorSetLayout)
 
 	cache_info := vk.PipelineCacheCreateInfo {
 		sType = .PIPELINE_CACHE_CREATE_INFO,

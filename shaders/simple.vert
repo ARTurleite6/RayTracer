@@ -1,5 +1,11 @@
 #version 450
 
+layout(set = 0, binding = 0) uniform Ubo {
+    mat4 projection;
+    mat4 view;
+    mat4 inverse_view;
+} ubo;
+
 layout(push_constant) uniform Push {
     mat4 model_matrix;
 } push;

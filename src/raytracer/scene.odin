@@ -111,7 +111,7 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 	for &object in scene.objects {
 
 		push_constant := Push_Constants {
-			model_matrix = glm.matrix4_rotate_f32(glm.to_radians(f32(45)), {0, 1, 0}),
+			model_matrix = glm.identity_matrix(Mat4),
 		}
 
 		vk.CmdPushConstants(

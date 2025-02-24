@@ -37,7 +37,6 @@ Frame_Error :: enum {
 	None = 0,
 	Command_Pool_Creation_Failed,
 	Command_Buffer_Creation_Failed,
-	Descriptor_Pool_Creation_Failed,
 	Descriptor_Set_Creation_Failed,
 	Buffer_Creation_Failed,
 	Sync_Creation_Failed,
