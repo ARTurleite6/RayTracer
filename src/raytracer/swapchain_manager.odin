@@ -192,6 +192,18 @@ swapchain_manager_submit_command_buffers :: proc(
 	return nil
 }
 
+swapchain_manager_get_image :: proc(
+	manager: Swapchain_Manager,
+	image_index: u32,
+) -> (
+	image: vk.Image,
+	image_view: vk.ImageView,
+) {
+	assert(int(image_index) < len(manager.images), "Invalid image index")
+
+	return manager.images[image_index], manager.image_views[image_index]
+}
+
 swapchain_manager_get_current_image_info :: proc(
 	manager: Swapchain_Manager,
 ) -> (

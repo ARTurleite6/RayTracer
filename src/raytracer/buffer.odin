@@ -8,12 +8,14 @@ _ :: runtime
 _ :: fmt
 
 Buffer :: struct {
-	handle:         vk.Buffer,
-	allocation:     vma.Allocation,
-	size:           vk.DeviceSize,
-	instance_size:  vk.DeviceSize,
-	instance_count: int,
-	mapped_data:    rawptr,
+	handle:            vk.Buffer,
+	allocation:        vma.Allocation,
+	size:              vk.DeviceSize,
+	instance_size:     vk.DeviceSize,
+	instance_count:    int,
+	mapped_data:       rawptr,
+	usage:             vk.BufferUsageFlags,
+	vertex_attributes: [dynamic]vk.VertexInputAttributeDescription,
 }
 
 Buffer_Error :: enum {
@@ -21,6 +23,22 @@ Buffer_Error :: enum {
 	Creation_Failed,
 	Mapping_Failed,
 	Invalid_Size,
+}
+
+vertex_buffer_init :: proc(buffer: ^Buffer, device: ^Device, vertices: []Vertex) -> Buffer_Error {
+	buffer_init_with_staging_buffer(
+		buffer,
+		device,
+		raw_data(vertices),
+		size_of(Vertex),
+		len(vertices),
+		{.VERTEX_BUFFER},
+	) or_return
+
+	append_elem(&buffer.vertex_attributes, VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[0])
+	append_elem(&buffer.vertex_attributes, VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[1])
+
+	return .None
 }
 
 buffer_init :: proc(
@@ -38,6 +56,8 @@ buffer_init :: proc(
 	buffer.size = size // TODO: this should be handled better in the future
 	buffer.instance_size = instance_size
 	buffer.instance_count = instance_count
+	buffer.usage = usage
+	buffer.vertex_attributes = make([dynamic]vk.VertexInputAttributeDescription)
 
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
@@ -117,6 +137,16 @@ buffer_destroy :: proc(buffer: ^Buffer, device: ^Device) {
 		buffer.handle = 0
 		buffer.allocation = nil
 	}
+
+	delete(buffer.vertex_attributes)
+	buffer.vertex_attributes = nil
+}
+
+buffer_add_vertex_attribute :: proc(
+	buffer: ^Buffer,
+	attribute: vk.VertexInputAttributeDescription,
+) {
+	append(&buffer.vertex_attributes, attribute)
 }
 
 buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> Buffer_Error {

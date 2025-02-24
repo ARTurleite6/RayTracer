@@ -17,6 +17,8 @@ Global_Ubo :: struct {
 }
 
 Render_Error :: union {
+	Pipeline_Error,
+	Shader_Error,
 	Swapchain_Error,
 }
 
@@ -27,7 +29,9 @@ Renderer :: struct {
 	window:                   ^Window,
 	scene:                    Scene,
 	camera:                   Camera,
+	render_graph:             Render_Graph,
 	// TODO: probably move this in the future
+	shaders:                  [dynamic]Shader,
 	pool:                     vk.DescriptorPool,
 	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
 	global_descriptor_layout: Descriptor_Set_Layout,
@@ -117,7 +121,43 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		}
 	}
 
+	{ 	// create shaders
+		shader: Shader
+		shader_init(&shader, renderer.device, "main", "main", "shaders/vert.spv", {.VERTEX})
+		append(&renderer.shaders, shader)
+
+		shader_init(&shader, renderer.device, "main", "main", "shaders/frag.spv", {.FRAGMENT})
+		append(&renderer.shaders, shader)
+	}
+
 	renderer.scene = create_scene(renderer.device)
+
+	render_graph_init(
+		&renderer.render_graph,
+		renderer.device,
+		&renderer.swapchain_manager,
+		allocator,
+	)
+	{ 	// create graphics stage
+		stage := new(Graphics_Stage)
+		graphics_stage_init(stage, "main", allocator)
+		render_stage_use_scene(stage, renderer.scene)
+		graphics_stage_use_shader(stage, renderer.shaders[0])
+		graphics_stage_use_shader(stage, renderer.shaders[1])
+		graphics_stage_use_format(stage, renderer.swapchain_manager.format)
+
+		render_graph_add_stage(&renderer.render_graph, stage)
+
+		render_stage_on_record(stage, proc(stage: ^Render_Stage, cmd: vk.CommandBuffer) {
+			graphics_stage := stage.variant.(^Graphics_Stage)
+			scene := stage.reads[0].(Scene)
+
+			scene_draw(&scene, cmd, graphics_stage.pipeline.layout)
+		})
+	}
+
+	render_graph_compile(&renderer.render_graph)
+
 	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
 	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
@@ -127,6 +167,11 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
 	scene_destroy(&renderer.scene, renderer.device)
+	render_graph_destroy(&renderer.render_graph)
+
+	for &shader in renderer.shaders {
+		shader_destroy(&shader)
+	}
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
@@ -147,40 +192,35 @@ renderer_update :: proc(renderer: ^Renderer) {
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
-	cmd, err := begin_frame(renderer)
+	if renderer.window.framebuffer_resized {
+		renderer.window.framebuffer_resized = false
+		renderer_handle_resizing(renderer)
+	}
+
+	cmd, image_index, err := begin_frame(renderer)
 	if err != nil {
 		return
 	}
 
-	begin_render_pass(renderer, cmd)
-
-	pipeline := pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
-
-	scene_draw(&renderer.scene, cmd, pipeline.layout)
-
-	end_render_pass(renderer, cmd)
-
-	end_frame(renderer, cmd)
+	render_graph_render(&renderer.render_graph, cmd, image_index)
 }
 
 @(private = "file")
-begin_frame :: proc(renderer: ^Renderer) -> (cmd: vk.CommandBuffer, err: Render_Error) {
+begin_frame :: proc(
+	renderer: ^Renderer,
+) -> (
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+	err: Render_Error,
+) {
 	frame := frame_manager_get_frame(&renderer.swapchain_manager.frame_manager)
 
 	frame_wait(frame, renderer.device)
 
-	_, acquire_err := swapchain_acquire_next_image(
+	result := swapchain_acquire_next_image(
 		&renderer.swapchain_manager,
 		frame.sync.image_available,
-	)
-
-	if acquire_err != nil {
-		if acquire_err == .Out_Of_Date {
-			// TODO handle resize in this
-			renderer_handle_resizing(renderer)
-		}
-		return {}, acquire_err
-	}
+	) or_return
 
 	_ = vk_check(
 		vk.ResetFences(renderer.device.logical_device.ptr, 1, &frame.sync.in_flight_fence),
@@ -196,91 +236,7 @@ begin_frame :: proc(renderer: ^Renderer) -> (cmd: vk.CommandBuffer, err: Render_
 		"Failed to begin command buffer",
 	)
 
-	return cmd, nil
-}
-
-@(private = "file")
-end_frame :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
-	image, _ := swapchain_manager_get_current_image_info(renderer.swapchain_manager)
-	image_transition(
-		cmd,
-		{
-			image = image,
-			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			new_layout = .PRESENT_SRC_KHR,
-			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			dst_stage = {.BOTTOM_OF_PIPE},
-			src_access = {.COLOR_ATTACHMENT_WRITE},
-			dst_access = {},
-		},
-	)
-
-	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
-
-	if result := swapchain_manager_submit_command_buffers(&renderer.swapchain_manager, {cmd});
-	   result != nil {
-		if result == .Suboptimal_Surface || result == .Out_Of_Date {
-			// TODO: handle resizing
-			renderer_handle_resizing(renderer)
-		}
-	}
-}
-
-@(private = "file")
-begin_render_pass :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
-	image, image_view := swapchain_manager_get_current_image_info(renderer.swapchain_manager)
-
-	image_transition(
-		cmd,
-		{
-			image = image,
-			old_layout = .UNDEFINED,
-			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			src_stage = {.TOP_OF_PIPE},
-			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			src_access = {},
-			dst_access = {.COLOR_ATTACHMENT_WRITE},
-		},
-	)
-
-	color_attachment := vk.RenderingAttachmentInfo {
-		sType = .RENDERING_ATTACHMENT_INFO,
-		imageView = image_view,
-		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		clearValue = vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
-	}
-
-	extent := renderer.swapchain_manager.extent
-	rendering_info := vk.RenderingInfo {
-		sType = .RENDERING_INFO,
-		renderArea = {offset = {0, 0}, extent = extent},
-		layerCount = 1,
-		colorAttachmentCount = 1,
-		pColorAttachments = &color_attachment,
-	}
-
-	vk.CmdBeginRendering(cmd, &rendering_info)
-
-	viewport := vk.Viewport {
-		minDepth = 0,
-		maxDepth = 1,
-		width    = f32(extent.width),
-		height   = f32(extent.height),
-	}
-
-	scissor := vk.Rect2D {
-		extent = extent,
-	}
-
-	vk.CmdSetViewport(cmd, 0, 1, &viewport)
-	vk.CmdSetScissor(cmd, 0, 1, &scissor)
-}
-
-@(private = "file")
-end_render_pass :: proc(renderer: ^Renderer, cmd: vk.CommandBuffer) {
-	vk.CmdEndRendering(cmd)
+	return cmd, result.image_index, nil
 }
 
 @(private = "file")

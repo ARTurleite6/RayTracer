@@ -171,15 +171,7 @@ mesh_init :: proc(
 	mesh.name = name
 	mesh.vertex_count = u32(len(vertices))
 
-	buffer_init_with_staging_buffer(
-		&mesh.vertex_buffer,
-		device,
-		raw_data(vertices),
-		size_of(Vertex),
-		len(vertices),
-		{.VERTEX_BUFFER},
-	) or_return
-
+	vertex_buffer_init(&mesh.vertex_buffer, device, vertices) or_return
 	if len(indices) > 0 {
 		buffer_init_with_staging_buffer(
 			&mesh.index_buffer,
