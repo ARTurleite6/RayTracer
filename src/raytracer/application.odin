@@ -2,7 +2,6 @@ package raytracer
 
 import "core:c"
 import "core:fmt"
-import "vendor:glfw"
 _ :: fmt
 
 Error :: union #shared_nil {
@@ -36,19 +35,6 @@ delete_application :: proc(app: Application) {
 	renderer_destroy(app.renderer)
 }
 
-application_run :: proc(app: ^Application, allocator := context.allocator) {
-	for !window_should_close(app.window^) {
-		application_update(app, allocator)
-		application_render(app, allocator)
-	}
-
-}
-
-application_update :: proc(app: ^Application, allocator := context.allocator) {
-	glfw.PollEvents()
-	window_update(app.window^)
-}
-
-application_render :: proc(app: ^Application, allocator := context.allocator) {
-	renderer_render(app.renderer)
+application_run :: proc(app: ^Application) {
+	renderer_run(app.renderer)
 }

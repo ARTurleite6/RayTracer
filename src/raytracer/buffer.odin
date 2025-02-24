@@ -143,3 +143,7 @@ buffer_write :: proc(buffer: ^Buffer, data: rawptr, size := vk.WHOLE_SIZE) {
 		runtime.mem_copy(buffer.mapped_data, data, int(size))
 	}
 }
+
+buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
+	vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size)
+}

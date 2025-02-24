@@ -1,5 +1,6 @@
 package raytracer
 
+import glm "core:math/linalg"
 import vk "vendor:vulkan"
 
 Vertex :: struct {
@@ -25,6 +26,21 @@ VERTEX_INPUT_ATTRIBUTE_DESCRIPTION := [?]vk.VertexInputAttributeDescription {
 
 Scene :: struct {
 	// TODO
+	meshes:  [dynamic]Mesh,
+	objects: [dynamic]Object,
+}
+
+Object :: struct {
+	name:       string,
+	transform:  Transform,
+	mesh_index: int,
+}
+
+Transform :: struct {
+	position:     Vec3,
+	rotation:     Vec3,
+	scale:        Vec3,
+	model_matrix: Mat4,
 }
 
 Mesh :: struct {
@@ -37,6 +53,112 @@ Mesh :: struct {
 
 Mesh_Error :: union {
 	Buffer_Error,
+}
+
+Scene_UBO :: struct {
+	view:       Mat4,
+	projection: Mat4,
+}
+
+Push_Constants :: struct {
+	model_matrix: Mat4,
+}
+
+scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
+	scene.meshes = make([dynamic]Mesh, allocator)
+	scene.objects = make([dynamic]Object, allocator)
+}
+
+scene_destroy :: proc(scene: ^Scene, device: ^Device) {
+	for &mesh in scene.meshes {
+		mesh_destroy(&mesh, device)
+	}
+
+	delete(scene.meshes)
+	delete(scene.objects)
+
+	scene.meshes = nil
+	scene.objects = nil
+}
+
+scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
+	append(&scene.meshes, mesh)
+	return len(scene.meshes) - 1
+}
+
+scene_add_object :: proc(
+	scene: ^Scene,
+	name: string,
+	mesh_index: int,
+	transform: Transform,
+) -> (
+	idx: int,
+) {
+	assert(mesh_index >= 0 && mesh_index < len(scene.meshes), "Invalid mesh index") // TODO: Move this to a error handling
+
+	object := Object {
+		name       = name,
+		transform  = transform,
+		mesh_index = mesh_index,
+	}
+
+	append(&scene.objects, object)
+	return len(scene.objects) - 1
+}
+
+// TODO: probably in the future would it be nice to change this, to not pass the pipeline_layout
+scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.PipelineLayout) {
+	for &object in scene.objects {
+
+		push_constant := Push_Constants {
+			model_matrix = glm.identity_matrix(Mat4),
+		}
+
+		vk.CmdPushConstants(
+			cmd,
+			pipeline_layout,
+			{.VERTEX},
+			0,
+			size_of(Push_Constants),
+			&push_constant,
+		)
+
+		mesh := &scene.meshes[object.mesh_index]
+
+		mesh_draw(mesh, cmd)
+	}
+}
+
+// TODO: this needs to be removed later
+VERTICES := []Vertex {
+	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
+	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
+	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
+	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
+}
+
+// Indices for two triangles making up the quad
+INDICES := []u32 {
+	0,
+	1,
+	2, // First triangle (bottom-right)
+	2,
+	3,
+	0, // Second triangle (top-left)
+}
+
+@(private)
+create_scene :: proc(device: ^Device) -> (scene: Scene) {
+	scene_init(&scene)
+
+	quad_mesh: Mesh
+	mesh_init(&quad_mesh, device, VERTICES, INDICES, "Quad")
+
+	mesh_index := scene_add_mesh(&scene, quad_mesh)
+
+	scene_add_object(&scene, "quad", mesh_index, {})
+
+	return scene
 }
 
 mesh_init :: proc(

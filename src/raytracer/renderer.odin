@@ -3,39 +3,37 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
+import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
+
+
+// TODO: change this
+Global_Ubo :: struct {
+	projection:   Mat4,
+	view:         Mat4,
+	inverse_view: Mat4,
+}
 
 Render_Error :: union {
 	Swapchain_Error,
 }
 
 Renderer :: struct {
-	device:            ^Device,
-	swapchain_manager: Swapchain_Manager,
-	pipeline_manager:  Pipeline_Manager,
-	window:            ^Window,
-	mesh:              Mesh,
-	camera:            Camera,
+	device:                   ^Device,
+	swapchain_manager:        Swapchain_Manager,
+	pipeline_manager:         Pipeline_Manager,
+	window:                   ^Window,
+	scene:                    Scene,
+	camera:                   Camera,
+	// TODO: probably move this in the future
+	pool:                     vk.DescriptorPool,
+	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
+	global_descriptor_layout: Descriptor_Set_Layout,
+	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
-VERTICES := []Vertex {
-	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
-	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
-	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
-	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
-}
-
-// Indices for two triangles making up the quad
-INDICES := []u32 {
-	0,
-	1,
-	2, // First triangle (bottom-right)
-	2,
-	3,
-	0, // Second triangle (top-left)
-}
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
@@ -56,10 +54,40 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	pipeline_manager_init(&renderer.pipeline_manager, renderer.device)
 
-	_ = create_graphics_pipeline2(
+	{ 	// pool
+		builder := &Descriptor_Pool_Builder{}
+		descriptor_pool_builder_init(builder, renderer.device)
+		descriptor_pool_builder_set_max_sets(builder, MAX_FRAMES_IN_FLIGHT)
+		descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT)
+		renderer.pool, _ = descriptor_pool_build(builder)
+		descriptor_pool_builder_init(builder, renderer.device)
+	}
+
+	for &buffer in renderer.ubos {
+		buffer_init(
+			&buffer,
+			renderer.device,
+			size_of(Global_Ubo),
+			1,
+			{.UNIFORM_BUFFER},
+			.Cpu_To_Gpu,
+		)
+
+		buffer_map(&buffer, renderer.device)
+	}
+
+	{
+		builder := &Descriptor_Set_Layout_Builder{}
+		descriptor_layout_builder_init(builder, renderer.device)
+		descriptor_layout_builder_add_binding(builder, 0, .UNIFORM_BUFFER, {.VERTEX})
+		renderer.global_descriptor_layout, _ = descriptor_layout_build(builder)
+	}
+
+	_ = create_graphics_pipeline(
 		&renderer.pipeline_manager,
 		"main",
 		{
+			descriptor_layouts = {renderer.global_descriptor_layout.handle},
 			color_attachment = renderer.swapchain_manager.format,
 			shader_stages = []Shader_Stage_Info {
 				{stage = {.VERTEX}, entry = "main", file_path = "shaders/vert.spv"},
@@ -68,7 +96,28 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		},
 	)
 
-	mesh_init(&renderer.mesh, renderer.device, VERTICES, INDICES, "triangle")
+	{ 	// descriptor sets
+		writer := &Descriptor_Writer{}
+		descriptor_writer_init(
+			writer,
+			renderer.global_descriptor_layout,
+			renderer.pool,
+			renderer.device,
+		)
+
+		for buffer, i in renderer.ubos {
+			buffer_info := vk.DescriptorBufferInfo {
+				buffer = buffer.handle,
+				offset = 0,
+				range  = vk.DeviceSize(size_of(Global_Ubo)),
+			}
+			descriptor_writer_write_buffer(writer, 0, &buffer_info)
+
+			renderer.descriptor_sets[i], _ = descriptor_writer_build(writer)
+		}
+	}
+
+	renderer.scene = create_scene(renderer.device)
 	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
 	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
 
@@ -77,12 +126,24 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
-	mesh_destroy(&renderer.mesh, renderer.device)
+	scene_destroy(&renderer.scene, renderer.device)
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
 	device_destroy(renderer.device)
 	// delete_context(&renderer.ctx)
+}
+
+renderer_run :: proc(renderer: ^Renderer) {
+	for !window_should_close(renderer.window^) {
+		renderer_update(renderer)
+		renderer_render(renderer)
+	}
+}
+
+renderer_update :: proc(renderer: ^Renderer) {
+	glfw.PollEvents()
+	window_update(renderer.window^)
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
@@ -93,9 +154,9 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 	begin_render_pass(renderer, cmd)
 
-	pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
+	pipeline := pipeline_manager_bind_pipeline(renderer.pipeline_manager, "main", cmd)
 
-	mesh_draw(&renderer.mesh, cmd)
+	scene_draw(&renderer.scene, cmd, pipeline.layout)
 
 	end_render_pass(renderer, cmd)
 

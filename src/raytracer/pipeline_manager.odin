@@ -11,10 +11,9 @@ Pipeline_Type :: enum {
 }
 
 Pipeline_Manager :: struct {
-	device:             ^Device,
-	pipelines:          map[string]Pipeline,
-	descriptor_layouts: map[string]vk.DescriptorSetLayout,
-	pipeline_cache:     vk.PipelineCache, // TODO: this for now is not to be used
+	device:         ^Device,
+	pipelines:      map[string]Pipeline,
+	pipeline_cache: vk.PipelineCache, // TODO: this for now is not to be used
 }
 
 Pipeline_Error :: enum {
@@ -22,6 +21,8 @@ Pipeline_Error :: enum {
 	Cache_Creation_Failed,
 	Layout_Creation_Failed,
 	Pipeline_Creation_Failed,
+	Descriptor_Set_Creation_Failed,
+	Pool_Creation_Failed,
 	Shader_Creation_Failed,
 }
 
@@ -35,6 +36,7 @@ Pipeline_Config :: struct {
 	descriptor_layouts: []vk.DescriptorSetLayout,
 	shader_stages:      []Shader_Stage_Info,
 	color_attachment:   vk.Format,
+	push_contant_range: vk.PushConstantRange,
 }
 
 Shader_Stage_Info :: struct {
@@ -52,7 +54,6 @@ pipeline_manager_init :: proc(
 ) {
 	manager.device = device
 	manager.pipelines = make(map[string]Pipeline)
-	manager.descriptor_layouts = make(map[string]vk.DescriptorSetLayout)
 
 	cache_info := vk.PipelineCacheCreateInfo {
 		sType = .PIPELINE_CACHE_CREATE_INFO,
@@ -86,12 +87,15 @@ pipeline_manager_bind_pipeline :: proc(
 	manager: Pipeline_Manager,
 	name: string,
 	cmd: vk.CommandBuffer,
-) {pipeline := manager.pipelines[name]
+) -> Pipeline {
+	pipeline := manager.pipelines[name]
 	vk.CmdBindPipeline(cmd, pipeline_type_bind_point(pipeline.type), pipeline.handle)
+
+	return pipeline
 }
 
 @(require_results)
-create_graphics_pipeline2 :: proc(
+create_graphics_pipeline :: proc(
 	manager: ^Pipeline_Manager,
 	name: string,
 	config: Pipeline_Config,
@@ -155,13 +159,23 @@ create_graphics_pipeline2 :: proc(
 		pAttachments    = &color_blend_attachment,
 	}
 
+	// TODO: its possible for this to be changed in the future
+	push_constant_range := vk.PushConstantRange {
+		stageFlags = {.VERTEX},
+		offset     = 0,
+		size       = size_of(Push_Constants),
+	}
+
+	descriptor_layouts := config.descriptor_layouts
+
 	{ 	// create pipeline layout
 
-		descriptor_layouts := config.descriptor_layouts
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-			setLayoutCount = u32(len(descriptor_layouts)),
-			pSetLayouts    = raw_data(descriptor_layouts),
+			sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount         = u32(len(descriptor_layouts)),
+			pSetLayouts            = raw_data(descriptor_layouts),
+			pushConstantRangeCount = 1,
+			pPushConstantRanges    = &push_constant_range,
 		}
 
 		vk.CreatePipelineLayout(
