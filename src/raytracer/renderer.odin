@@ -38,7 +38,6 @@ Renderer :: struct {
 	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
 }
 
-
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
@@ -87,19 +86,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.global_descriptor_layout, _ = descriptor_layout_build(builder)
 	}
 
-	_ = create_graphics_pipeline(
-		&renderer.pipeline_manager,
-		"main",
-		{
-			descriptor_layouts = {renderer.global_descriptor_layout.handle},
-			color_attachment = renderer.swapchain_manager.format,
-			shader_stages = []Shader_Stage_Info {
-				{stage = {.VERTEX}, entry = "main", file_path = "shaders/vert.spv"},
-				{stage = {.FRAGMENT}, entry = "main", file_path = "shaders/frag.spv"},
-			},
-		},
-	)
-
 	{ 	// descriptor sets
 		writer := &Descriptor_Writer{}
 		descriptor_writer_init(
@@ -141,19 +127,26 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	{ 	// create graphics stage
 		stage := new(Graphics_Stage)
 		graphics_stage_init(stage, "main", allocator)
-		render_stage_use_scene(stage, renderer.scene)
 		graphics_stage_use_shader(stage, renderer.shaders[0])
 		graphics_stage_use_shader(stage, renderer.shaders[1])
 		graphics_stage_use_format(stage, renderer.swapchain_manager.format)
+		graphics_stage_use_vertex_buffer_binding(
+			stage,
+			0,
+			VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:],
+			VERTEX_INPUT_BINDING_DESCRIPTION,
+		)
+		render_stage_use_push_constant_range(
+			stage,
+			vk.PushConstantRange {
+				stageFlags = {.VERTEX},
+				offset = 0,
+				size = size_of(Push_Constants),
+			},
+		)
+		render_stage_use_descriptor_layout(stage, renderer.global_descriptor_layout.handle)
 
 		render_graph_add_stage(&renderer.render_graph, stage)
-
-		render_stage_on_record(stage, proc(stage: ^Render_Stage, cmd: vk.CommandBuffer) {
-			graphics_stage := stage.variant.(^Graphics_Stage)
-			scene := stage.reads[0].(Scene)
-
-			scene_draw(&scene, cmd, graphics_stage.pipeline.layout)
-		})
 	}
 
 	render_graph_compile(&renderer.render_graph)
@@ -166,17 +159,27 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
-	scene_destroy(&renderer.scene, renderer.device)
 	render_graph_destroy(&renderer.render_graph)
+	scene_destroy(&renderer.scene, renderer.device)
 
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
 
+	for &ubo in renderer.ubos {
+		buffer_destroy(&ubo, renderer.device)
+	}
+
+	vk.DestroyDescriptorPool(renderer.device.logical_device.ptr, renderer.pool, nil)
+	vk.DestroyDescriptorSetLayout(
+		renderer.device.logical_device.ptr,
+		renderer.global_descriptor_layout.handle,
+		nil,
+	)
+
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
 	device_destroy(renderer.device)
-	// delete_context(&renderer.ctx)
 }
 
 renderer_run :: proc(renderer: ^Renderer) {
@@ -202,7 +205,36 @@ renderer_render :: proc(renderer: ^Renderer) {
 		return
 	}
 
-	render_graph_render(&renderer.render_graph, cmd, image_index)
+	// FIXME: this should be on update, both this and the begin_frame
+	ubo := &Global_Ubo {
+		view = renderer.camera.view,
+		projection = renderer.camera.proj,
+		inverse_view = glm.matrix4_inverse(renderer.camera.view),
+	}
+	buffer_write(&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame], ubo)
+	buffer_flush(
+		&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame],
+		renderer.device^,
+	)
+
+
+	_ = vk_check(
+		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
+		"Failed to begin command buffer",
+	)
+
+	render_graph_render(
+		&renderer.render_graph,
+		cmd,
+		image_index,
+		{
+			scene = &renderer.scene,
+			descriptor_set = renderer.descriptor_sets[renderer.swapchain_manager.frame_manager.current_frame],
+		},
+	)
+
+	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
+	swapchain_present(&renderer.swapchain_manager, {cmd}, image_index)
 }
 
 @(private = "file")
@@ -230,11 +262,6 @@ begin_frame :: proc(
 	cmd = frame.commands.primary_buffer
 	_ = vk_check(vk.ResetCommandBuffer(cmd, {}), "Error reseting command buffer")
 
-
-	_ = vk_check(
-		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
-		"Failed to begin command buffer",
-	)
 
 	return cmd, result.image_index, nil
 }

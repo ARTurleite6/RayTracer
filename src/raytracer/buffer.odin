@@ -175,5 +175,8 @@ buffer_write :: proc(buffer: ^Buffer, data: rawptr, size := vk.WHOLE_SIZE) {
 }
 
 buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
-	vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size)
+	_ = vk_check(
+		vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size),
+		"Failed to upload data to uniform buffer",
+	)
 }

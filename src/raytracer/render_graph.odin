@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import vk "vendor:vulkan"
 _ :: fmt
@@ -10,26 +11,36 @@ Render_Stage :: struct {
 	reads:              [dynamic]Render_Resource,
 	descriptor_layouts: [dynamic]vk.DescriptorSetLayout,
 	push_constants:     [dynamic]vk.PushConstantRange,
-	execute:            On_Record_Proc,
+	// TODO: Possibly in the future add a execute proc pointer
 	variant:            Render_Stage_Variant,
 }
 
-On_Record_Proc :: #type proc(stage: ^Render_Stage, cmd: vk.CommandBuffer)
+// TODO: see if this is needed
+Render_Data :: struct {
+	scene:          ^Scene,
+	descriptor_set: vk.DescriptorSet,
+}
 
 Render_Stage_Variant :: union {
 	^Graphics_Stage,
 }
 
 Graphics_Stage :: struct {
-	using base: Render_Stage,
-	pipeline:   Pipeline,
-	shaders:    [dynamic]vk.PipelineShaderStageCreateInfo,
-	format:     vk.Format,
+	using base:      Render_Stage,
+	pipeline:        Pipeline,
+	shaders:         [dynamic]vk.PipelineShaderStageCreateInfo,
+	vertex_bindings: [dynamic]Vertex_Buffer_Binding,
+	format:          vk.Format,
+}
+
+Vertex_Buffer_Binding :: struct {
+	value:                 u32,
+	binding_description:   vk.VertexInputBindingDescription,
+	attribute_description: []vk.VertexInputAttributeDescription,
 }
 
 Render_Resource :: union {
 	Buffer,
-	Scene,
 }
 
 Render_Graph :: struct {
@@ -51,7 +62,7 @@ render_graph_init :: proc(
 
 render_graph_destroy :: proc(graph: ^Render_Graph) {
 	for stage in graph.stages {
-		render_stage_destroy(stage)
+		render_stage_destroy(stage, graph.device^)
 	}
 	delete(graph.stages)
 	graph.stages = nil
@@ -70,9 +81,14 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 	}
 }
 
-render_graph_render :: proc(graph: ^Render_Graph, cmd: vk.CommandBuffer, image_index: u32) {
+render_graph_render :: proc(
+	graph: ^Render_Graph,
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+	render_data: Render_Data,
+) {
 	for stage in graph.stages {
-		record_command_buffer(graph^, stage^, cmd, image_index)
+		record_command_buffer(graph^, stage^, cmd, image_index, render_data)
 	}
 }
 
@@ -89,10 +105,10 @@ render_stage_init :: proc(
 	stage.variant = variant
 }
 
-render_stage_destroy :: proc(stage: ^Render_Stage) {
+render_stage_destroy :: proc(stage: ^Render_Stage, device: Device) {
 	switch v in stage.variant {
 	case ^Graphics_Stage:
-		graphics_stage_destroy(v)
+		graphics_stage_destroy(v, device)
 	}
 	stage.variant = nil
 
@@ -104,23 +120,43 @@ render_stage_destroy :: proc(stage: ^Render_Stage) {
 	stage.push_constants = nil
 }
 
-render_stage_on_record :: proc(stage: ^Render_Stage, on_record: On_Record_Proc) {
-	stage.execute = on_record
+render_stage_use_descriptor_layout :: proc(stage: ^Render_Stage, layout: vk.DescriptorSetLayout) {
+	append(&stage.descriptor_layouts, layout)
 }
 
-render_stage_use_scene :: proc(stage: ^Render_Stage, scene: Scene) {
-	append(&stage.reads, scene)
+render_stage_use_push_constant_range :: proc(stage: ^Render_Stage, range: vk.PushConstantRange) {
+	append(&stage.push_constants, range)
 }
 
 graphics_stage_init :: proc(stage: ^Graphics_Stage, name: string, allocator := context.allocator) {
-	render_stage_init(stage, name, stage, allocator)
-	delete(stage.shaders)
-	stage.shaders = nil
+	render_stage_init(stage, name, stage, allocator = allocator)
+	stage.vertex_bindings = make([dynamic]Vertex_Buffer_Binding, allocator)
 }
 
-graphics_stage_destroy :: proc(stage: ^Graphics_Stage) {
+graphics_stage_destroy :: proc(stage: ^Graphics_Stage, device: Device) {
+	vk.DestroyPipelineLayout(device.logical_device.ptr, stage.pipeline.layout, nil)
+	vk.DestroyPipeline(device.logical_device.ptr, stage.pipeline.handle, nil)
 	delete(stage.shaders)
+	delete(stage.vertex_bindings)
+	stage.vertex_bindings = nil
 	stage.shaders = nil
+	stage.vertex_bindings = nil
+}
+
+graphics_stage_use_vertex_buffer_binding :: proc(
+	stage: ^Graphics_Stage,
+	binding: u32,
+	attribute_description: []vk.VertexInputAttributeDescription,
+	binding_description: vk.VertexInputBindingDescription,
+) {
+	append(
+		&stage.vertex_bindings,
+		Vertex_Buffer_Binding {
+			value = binding,
+			attribute_description = attribute_description,
+			binding_description = binding_description,
+		},
+	)
 }
 
 graphics_stage_use_format :: proc(stage: ^Graphics_Stage, format: vk.Format) {
@@ -148,12 +184,31 @@ build_graphics_pipeline :: proc(stage: ^Graphics_Stage, device: Device) -> Rende
 		pDynamicStates    = raw_data(dynamic_states),
 	}
 
+	bindings := slice.mapper(
+		stage.vertex_bindings[:],
+		proc(b: Vertex_Buffer_Binding) -> vk.VertexInputBindingDescription {
+			return b.binding_description
+		},
+		context.temp_allocator,
+	)
+
+	attribute_descriptions := make(
+		[dynamic]vk.VertexInputAttributeDescription,
+		allocator = context.temp_allocator,
+	)
+
+	for attr in stage.vertex_bindings {
+		for b in attr.attribute_description {
+			append_elem(&attribute_descriptions, b)
+		}
+	}
+
 	vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
 		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-		vertexBindingDescriptionCount   = 1,
-		pVertexBindingDescriptions      = &VERTEX_INPUT_BINDING_DESCRIPTION,
-		vertexAttributeDescriptionCount = len(VERTEX_INPUT_ATTRIBUTE_DESCRIPTION),
-		pVertexAttributeDescriptions    = raw_data(VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:]),
+		vertexBindingDescriptionCount   = u32(len(bindings)),
+		pVertexBindingDescriptions      = raw_data(bindings),
+		vertexAttributeDescriptionCount = u32(len(attribute_descriptions)),
+		pVertexAttributeDescriptions    = raw_data(attribute_descriptions),
 	}
 
 	input_assembly_info := vk.PipelineInputAssemblyStateCreateInfo {
@@ -196,11 +251,6 @@ build_graphics_pipeline :: proc(stage: ^Graphics_Stage, device: Device) -> Rende
 	}
 
 	// TODO: its possible for this to be changed in the future
-	push_constant_range := vk.PushConstantRange {
-		stageFlags = {.VERTEX},
-		offset     = 0,
-		size       = size_of(Push_Constants),
-	}
 
 	descriptor_layouts := stage.descriptor_layouts[:]
 
@@ -210,8 +260,8 @@ build_graphics_pipeline :: proc(stage: ^Graphics_Stage, device: Device) -> Rende
 			sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
 			setLayoutCount         = u32(len(descriptor_layouts)),
 			pSetLayouts            = raw_data(descriptor_layouts),
-			pushConstantRangeCount = 1,
-			pPushConstantRanges    = &push_constant_range,
+			pushConstantRangeCount = u32(len(stage.push_constants)),
+			pPushConstantRanges    = raw_data(stage.push_constants[:]),
 		}
 
 		vk.CreatePipelineLayout(
@@ -254,7 +304,6 @@ build_graphics_pipeline :: proc(stage: ^Graphics_Stage, device: Device) -> Rende
 		return .Pipeline_Creation_Failed
 	}
 
-	stage.pipeline.type = .Graphics
 	return nil
 }
 
@@ -264,32 +313,54 @@ record_command_buffer :: proc(
 	stage: Render_Stage,
 	cmd: vk.CommandBuffer,
 	image_index: u32,
+	render_data: Render_Data,
 ) {
 	if graphics_stage, ok := stage.variant.(^Graphics_Stage); ok {
-		begin_render_pass(graph, graphics_stage, cmd, image_index)
-
-		vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
-		graphics_stage->execute(cmd)
-
-		end_render_pass(cmd)
-
-		image_transition(
-			cmd,
-			{
-				image = graph.swapchain.images[image_index],
-				old_layout = .COLOR_ATTACHMENT_OPTIMAL,
-				new_layout = .PRESENT_SRC_KHR,
-				src_stage = {.COLOR_ATTACHMENT_OUTPUT},
-				dst_stage = {.BOTTOM_OF_PIPE},
-				src_access = {.COLOR_ATTACHMENT_WRITE},
-				dst_access = {},
-			},
-		)
-
-		_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
-
-		swapchain_manager_submit_command_buffers(graph.swapchain, {cmd})
+		graphics_stage_render(graph, graphics_stage, cmd, image_index, render_data)
 	}
+}
+
+graphics_stage_render :: proc(
+	graph: Render_Graph,
+	graphics_stage: ^Graphics_Stage,
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+	render_data: Render_Data,
+) {
+
+	begin_render_pass(graph, graphics_stage, cmd, image_index)
+
+	vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
+	if render_data.descriptor_set != 0 {
+		descriptor_set := render_data.descriptor_set
+		vk.CmdBindDescriptorSets(
+			cmd,
+			.GRAPHICS,
+			graphics_stage.pipeline.layout,
+			0,
+			1,
+			&descriptor_set,
+			0,
+			nil,
+		)
+	}
+
+	scene_draw(render_data.scene, cmd, graphics_stage.pipeline.layout)
+
+	end_render_pass(cmd)
+
+	image_transition(
+		cmd,
+		{
+			image = graph.swapchain.images[image_index],
+			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			new_layout = .PRESENT_SRC_KHR,
+			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			dst_stage = {.BOTTOM_OF_PIPE},
+			src_access = {.COLOR_ATTACHMENT_WRITE},
+			dst_access = {},
+		},
+	)
 }
 
 @(private = "file")

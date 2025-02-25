@@ -20,10 +20,10 @@ Window :: struct {
 	width, height:       c.int,
 }
 
-make_window :: proc(width, height: c.int, title: cstring) -> (window: Window, err: Window_Error) {
+window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (err: Window_Error) {
 	if !glfw.Init() {
 		log.error("GLFW: Error while initialization")
-		return {}, .Initializing
+		return .Initializing
 	}
 
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
@@ -31,7 +31,7 @@ make_window :: proc(width, height: c.int, title: cstring) -> (window: Window, er
 	window.handle = glfw.CreateWindow(width, height, title, nil, nil)
 	if window.handle == nil {
 		log.error("GLFW: Error creating window")
-		return {}, .Creating_Window
+		return .Creating_Window
 	}
 
 	glfw.SetFramebufferSizeCallback(window.handle, framebuffer_resize)
@@ -39,7 +39,10 @@ make_window :: proc(width, height: c.int, title: cstring) -> (window: Window, er
 	return
 }
 
-delete_window :: proc(window: Window) {
+window_destroy :: proc(window: Window, instance: vk.Instance) {
+	if window.surface != 0 {
+		vk.DestroySurfaceKHR(instance, window.surface, nil)
+	}
 	glfw.DestroyWindow(window.handle)
 	glfw.Terminate()
 }

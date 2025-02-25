@@ -15,7 +15,6 @@ Swapchain_Manager :: struct {
 	extent:        vk.Extent2D,
 	format:        vk.Format,
 	present_mode:  vk.PresentModeKHR,
-	current_image: u32,
 }
 
 Swapchain_Config :: struct {
@@ -135,9 +134,10 @@ swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	vkb.destroy_swapchain(manager.handle)
 }
 
-swapchain_manager_submit_command_buffers :: proc(
+swapchain_present :: proc(
 	manager: ^Swapchain_Manager,
 	command_buffers: []vk.CommandBuffer,
+	image_index: u32,
 ) -> Swapchain_Error {
 	frame := frame_manager_get_frame(&manager.frame_manager)
 	{ 	// submit to graphics queue
@@ -165,13 +165,14 @@ swapchain_manager_submit_command_buffers :: proc(
 	}
 
 	{ 	// present
+		image_index := image_index
 		present_info := vk.PresentInfoKHR {
 			sType              = .PRESENT_INFO_KHR,
 			waitSemaphoreCount = 1,
 			pWaitSemaphores    = &frame.sync.render_finished,
 			swapchainCount     = 1,
 			pSwapchains        = &manager.handle.ptr,
-			pImageIndices      = &manager.current_image,
+			pImageIndices      = &image_index,
 		}
 
 		result := vk_check(
@@ -202,16 +203,6 @@ swapchain_manager_get_image :: proc(
 	assert(int(image_index) < len(manager.images), "Invalid image index")
 
 	return manager.images[image_index], manager.image_views[image_index]
-}
-
-swapchain_manager_get_current_image_info :: proc(
-	manager: Swapchain_Manager,
-) -> (
-	image: vk.Image,
-	image_view: vk.ImageView,
-) {
-	curr_image := manager.current_image
-	return manager.images[curr_image], manager.image_views[curr_image]
 }
 
 swapchain_recreate :: proc(
@@ -273,7 +264,6 @@ swapchain_acquire_next_image :: proc(
 
 	#partial switch res {
 	case .SUCCESS:
-		manager.current_image = result.image_index
 		return result, nil
 	case .SUBOPTIMAL_KHR:
 		result.suboptimal = true
