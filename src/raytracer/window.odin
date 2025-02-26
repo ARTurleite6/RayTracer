@@ -18,6 +18,8 @@ Window :: struct {
 	surface:             vk.SurfaceKHR,
 	framebuffer_resized: bool,
 	width, height:       c.int,
+	// TODO: probably this does not make sense, and should go with a better approach
+	logger:              log.Logger,
 }
 
 window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (err: Window_Error) {
@@ -36,7 +38,12 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 
 	window.width, window.height = width, height
 
+	window.logger = context.logger
+
 	glfw.SetFramebufferSizeCallback(window.handle, framebuffer_resize)
+	glfw.SetKeyCallback(window.handle, key_callback)
+	glfw.SetCursorPosCallback(window.handle, cursor_position_callback)
+	glfw.SetMouseButtonCallback(window.handle, mouse_button_callback)
 
 	return
 }
@@ -55,6 +62,12 @@ window_set_window_user_pointer :: proc(window: Window, pointer: rawptr) {
 
 window_should_close :: proc(window: Window) -> b32 {
 	return glfw.WindowShouldClose(window.handle)
+}
+
+window_resize :: proc(window: ^Window, width, height: i32) {
+	window.framebuffer_resized = true
+	window.width = width
+	window.width = width
 }
 
 window_update :: proc(window: Window) {
@@ -93,9 +106,44 @@ window_wait_events :: proc(window: Window) {
 
 framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
 	context = runtime.default_context()
-	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
+	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+	event_system_append_event(system, Resize_Event{width = width, height = height})
+	// queue_push_event(&renderer.events_queue, Resize_Event{width = width, height = height})
+}
 
-	window.framebuffer_resized = true
-	window.width = width
-	window.height = height
+@(private = "file")
+key_callback :: proc "c" (window_handle: glfw.WindowHandle, key, scancode, action, mods: c.int) {
+	context = runtime.default_context()
+	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+	event_system_append_event(
+		system,
+		Key_Event {
+			key = Key_Code(key),
+			action = Key_Action(action),
+			mods = transmute(Key_Mod_Flags)mods,
+		},
+	)
+}
+
+@(private = "file")
+cursor_position_callback :: proc "c" (window_handle: glfw.WindowHandle, x_pos: f64, y_pos: f64) {
+	context = runtime.default_context()
+	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+
+	event_system_append_event(system, Mouse_Event{x = f32(x_pos), y = f32(y_pos)})
+}
+
+@(private = "file")
+mouse_button_callback :: proc "c" (window_handle: glfw.WindowHandle, button, action, mods: c.int) {
+	context = runtime.default_context()
+	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+
+	event_system_append_event(
+		system,
+		Mouse_Button_Event {
+			key = cast(Mouse_Key_Code)button,
+			action = cast(Key_Action)action,
+			mods = transmute(Key_Mod_Flags)mods,
+		},
+	)
 }

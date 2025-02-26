@@ -30,17 +30,25 @@ Renderer :: struct {
 	scene:                    Scene,
 	camera:                   Camera,
 	render_graph:             Render_Graph,
+	event_system:             Event_System,
 	// TODO: probably move this in the future
 	shaders:                  [dynamic]Shader,
 	pool:                     vk.DescriptorPool,
 	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
 	global_descriptor_layout: Descriptor_Set_Layout,
 	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+
+	// time
+	last_frame_time:          f64,
+	delta_time:               f32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
+	event_system_init(&renderer.event_system, renderer, allocator)
+	window_set_window_user_pointer(window^, &renderer.event_system)
+
 	renderer.device = new(Device)
 	if err := device_init(renderer.device, renderer.window); err != .None {
 		fmt.println("Error on device: %v", err)
@@ -179,17 +187,41 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	device_destroy(renderer.device)
 }
 
+// FIXME: in the future change this
+renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
+	if event_system_is_mouse_key_pressed(renderer.event_system, .MOUSE_BUTTON_2) {
+	}
+}
+
 renderer_run :: proc(renderer: ^Renderer) {
-	log.debug(renderer.camera)
 	for !window_should_close(renderer.window^) {
+		free_all(context.temp_allocator)
 		renderer_update(renderer)
 		renderer_render(renderer)
 	}
 }
 
 renderer_update :: proc(renderer: ^Renderer) {
+	current_time := glfw.GetTime()
+	renderer.delta_time = f32(current_time - renderer.last_frame_time)
+	renderer.last_frame_time = current_time
+
 	glfw.PollEvents()
+	event_system_process_events(&renderer.event_system)
 	window_update(renderer.window^)
+
+	if event_system_is_key_pressed(renderer.event_system, .W) {
+		camera_move(&renderer.camera, .Front, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .S) {
+		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .D) {
+		camera_move(&renderer.camera, .Right, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .A) {
+		camera_move(&renderer.camera, .Left, renderer.delta_time)
+	}
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
