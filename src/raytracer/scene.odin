@@ -110,8 +110,13 @@ scene_add_object :: proc(
 scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.PipelineLayout) {
 	for &object in scene.objects {
 
+		transform := glm.MATRIX4F32_IDENTITY
+		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 1, 0}) *
+		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 0, 1})
+
 		push_constant := Push_Constants {
-			model_matrix = glm.identity_matrix(Mat4),
+			// model_matrix = glm.identity_matrix(Mat4),
+			model_matrix = transform,
 		}
 
 		vk.CmdPushConstants(
@@ -129,31 +134,12 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 	}
 }
 
-// TODO: this needs to be removed later
-VERTICES := []Vertex {
-	{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
-	{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
-	{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
-	{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
-}
-
-// Indices for two triangles making up the quad
-INDICES := []u32 {
-	0,
-	1,
-	2, // First triangle (bottom-right)
-	2,
-	3,
-	0, // Second triangle (top-left)
-}
 
 @(private)
 create_scene :: proc(device: ^Device) -> (scene: Scene) {
 	scene_init(&scene)
 
-	quad_mesh: Mesh
-	mesh_init(&quad_mesh, device, VERTICES, INDICES, "Quad")
-
+	quad_mesh := create_cube(device)
 	mesh_index := scene_add_mesh(&scene, quad_mesh)
 
 	scene_add_object(&scene, "quad", mesh_index, {})
@@ -201,4 +187,97 @@ mesh_draw :: proc(mesh: ^Mesh, cmd: vk.CommandBuffer) {
 	} else {
 		vk.CmdDraw(cmd, mesh.vertex_count, 1, 0, 0)
 	}
+}
+
+create_quad :: proc(device: ^Device) -> (mesh: Mesh) {
+
+	vertices := []Vertex {
+		{{-0.5, -0.5, 0}, {1, 0, 0}}, // Bottom-left
+		{{-0.5, 0.5, 0}, {1, 1, 1}}, // Top-left
+		{{0.5, 0.5, 0}, {0, 0, 1}}, // Top-right
+		{{0.5, -0.5, 0}, {0, 1, 0}}, // Bottom-right
+	}
+
+	// Counter-clockwise indices
+	indices := []u32 {
+		0,
+		1,
+		2, // First triangle (left side)
+		0,
+		2,
+		3, // Second triangle (right side)
+	}
+	mesh_init(&mesh, device, vertices, indices, "Quad")
+
+	return mesh
+}
+
+create_cube :: proc(device: ^Device) -> (mesh: Mesh) {
+	vertices := []Vertex {
+		// Front face
+		{{-0.5, -0.5, 0.5}, {1, 0, 0}}, // 0
+		{{-0.5, 0.5, 0.5}, {1, 1, 0}}, // 1
+		{{0.5, 0.5, 0.5}, {0, 0, 1}}, // 2
+		{{0.5, -0.5, 0.5}, {0, 1, 0}}, // 3
+
+		// Back face
+		{{-0.5, -0.5, -0.5}, {1, 0, 1}}, // 4
+		{{-0.5, 0.5, -0.5}, {0, 0, 0}}, // 5
+		{{0.5, 0.5, -0.5}, {1, 1, 1}}, // 6
+		{{0.5, -0.5, -0.5}, {0, 1, 1}}, // 7
+	}
+
+	// Counter-clockwise indices for each face
+	indices := []u32 {
+		// Front face
+		0,
+		1,
+		2,
+		0,
+		2,
+		3,
+
+		// Back face
+		7,
+		6,
+		5,
+		7,
+		5,
+		4,
+
+		// Right face
+		3,
+		2,
+		6,
+		3,
+		6,
+		7,
+
+		// Left face
+		4,
+		5,
+		1,
+		4,
+		1,
+		0,
+
+		// Top face
+		1,
+		5,
+		6,
+		1,
+		6,
+		2,
+
+		// Bottom face
+		4,
+		0,
+		3,
+		4,
+		3,
+		7,
+	}
+
+	mesh_init(&mesh, device, vertices, indices, "Cube")
+	return mesh
 }

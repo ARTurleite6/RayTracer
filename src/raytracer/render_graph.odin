@@ -229,7 +229,7 @@ build_graphics_pipeline :: proc(stage: ^Graphics_Stage, device: Device) -> Rende
 		rasterizerDiscardEnable = false,
 		polygonMode             = .FILL,
 		cullMode                = {.BACK},
-		frontFace               = .CLOCKWISE,
+		frontFace               = .COUNTER_CLOCKWISE,
 		lineWidth               = 1,
 	}
 
