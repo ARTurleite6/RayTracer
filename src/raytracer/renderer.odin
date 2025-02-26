@@ -151,9 +151,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	render_graph_compile(&renderer.render_graph)
 
-	// // mesh_init_without_indices(&renderer.mesh, &renderer.ctx, "Triangle", VERTICES) or_return
-	// renderer.mesh = create_quad(&renderer.ctx, "Triangle") or_return
-
 	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
 }
 
@@ -183,6 +180,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 }
 
 renderer_run :: proc(renderer: ^Renderer) {
+	log.debug(renderer.camera)
 	for !window_should_close(renderer.window^) {
 		renderer_update(renderer)
 		renderer_render(renderer)
@@ -205,7 +203,6 @@ renderer_render :: proc(renderer: ^Renderer) {
 		return
 	}
 
-	// FIXME: this should be on update, both this and the begin_frame
 	ubo := &Global_Ubo {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,

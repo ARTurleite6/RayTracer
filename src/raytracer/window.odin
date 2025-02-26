@@ -34,6 +34,8 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 		return .Creating_Window
 	}
 
+	window.width, window.height = width, height
+
 	glfw.SetFramebufferSizeCallback(window.handle, framebuffer_resize)
 
 	return
