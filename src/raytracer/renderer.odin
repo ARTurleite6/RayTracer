@@ -30,17 +30,25 @@ Renderer :: struct {
 	scene:                    Scene,
 	camera:                   Camera,
 	render_graph:             Render_Graph,
+	event_system:             Event_System,
 	// TODO: probably move this in the future
 	shaders:                  [dynamic]Shader,
 	pool:                     vk.DescriptorPool,
 	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
 	global_descriptor_layout: Descriptor_Set_Layout,
 	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+
+	// time
+	last_frame_time:          f64,
+	delta_time:               f32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
+	event_system_init(&renderer.event_system, renderer, allocator)
+	window_set_window_user_pointer(window^, &renderer.event_system)
+
 	renderer.device = new(Device)
 	if err := device_init(renderer.device, renderer.window); err != .None {
 		fmt.println("Error on device: %v", err)
@@ -151,7 +159,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	render_graph_compile(&renderer.render_graph)
 
-	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
+	camera_init(&renderer.camera, position = {0, 0, -3}, aspect = window_aspect_ratio(window^))
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
@@ -179,17 +187,50 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	device_destroy(renderer.device)
 }
 
+// FIXME: in the future change this
+renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
+	move_camera := event_system_is_mouse_key_pressed(renderer.event_system, .MOUSE_BUTTON_2)
+	if move_camera {
+		window_set_input_mode(renderer.window^, .Locked)
+	} else {
+		window_set_input_mode(renderer.window^, .Normal)
+	}
+	camera_process_mouse(&renderer.camera, x, y, move = move_camera)
+}
+
 renderer_run :: proc(renderer: ^Renderer) {
-	log.debug(renderer.camera)
 	for !window_should_close(renderer.window^) {
+		free_all(context.temp_allocator)
 		renderer_update(renderer)
 		renderer_render(renderer)
 	}
 }
 
 renderer_update :: proc(renderer: ^Renderer) {
+	current_time := glfw.GetTime()
+	renderer.delta_time = f32(current_time - renderer.last_frame_time)
+	renderer.last_frame_time = current_time
+
 	glfw.PollEvents()
+	event_system_process_events(&renderer.event_system)
 	window_update(renderer.window^)
+
+	if event_system_is_key_pressed(renderer.event_system, .W) {
+		camera_move(&renderer.camera, .Front, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .S) {
+		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .D) {
+		camera_move(&renderer.camera, .Right, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .A) {
+		camera_move(&renderer.camera, .Left, renderer.delta_time)
+	}
+
+	if event_system_is_key_pressed(renderer.event_system, .Q) {
+		window_set_should_close(renderer.window^)
+	}
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
@@ -206,7 +247,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 	ubo := &Global_Ubo {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,
-		inverse_view = glm.matrix4_inverse(renderer.camera.view),
+		inverse_view = renderer.camera.inverse_view,
 	}
 	buffer_write(&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame], ubo)
 	buffer_flush(
@@ -269,6 +310,7 @@ renderer_handle_resizing :: proc(
 	allocator := context.allocator,
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
+	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	return swapchain_recreate(&renderer.swapchain_manager, extent.width, extent.height, allocator)
 }
 

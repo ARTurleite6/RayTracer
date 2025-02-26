@@ -27,8 +27,6 @@ application_init :: proc(
 
 	renderer_init(app.renderer, app.window, allocator)
 
-	window_set_window_user_pointer(app.window^, app.window)
-
 	return
 }
 
