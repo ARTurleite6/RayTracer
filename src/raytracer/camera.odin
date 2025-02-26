@@ -6,7 +6,9 @@ import glm "core:math/linalg"
 _ :: log
 
 CAMERA_SPEED :: f32(5.0)
+CAMERA_SENSIVITY :: f32(0.001)
 
+Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
 Mat4 :: glm.Matrix4f32
 
@@ -18,38 +20,35 @@ Direction :: enum {
 }
 
 Camera :: struct {
-	position, forward, up, right: Vec3,
-	fov, aspect, near, far:       f32,
-	view, proj:                   Mat4,
+	position, forward, up, right:           Vec3,
+	fov, aspect, near, far:                 f32,
+	view, proj, inverse_proj, inverse_view: Mat4,
 	// camera movement
-	speed:                        f32,
+	speed:                                  f32,
 	// mouse movement
-	first_mouse:                  bool,
-	last_x, last_y:               f32,
-	yaw, pitch, sensivity:        f32,
+	last_mouse_position:                    Vec2,
+	sensivity:                              f32,
 }
 
 camera_init :: proc(
 	camera: ^Camera,
-	position: Vec3 = {0, 0, -3},
+	position: Vec3,
+	aspect: f32,
 	target: Vec3 = {0, 0, 0},
 	up: Vec3 = {0, 1, 0},
 	fov: f32 = 45,
-	aspect: f32 = f32(16.0) / f32(9.0),
 	near: f32 = 0.1,
 	far: f32 = 100,
 ) {
 	camera^ = {
-		position    = position,
-		fov         = fov,
-		aspect      = f32(16.0 / 9.0),
-		near        = near,
-		far         = far,
-		speed       = CAMERA_SPEED,
-		first_mouse = false,
-		yaw         = -90,
-		pitch       = 0,
-		sensivity   = 0.1,
+		position  = position,
+		fov       = fov,
+		up        = up,
+		aspect    = aspect,
+		near      = near,
+		far       = far,
+		speed     = CAMERA_SPEED,
+		sensivity = CAMERA_SENSIVITY,
 	}
 	camera_look_at(camera, target, up)
 	camera_update_matrices(camera)
@@ -57,8 +56,12 @@ camera_init :: proc(
 
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.forward = glm.normalize(target - camera.position)
-	camera.right = glm.normalize(glm.cross(camera.forward, up))
-	camera.up = glm.normalize(glm.cross(camera.right, camera.forward))
+	camera.right = glm.cross(camera.forward, camera.up)
+}
+
+camera_update_aspect_ratio :: proc(camera: ^Camera, aspect_ratio: f32) {
+	camera.aspect = aspect_ratio
+	camera_update_matrices(camera)
 }
 
 camera_update_matrices :: proc(camera: ^Camera) {
@@ -69,47 +72,37 @@ camera_update_matrices :: proc(camera: ^Camera) {
 		camera.near,
 		camera.far,
 	)
+	camera.inverse_view = glm.matrix4_inverse_f32(camera.view)
+	camera.inverse_proj = glm.matrix4_inverse_f32(camera.proj)
 }
 
-camera_process_mouse :: proc(camera: ^Camera, x, y: f32) {
-	if camera.first_mouse {
-		camera.last_x = x
-		camera.last_y = y
-		camera.first_mouse = false
-		return
-	}
+camera_process_mouse :: proc(camera: ^Camera, x, y: f32, move: bool) {
+	current_pos := Vec2{x, y}
 
-	offset_x := x - camera.last_x
-	offset_y := camera.last_y - y
+	delta := current_pos - camera.last_mouse_position
+	camera.last_mouse_position = current_pos
 
-	camera.last_x = x
-	camera.last_y = y
+	if !move || delta == {} do return
 
-	offset_x *= camera.sensivity
-	offset_y *= camera.sensivity
+	pitch_delta := delta.y * camera.sensivity
+	yaw_delta := delta.x * camera.sensivity
 
-	camera.yaw += offset_x
-	camera.pitch += offset_y
+	rotation := glm.normalize(
+		glm.cross(
+			glm.quaternion_angle_axis_f32(pitch_delta, camera.right),
+			glm.quaternion_angle_axis_f32(-yaw_delta, {0, 1, 0}),
+		),
+	)
 
-	camera.pitch = clamp(camera.pitch, -89.0, 89.0)
-
-	// Calculate new direction
-	camera.forward = {
-		glm.cos(math.to_radians(camera.yaw)) * glm.cos(math.to_radians(camera.pitch)),
-		glm.sin(math.to_radians(camera.pitch)),
-		glm.sin(math.to_radians(camera.yaw)) * glm.cos(math.to_radians(camera.pitch)),
-	}
-	camera.forward = glm.normalize(camera.forward)
-
-	// Re-calculate camera vectors
-	camera.right = glm.normalize(glm.cross(camera.forward, {0, 1, 0}))
-	camera.up = glm.normalize(glm.cross(camera.right, camera.forward))
+	camera.forward = glm.quaternion_mul_vector3(rotation, camera.forward)
+	camera.right = glm.cross(camera.forward, camera.up)
 
 	camera_update_matrices(camera)
 }
 
 camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 	movement := camera.speed * delta_time
+
 	direction_vector: Vec3
 	switch direction {
 	case .Front:

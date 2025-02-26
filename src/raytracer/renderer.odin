@@ -159,7 +159,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	render_graph_compile(&renderer.render_graph)
 
-	camera_init(&renderer.camera, aspect = window_aspect_ratio(window^))
+	camera_init(&renderer.camera, position = {0, 0, -3}, aspect = window_aspect_ratio(window^))
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
@@ -189,8 +189,13 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 // FIXME: in the future change this
 renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
-	if event_system_is_mouse_key_pressed(renderer.event_system, .MOUSE_BUTTON_2) {
+	move_camera := event_system_is_mouse_key_pressed(renderer.event_system, .MOUSE_BUTTON_2)
+	if move_camera {
+		window_set_input_mode(renderer.window^, .Locked)
+	} else {
+		window_set_input_mode(renderer.window^, .Normal)
 	}
+	camera_process_mouse(&renderer.camera, x, y, move = move_camera)
 }
 
 renderer_run :: proc(renderer: ^Renderer) {
@@ -222,6 +227,10 @@ renderer_update :: proc(renderer: ^Renderer) {
 	if event_system_is_key_pressed(renderer.event_system, .A) {
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
+
+	if event_system_is_key_pressed(renderer.event_system, .Q) {
+		window_set_should_close(renderer.window^)
+	}
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
@@ -238,7 +247,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 	ubo := &Global_Ubo {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,
-		inverse_view = glm.matrix4_inverse(renderer.camera.view),
+		inverse_view = renderer.camera.inverse_view,
 	}
 	buffer_write(&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame], ubo)
 	buffer_flush(
@@ -301,6 +310,7 @@ renderer_handle_resizing :: proc(
 	allocator := context.allocator,
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
+	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	return swapchain_recreate(&renderer.swapchain_manager, extent.width, extent.height, allocator)
 }
 

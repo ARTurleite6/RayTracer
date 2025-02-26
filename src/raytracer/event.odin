@@ -212,6 +212,15 @@ event_system_init :: proc(
 	system.renderer = renderer
 }
 
+event_system_destroy :: proc(system: ^Event_System) {
+	queue.destroy(&system.events)
+	delete(system.key_states)
+	delete(system.mouse_key_state)
+	system.key_states = nil
+	system.mouse_key_state = nil
+	system.renderer = nil
+}
+
 event_system_append_event :: proc(system: ^Event_System, event: Event) {
 	queue.push_back(&system.events, event)
 }

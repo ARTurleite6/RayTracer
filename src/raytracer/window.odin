@@ -13,6 +13,12 @@ Window_Error :: enum {
 	Creating_Window,
 }
 
+Cursor_Mode :: enum {
+	Normal = 0,
+	Hidden,
+	Locked,
+}
+
 Window :: struct {
 	handle:              glfw.WindowHandle,
 	surface:             vk.SurfaceKHR,
@@ -67,11 +73,15 @@ window_should_close :: proc(window: Window) -> b32 {
 window_resize :: proc(window: ^Window, width, height: i32) {
 	window.framebuffer_resized = true
 	window.width = width
-	window.width = width
+	window.height = height
 }
 
 window_update :: proc(window: Window) {
 	glfw.SwapBuffers(window.handle)
+}
+
+window_set_should_close :: proc(window: Window) {
+	glfw.SetWindowShouldClose(window.handle, true)
 }
 
 window_aspect_ratio :: proc(window: Window) -> f32 {
@@ -93,6 +103,10 @@ window_get_surface :: proc(
 	glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &window.surface) or_return
 
 	return window.surface, .SUCCESS
+}
+
+window_set_input_mode :: proc(window: Window, mode: Cursor_Mode) {
+	glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_NORMAL + cast(i32)mode)
 }
 
 @(require_results)
