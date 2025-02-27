@@ -1,7 +1,6 @@
 package raytracer
 
 import "base:runtime"
-import "core:log"
 import "core:os"
 import "core:strings"
 

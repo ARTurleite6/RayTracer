@@ -18,6 +18,8 @@ Direction :: enum {
 	Backwards,
 	Left,
 	Right,
+	Up,
+	Down,
 }
 
 Camera :: struct {
@@ -106,6 +108,10 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 
 	direction_vector: Vec3
 	switch direction {
+	case .Up:
+		direction_vector = -camera.up
+	case .Down:
+		direction_vector = camera.up
 	case .Front:
 		direction_vector = camera.forward
 	case .Backwards:

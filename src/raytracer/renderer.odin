@@ -233,6 +233,12 @@ renderer_update :: proc(renderer: ^Renderer) {
 	if event_system_is_key_pressed(renderer.event_system, .A) {
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
+	if event_system_is_key_pressed(renderer.event_system, .Space) {
+		camera_move(&renderer.camera, .Up, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .Left_Shift) {
+		camera_move(&renderer.camera, .Down, renderer.delta_time)
+	}
 
 	if event_system_is_key_pressed(renderer.event_system, .Q) {
 		window_set_should_close(renderer.window^)
