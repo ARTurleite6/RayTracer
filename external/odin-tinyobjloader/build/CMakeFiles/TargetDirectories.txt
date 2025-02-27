@@ -1,3 +1,0 @@
-/home/arturleite/dev/RayTracer/external/odin-tinyobjloader/build/CMakeFiles/tinyobjloader-c.dir
-/home/arturleite/dev/RayTracer/external/odin-tinyobjloader/build/CMakeFiles/edit_cache.dir
-/home/arturleite/dev/RayTracer/external/odin-tinyobjloader/build/CMakeFiles/rebuild_cache.dir
