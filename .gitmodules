@@ -7,3 +7,6 @@
 [submodule "external/odin-vma"]
 	path = external/odin-vma
 	url = https://github.com/Capati/odin-vma
+[submodule "external/odin-tinyobjloader/tinyobjloader-c"]
+	path = external/odin-tinyobjloader/tinyobjloader-c
+	url = git@github.com:syoyo/tinyobjloader-c.git

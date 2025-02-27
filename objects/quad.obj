@@ -1,0 +1,32 @@
+# First face (Red)
+o Quad1
+v -1.0  1.0  0.0
+v -1.0 -1.0  0.0
+v  1.0 -1.0  0.0
+v  1.0  1.0  0.0
+f 1 2 3 4
+
+# Second face (Green) - Same quad, different material
+o Quad2
+v -1.0  1.0  -0.1
+v -1.0 -1.0  -0.1
+v  1.0 -1.0  -0.1
+v  1.0  1.0  -0.1
+f 5 6 7 8
+
+# Third face (Blue) - Shifted slightly back
+o Quad3
+v -1.0  1.0  -0.2
+v -1.0 -1.0  -0.2
+v  1.0 -1.0  -0.2
+v  1.0  1.0  -0.2
+f 9 10 11 12
+
+# Fourth face (Yellow) - Shifted back further
+o Quad4
+v -1.0  1.0  -0.3
+v -1.0 -1.0  -0.3
+v  1.0 -1.0  -0.3
+v  1.0  1.0  -0.3
+f 13 14 15 16
+

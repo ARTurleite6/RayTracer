@@ -132,6 +132,10 @@ swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	frame_manager_destroy(&manager.frame_manager)
 	vkb.swapchain_destroy_image_views(manager.handle, manager.image_views)
 	vkb.destroy_swapchain(manager.handle)
+	delete(manager.images)
+	delete(manager.image_views)
+	manager.images = nil
+	manager.image_views = nil
 }
 
 swapchain_present :: proc(

@@ -170,21 +170,27 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
+	delete(renderer.shaders)
+	renderer.shaders = nil
 
 	for &ubo in renderer.ubos {
 		buffer_destroy(&ubo, renderer.device)
 	}
 
 	vk.DestroyDescriptorPool(renderer.device.logical_device.ptr, renderer.pool, nil)
-	vk.DestroyDescriptorSetLayout(
-		renderer.device.logical_device.ptr,
-		renderer.global_descriptor_layout.handle,
-		nil,
-	)
+	descriptor_layout_destroy(&renderer.global_descriptor_layout, renderer.device^)
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
+
+	window_destroy(renderer.window^, renderer.device.instance.ptr)
+
 	device_destroy(renderer.device)
+
+	event_system_destroy(&renderer.event_system)
+
+	free(renderer.device)
+	renderer.device = nil
 }
 
 // FIXME: in the future change this
@@ -226,6 +232,12 @@ renderer_update :: proc(renderer: ^Renderer) {
 	}
 	if event_system_is_key_pressed(renderer.event_system, .A) {
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .Space) {
+		camera_move(&renderer.camera, .Up, renderer.delta_time)
+	}
+	if event_system_is_key_pressed(renderer.event_system, .Left_Shift) {
+		camera_move(&renderer.camera, .Down, renderer.delta_time)
 	}
 
 	if event_system_is_key_pressed(renderer.event_system, .Q) {

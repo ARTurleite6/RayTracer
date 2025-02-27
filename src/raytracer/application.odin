@@ -30,9 +30,12 @@ application_init :: proc(
 	return
 }
 
-application_destroy :: proc(app: Application) {
-	window_destroy(app.window^, app.renderer.device.instance.ptr)
+application_destroy :: proc(app: ^Application) {
 	renderer_destroy(app.renderer)
+	free(app.renderer)
+	free(app.window)
+	app.renderer = nil
+	app.window = nil
 }
 
 application_run :: proc(app: ^Application) {

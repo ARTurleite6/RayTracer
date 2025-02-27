@@ -32,7 +32,7 @@ shader_init :: proc(
 	shader.type = type
 	shader.device = device
 
-	data, ok := os.read_entire_file(path)
+	data, ok := os.read_entire_file(path, allocator = context.temp_allocator)
 	if !ok {
 		return .File_Non_Existent
 	}

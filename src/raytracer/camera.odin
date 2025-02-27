@@ -10,6 +10,7 @@ CAMERA_SENSIVITY :: f32(0.001)
 
 Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
+Vec4 :: glm.Vector4f32
 Mat4 :: glm.Matrix4f32
 
 Direction :: enum {
@@ -17,6 +18,8 @@ Direction :: enum {
 	Backwards,
 	Left,
 	Right,
+	Up,
+	Down,
 }
 
 Camera :: struct {
@@ -105,6 +108,10 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 
 	direction_vector: Vec3
 	switch direction {
+	case .Up:
+		direction_vector = -camera.up
+	case .Down:
+		direction_vector = camera.up
 	case .Front:
 		direction_vector = camera.forward
 	case .Backwards:
