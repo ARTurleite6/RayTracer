@@ -170,21 +170,27 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
+	delete(renderer.shaders)
+	renderer.shaders = nil
 
 	for &ubo in renderer.ubos {
 		buffer_destroy(&ubo, renderer.device)
 	}
 
 	vk.DestroyDescriptorPool(renderer.device.logical_device.ptr, renderer.pool, nil)
-	vk.DestroyDescriptorSetLayout(
-		renderer.device.logical_device.ptr,
-		renderer.global_descriptor_layout.handle,
-		nil,
-	)
+	descriptor_layout_destroy(&renderer.global_descriptor_layout, renderer.device^)
 
 	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
+
+	window_destroy(renderer.window^, renderer.device.instance.ptr)
+
 	device_destroy(renderer.device)
+
+	event_system_destroy(&renderer.event_system)
+
+	free(renderer.device)
+	renderer.device = nil
 }
 
 // FIXME: in the future change this

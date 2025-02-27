@@ -141,6 +141,7 @@ graphics_stage_destroy :: proc(stage: ^Graphics_Stage, device: Device) {
 	stage.vertex_bindings = nil
 	stage.shaders = nil
 	stage.vertex_bindings = nil
+	free(stage)
 }
 
 graphics_stage_use_vertex_buffer_binding :: proc(

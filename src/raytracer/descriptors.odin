@@ -136,6 +136,9 @@ descriptor_pool_build :: proc(
 		return 0, .Pool_Creation_Failed
 	}
 
+	delete(builder.pool_sizes)
+	builder.pool_sizes = nil
+
 	return pool, nil
 }
 
@@ -217,6 +220,9 @@ descriptor_writer_build :: proc(
 		0,
 		nil,
 	)
+
+	delete(writer.writes)
+	writer.writes = nil
 
 	return set, nil
 }

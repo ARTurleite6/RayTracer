@@ -10,6 +10,7 @@ CAMERA_SENSIVITY :: f32(0.001)
 
 Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
+Vec4 :: glm.Vector4f32
 Mat4 :: glm.Matrix4f32
 
 Direction :: enum {
