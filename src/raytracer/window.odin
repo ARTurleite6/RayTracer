@@ -24,8 +24,14 @@ Window :: struct {
 	surface:             vk.SurfaceKHR,
 	framebuffer_resized: bool,
 	width, height:       c.int,
+	event_handler:       Event_Handler,
 	// TODO: probably this does not make sense, and should go with a better approach
 	logger:              log.Logger,
+}
+
+Event_Handler :: struct {
+	data:     rawptr,
+	on_event: #type proc(handler: ^Event_Handler, event: Event),
 }
 
 window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (err: Window_Error) {
@@ -62,8 +68,12 @@ window_destroy :: proc(window: Window, instance: vk.Instance) {
 	glfw.Terminate()
 }
 
-window_set_window_user_pointer :: proc(window: Window, pointer: rawptr) {
+window_set_window_user_pointer :: proc(window: ^Window, pointer: rawptr) {
 	glfw.SetWindowUserPointer(window.handle, pointer)
+}
+
+window_set_event_handler :: proc(window: ^Window, handler: Event_Handler) {
+	window.event_handler = handler
 }
 
 window_should_close :: proc(window: Window) -> b32 {
@@ -120,17 +130,18 @@ window_wait_events :: proc(window: Window) {
 
 framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
 	context = runtime.default_context()
-	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
-	event_system_append_event(system, Resize_Event{width = width, height = height})
-	// queue_push_event(&renderer.events_queue, Resize_Event{width = width, height = height})
+	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
+	context.logger = window.logger
+
+	window.event_handler->on_event(Resize_Event{width = width, height = height})
 }
 
 @(private = "file")
 key_callback :: proc "c" (window_handle: glfw.WindowHandle, key, scancode, action, mods: c.int) {
 	context = runtime.default_context()
-	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
-	event_system_append_event(
-		system,
+	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
+	context.logger = window.logger
+	window.event_handler->on_event(
 		Key_Event {
 			key = Key_Code(key),
 			action = Key_Action(action),
@@ -142,18 +153,20 @@ key_callback :: proc "c" (window_handle: glfw.WindowHandle, key, scancode, actio
 @(private = "file")
 cursor_position_callback :: proc "c" (window_handle: glfw.WindowHandle, x_pos: f64, y_pos: f64) {
 	context = runtime.default_context()
-	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
+	context.logger = window.logger
 
-	event_system_append_event(system, Mouse_Event{x = f32(x_pos), y = f32(y_pos)})
+	window.event_handler->on_event(Mouse_Event{x = f32(x_pos), y = f32(y_pos)})
 }
 
 @(private = "file")
 mouse_button_callback :: proc "c" (window_handle: glfw.WindowHandle, button, action, mods: c.int) {
 	context = runtime.default_context()
-	system := cast(^Event_System)glfw.GetWindowUserPointer(window_handle)
+	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
+	context.logger = window.logger
 
-	event_system_append_event(
-		system,
+	window.event_handler.on_event(
+		&window.event_handler,
 		Mouse_Button_Event {
 			key = cast(Mouse_Key_Code)button,
 			action = cast(Key_Action)action,

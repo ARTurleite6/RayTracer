@@ -3,15 +3,30 @@ package raytracer
 import "core:fmt"
 import "core:slice"
 import "core:strings"
+import imgui "external:odin-imgui"
+import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
+import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import vk "vendor:vulkan"
 _ :: fmt
+
+Pipeline :: struct {
+	handle: vk.Pipeline,
+	layout: vk.PipelineLayout,
+}
+
+Color_Attachment :: struct {
+	load_op:      vk.AttachmentLoadOp,
+	store_op:     vk.AttachmentStoreOp,
+	clear_value:  vk.ClearValue,
+	image_layout: vk.ImageLayout,
+}
 
 Render_Stage :: struct {
 	name:               string,
 	reads:              [dynamic]Render_Resource,
 	descriptor_layouts: [dynamic]vk.DescriptorSetLayout,
 	push_constants:     [dynamic]vk.PushConstantRange,
-	// TODO: Possibly in the future add a execute proc pointer
+	color_attachments:  [dynamic]Color_Attachment,
 	variant:            Render_Stage_Variant,
 }
 
@@ -23,6 +38,7 @@ Render_Data :: struct {
 
 Render_Stage_Variant :: union {
 	^Graphics_Stage,
+	^UI_Stage,
 }
 
 Graphics_Stage :: struct {
@@ -31,6 +47,11 @@ Graphics_Stage :: struct {
 	shaders:         [dynamic]vk.PipelineShaderStageCreateInfo,
 	vertex_bindings: [dynamic]Vertex_Buffer_Binding,
 	format:          vk.Format,
+}
+
+UI_Stage :: struct {
+	using base: Render_Stage,
+	ui_context: ^UI_Context,
 }
 
 Vertex_Buffer_Binding :: struct {
@@ -42,6 +63,17 @@ Vertex_Buffer_Binding :: struct {
 Render_Resource :: union {
 	Buffer,
 }
+
+Pipeline_Error :: enum {
+	None = 0,
+	Cache_Creation_Failed,
+	Layout_Creation_Failed,
+	Pipeline_Creation_Failed,
+	Descriptor_Set_Creation_Failed,
+	Pool_Creation_Failed,
+	Shader_Creation_Failed,
+}
+
 
 Render_Graph :: struct {
 	stages:    [dynamic]^Render_Stage,
@@ -77,6 +109,8 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 		switch v in stage.variant {
 		case ^Graphics_Stage:
 			build_graphics_pipeline(v, graph.device^)
+		case ^UI_Stage:
+		// for now we dont have nothing in here
 		}
 	}
 }
@@ -87,9 +121,34 @@ render_graph_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	image_transition(
+		cmd,
+		{
+			image = graph.swapchain.images[image_index],
+			old_layout = .UNDEFINED,
+			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			src_stage = {.TOP_OF_PIPE},
+			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			src_access = {},
+			dst_access = {.COLOR_ATTACHMENT_WRITE},
+		},
+	)
+
 	for stage in graph.stages {
 		record_command_buffer(graph^, stage^, cmd, image_index, render_data)
 	}
+	image_transition(
+		cmd,
+		{
+			image = graph.swapchain.images[image_index],
+			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			new_layout = .PRESENT_SRC_KHR,
+			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			dst_stage = {.BOTTOM_OF_PIPE},
+			src_access = {.COLOR_ATTACHMENT_WRITE},
+			dst_access = {},
+		},
+	)
 }
 
 render_stage_init :: proc(
@@ -102,6 +161,7 @@ render_stage_init :: proc(
 	stage.reads = make([dynamic]Render_Resource, allocator)
 	stage.descriptor_layouts = make([dynamic]vk.DescriptorSetLayout, allocator)
 	stage.push_constants = make([dynamic]vk.PushConstantRange, allocator)
+	stage.color_attachments = make([dynamic]Color_Attachment, allocator)
 	stage.variant = variant
 }
 
@@ -109,15 +169,14 @@ render_stage_destroy :: proc(stage: ^Render_Stage, device: Device) {
 	switch v in stage.variant {
 	case ^Graphics_Stage:
 		graphics_stage_destroy(v, device)
+	case ^UI_Stage:
 	}
-	stage.variant = nil
-
 	delete(stage.reads)
 	delete(stage.descriptor_layouts)
 	delete(stage.push_constants)
-	stage.reads = nil
-	stage.descriptor_layouts = nil
-	stage.push_constants = nil
+	delete(stage.color_attachments)
+
+	stage^ = {}
 }
 
 render_stage_use_descriptor_layout :: proc(stage: ^Render_Stage, layout: vk.DescriptorSetLayout) {
@@ -126,6 +185,24 @@ render_stage_use_descriptor_layout :: proc(stage: ^Render_Stage, layout: vk.Desc
 
 render_stage_use_push_constant_range :: proc(stage: ^Render_Stage, range: vk.PushConstantRange) {
 	append(&stage.push_constants, range)
+}
+
+render_stage_add_color_attachment :: proc(
+	stage: ^Render_Stage,
+	load_op: vk.AttachmentLoadOp,
+	store_op: vk.AttachmentStoreOp,
+	clear_value: vk.ClearValue,
+	image_layout: vk.ImageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+) {
+	append_elem(
+		&stage.color_attachments,
+		Color_Attachment {
+			load_op = load_op,
+			store_op = store_op,
+			clear_value = clear_value,
+			image_layout = image_layout,
+		},
+	)
 }
 
 graphics_stage_init :: proc(stage: ^Graphics_Stage, name: string, allocator := context.allocator) {
@@ -174,6 +251,10 @@ graphics_stage_use_shader :: proc(stage: ^Graphics_Stage, shader: Shader) {
 			pName = strings.clone_to_cstring(shader.name, context.temp_allocator),
 		},
 	)
+}
+
+ui_stage_init :: proc(stage: ^UI_Stage, name: string, allocator := context.allocator) {
+	render_stage_init(stage, name, stage, allocator)
 }
 
 @(private = "file")
@@ -316,9 +397,29 @@ record_command_buffer :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	if graphics_stage, ok := stage.variant.(^Graphics_Stage); ok {
-		graphics_stage_render(graph, graphics_stage, cmd, image_index, render_data)
+	begin_render_pass(graph, stage, cmd, image_index)
+	#partial switch v in stage.variant {
+	case ^Graphics_Stage:
+		graphics_stage_render(graph, v, cmd, image_index, render_data)
+	case ^UI_Stage:
+		ui_stage_render(graph, v, cmd, image_index)
 	}
+	end_render_pass(graph, cmd, image_index)
+}
+
+ui_stage_render :: proc(
+	graph: Render_Graph,
+	ui_stage: ^UI_Stage,
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+) {
+	imgui_vulkan.NewFrame()
+	imgui_glfw.NewFrame()
+	imgui.NewFrame()
+	imgui.ShowDemoWindow()
+	imgui.Render()
+
+	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
 }
 
 graphics_stage_render :: proc(
@@ -328,8 +429,6 @@ graphics_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-
-	begin_render_pass(graph, graphics_stage, cmd, image_index)
 
 	vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
 	if render_data.descriptor_set != 0 {
@@ -347,61 +446,33 @@ graphics_stage_render :: proc(
 	}
 
 	scene_draw(render_data.scene, cmd, graphics_stage.pipeline.layout)
-
-	end_render_pass(cmd)
-
-	image_transition(
-		cmd,
-		{
-			image = graph.swapchain.images[image_index],
-			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			new_layout = .PRESENT_SRC_KHR,
-			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			dst_stage = {.BOTTOM_OF_PIPE},
-			src_access = {.COLOR_ATTACHMENT_WRITE},
-			dst_access = {},
-		},
-	)
 }
 
 @(private = "file")
 begin_render_pass :: proc(
 	render_graph: Render_Graph,
-	stage: ^Graphics_Stage,
+	stage: Render_Stage,
 	cmd: vk.CommandBuffer,
 	image_index: u32,
 ) {
-	image, image_view := swapchain_manager_get_image(render_graph.swapchain^, image_index)
+	image_view := render_graph.swapchain.image_views[image_index]
 
-	image_transition(
-		cmd,
-		{
-			image = image,
-			old_layout = .UNDEFINED,
-			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			src_stage = {.TOP_OF_PIPE},
-			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			src_access = {},
-			dst_access = {.COLOR_ATTACHMENT_WRITE},
+	context.user_ptr = &image_view
+	color_attachments := slice.mapper(
+		stage.color_attachments[:],
+		proc(ca: Color_Attachment) -> vk.RenderingAttachmentInfo {
+			return color_attachment_to_rendering_info(ca, (cast(^vk.ImageView)context.user_ptr)^)
 		},
+		context.temp_allocator,
 	)
-
-	color_attachment := vk.RenderingAttachmentInfo {
-		sType = .RENDERING_ATTACHMENT_INFO,
-		imageView = image_view,
-		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		clearValue = vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
-	}
 
 	extent := render_graph.swapchain.extent
 	rendering_info := vk.RenderingInfo {
 		sType = .RENDERING_INFO,
 		renderArea = {offset = {0, 0}, extent = extent},
 		layerCount = 1,
-		colorAttachmentCount = 1,
-		pColorAttachments = &color_attachment,
+		colorAttachmentCount = u32(len(color_attachments)),
+		pColorAttachments = raw_data(color_attachments),
 	}
 
 	vk.CmdBeginRendering(cmd, &rendering_info)
@@ -422,6 +493,22 @@ begin_render_pass :: proc(
 }
 
 @(private = "file")
-end_render_pass :: proc(cmd: vk.CommandBuffer) {
+end_render_pass :: proc(graph: Render_Graph, cmd: vk.CommandBuffer, image_index: u32) {
 	vk.CmdEndRendering(cmd)
+}
+
+@(private = "file")
+@(require_results)
+color_attachment_to_rendering_info :: proc(
+	attachment: Color_Attachment,
+	image_view: vk.ImageView,
+) -> vk.RenderingAttachmentInfo {
+	return vk.RenderingAttachmentInfo {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = image_view,
+		imageLayout = attachment.image_layout,
+		loadOp = attachment.load_op,
+		storeOp = attachment.store_op,
+		clearValue = attachment.clear_value,
+	}
 }
