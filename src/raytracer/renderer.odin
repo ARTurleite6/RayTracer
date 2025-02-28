@@ -25,7 +25,6 @@ Render_Error :: union {
 Renderer :: struct {
 	device:                   ^Device,
 	swapchain_manager:        Swapchain_Manager,
-	pipeline_manager:         Pipeline_Manager,
 	window:                   ^Window,
 	scene:                    Scene,
 	camera:                   Camera,
@@ -33,10 +32,13 @@ Renderer :: struct {
 	input_system:             Input_System,
 	// TODO: probably move this in the future
 	shaders:                  [dynamic]Shader,
-	pool:                     vk.DescriptorPool,
 	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
 	global_descriptor_layout: Descriptor_Set_Layout,
 	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+
+	//pools
+	pool:                     vk.DescriptorPool,
+	ui_ctx:                   UI_Context,
 
 	// time
 	last_frame_time:          f64,
@@ -68,7 +70,12 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		{extent = window_get_extent(window^), vsync = true},
 	)
 
-	pipeline_manager_init(&renderer.pipeline_manager, renderer.device)
+	ui_context_init(
+		&renderer.ui_ctx,
+		renderer.device,
+		renderer.window^,
+		renderer.swapchain_manager.format,
+	)
 
 	{ 	// pool
 		builder := &Descriptor_Pool_Builder{}
@@ -76,7 +83,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		descriptor_pool_builder_set_max_sets(builder, MAX_FRAMES_IN_FLIGHT)
 		descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT)
 		renderer.pool, _ = descriptor_pool_build(builder)
-		descriptor_pool_builder_init(builder, renderer.device)
 	}
 
 	for &buffer in renderer.ubos {
@@ -158,6 +164,26 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			},
 		)
 		render_stage_use_descriptor_layout(stage, renderer.global_descriptor_layout.handle)
+		render_stage_add_color_attachment(
+			stage,
+			load_op = .CLEAR,
+			store_op = .STORE,
+			clear_value = vk.ClearValue {
+				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
+			},
+		)
+		render_graph_add_stage(&renderer.render_graph, stage)
+	}
+
+	{
+		stage := new(UI_Stage)
+		ui_stage_init(stage, "ui", allocator)
+		render_stage_add_color_attachment(
+			stage,
+			.LOAD,
+			.STORE,
+			vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
+		)
 
 		render_graph_add_stage(&renderer.render_graph, stage)
 	}
@@ -182,10 +208,10 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 		buffer_destroy(&ubo, renderer.device)
 	}
 
-	vk.DestroyDescriptorPool(renderer.device.logical_device.ptr, renderer.pool, nil)
+	ui_context_destroy(&renderer.ui_ctx, renderer.device)
+
 	descriptor_layout_destroy(&renderer.global_descriptor_layout, renderer.device^)
 
-	pipeline_manager_destroy(&renderer.pipeline_manager)
 	swapchain_manager_destroy(&renderer.swapchain_manager)
 
 	window_destroy(renderer.window^, renderer.device.instance.ptr)
