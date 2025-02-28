@@ -121,9 +121,34 @@ render_graph_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	image_transition(
+		cmd,
+		{
+			image = graph.swapchain.images[image_index],
+			old_layout = .UNDEFINED,
+			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			src_stage = {.TOP_OF_PIPE},
+			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			src_access = {},
+			dst_access = {.COLOR_ATTACHMENT_WRITE},
+		},
+	)
+
 	for stage in graph.stages {
 		record_command_buffer(graph^, stage^, cmd, image_index, render_data)
 	}
+	image_transition(
+		cmd,
+		{
+			image = graph.swapchain.images[image_index],
+			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+			new_layout = .PRESENT_SRC_KHR,
+			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+			dst_stage = {.BOTTOM_OF_PIPE},
+			src_access = {.COLOR_ATTACHMENT_WRITE},
+			dst_access = {},
+		},
+	)
 }
 
 render_stage_init :: proc(
@@ -430,20 +455,7 @@ begin_render_pass :: proc(
 	cmd: vk.CommandBuffer,
 	image_index: u32,
 ) {
-	image, image_view := swapchain_manager_get_image(render_graph.swapchain^, image_index)
-
-	image_transition(
-		cmd,
-		{
-			image = image,
-			old_layout = .UNDEFINED,
-			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			src_stage = {.TOP_OF_PIPE},
-			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			src_access = {},
-			dst_access = {.COLOR_ATTACHMENT_WRITE},
-		},
-	)
+	image_view := render_graph.swapchain.image_views[image_index]
 
 	context.user_ptr = &image_view
 	color_attachments := slice.mapper(
@@ -483,18 +495,6 @@ begin_render_pass :: proc(
 @(private = "file")
 end_render_pass :: proc(graph: Render_Graph, cmd: vk.CommandBuffer, image_index: u32) {
 	vk.CmdEndRendering(cmd)
-	image_transition(
-		cmd,
-		{
-			image = graph.swapchain.images[image_index],
-			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			new_layout = .PRESENT_SRC_KHR,
-			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			dst_stage = {.BOTTOM_OF_PIPE},
-			src_access = {.COLOR_ATTACHMENT_WRITE},
-			dst_access = {},
-		},
-	)
 }
 
 @(private = "file")
