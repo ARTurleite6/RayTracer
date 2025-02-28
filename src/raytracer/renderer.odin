@@ -30,7 +30,7 @@ Renderer :: struct {
 	scene:                    Scene,
 	camera:                   Camera,
 	render_graph:             Render_Graph,
-	event_system:             Event_System,
+	input_system:             Input_System,
 	// TODO: probably move this in the future
 	shaders:                  [dynamic]Shader,
 	pool:                     vk.DescriptorPool,
@@ -46,8 +46,13 @@ Renderer :: struct {
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
-	event_system_init(&renderer.event_system, renderer, allocator)
-	window_set_window_user_pointer(window^, &renderer.event_system)
+	input_system_init(&renderer.input_system, allocator)
+	window_set_window_user_pointer(window, renderer.window)
+	event_handler := Event_Handler {
+		data     = renderer,
+		on_event = renderer_on_event,
+	}
+	window_set_event_handler(window, event_handler)
 
 	renderer.device = new(Device)
 	if err := device_init(renderer.device, renderer.window); err != .None {
@@ -187,7 +192,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 	device_destroy(renderer.device)
 
-	event_system_destroy(&renderer.event_system)
+	input_system_destroy(&renderer.input_system)
 
 	free(renderer.device)
 	renderer.device = nil
@@ -195,7 +200,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 // FIXME: in the future change this
 renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
-	move_camera := event_system_is_mouse_key_pressed(renderer.event_system, .MOUSE_BUTTON_2)
+	move_camera := input_system_is_mouse_key_pressed(renderer.input_system, .MOUSE_BUTTON_2)
 	if move_camera {
 		window_set_input_mode(renderer.window^, .Locked)
 	} else {
@@ -218,29 +223,28 @@ renderer_update :: proc(renderer: ^Renderer) {
 	renderer.last_frame_time = current_time
 
 	glfw.PollEvents()
-	event_system_process_events(&renderer.event_system)
 	window_update(renderer.window^)
 
-	if event_system_is_key_pressed(renderer.event_system, .W) {
+	if input_system_is_key_pressed(renderer.input_system, .W) {
 		camera_move(&renderer.camera, .Front, renderer.delta_time)
 	}
-	if event_system_is_key_pressed(renderer.event_system, .S) {
+	if input_system_is_key_pressed(renderer.input_system, .S) {
 		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
 	}
-	if event_system_is_key_pressed(renderer.event_system, .D) {
+	if input_system_is_key_pressed(renderer.input_system, .D) {
 		camera_move(&renderer.camera, .Right, renderer.delta_time)
 	}
-	if event_system_is_key_pressed(renderer.event_system, .A) {
+	if input_system_is_key_pressed(renderer.input_system, .A) {
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
-	if event_system_is_key_pressed(renderer.event_system, .Space) {
+	if input_system_is_key_pressed(renderer.input_system, .Space) {
 		camera_move(&renderer.camera, .Up, renderer.delta_time)
 	}
-	if event_system_is_key_pressed(renderer.event_system, .Left_Shift) {
+	if input_system_is_key_pressed(renderer.input_system, .Left_Shift) {
 		camera_move(&renderer.camera, .Down, renderer.delta_time)
 	}
 
-	if event_system_is_key_pressed(renderer.event_system, .Q) {
+	if input_system_is_key_pressed(renderer.input_system, .Q) {
 		window_set_should_close(renderer.window^)
 	}
 }
@@ -324,6 +328,24 @@ renderer_handle_resizing :: proc(
 	extent := window_get_extent(renderer.window^)
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	return swapchain_recreate(&renderer.swapchain_manager, extent.width, extent.height, allocator)
+}
+
+@(private = "file")
+renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
+	renderer := cast(^Renderer)handler.data
+
+	log.debugf("Received event: %v", event)
+
+	switch v in event {
+	case Mouse_Button_Event:
+		input_system_register_mouse_button(&renderer.input_system, v.key, v.action)
+	case Key_Event:
+		input_system_register_key(&renderer.input_system, v.key, v.action)
+	case Resize_Event:
+		window_resize(renderer.window, v.width, v.height)
+	case Mouse_Event:
+		renderer_handle_mouse(renderer, v.x, v.y)
+	}
 }
 
 @(private)
