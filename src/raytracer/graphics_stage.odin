@@ -1,8 +1,10 @@
 package raytracer
 
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 import vk "vendor:vulkan"
+_ :: fmt
 
 Graphics_Stage :: struct {
 	using base:      Render_Stage,

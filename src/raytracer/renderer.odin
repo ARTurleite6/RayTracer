@@ -3,16 +3,11 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
-import imgui "external:odin-imgui"
-import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
-import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
 
-
-// TODO: change this
 Global_Ubo :: struct {
 	projection:   Mat4,
 	view:         Mat4,
@@ -26,124 +21,55 @@ Render_Error :: union {
 }
 
 Renderer :: struct {
-	device:                   ^Device,
-	swapchain_manager:        Swapchain_Manager,
-	window:                   ^Window,
-	scene:                    Scene,
-	camera:                   Camera,
-	render_graph:             Render_Graph,
-	input_system:             Input_System,
+	ctx:             Vulkan_Context,
+	window:          ^Window,
+	scene:           Scene,
+	camera:          Camera,
+	render_graph:    Render_Graph,
+	input_system:    Input_System,
 	// TODO: probably move this in the future
-	shaders:                  [dynamic]Shader,
-	ubos:                     [MAX_FRAMES_IN_FLIGHT]Buffer,
-	global_descriptor_layout: Descriptor_Set_Layout,
-	descriptor_sets:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-
-	//pools
-	pool:                     vk.DescriptorPool,
-	ui_ctx:                   UI_Context,
+	shaders:         [dynamic]Shader,
+	ui_ctx:          UI_Context,
 
 	// time
-	last_frame_time:          f64,
-	delta_time:               f32,
+	last_frame_time: f64,
+	delta_time:      f32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
-	// context_init(&renderer.ctx, window, allocator) or_return
 	renderer.window = window
-	input_system_init(&renderer.input_system, allocator)
+	vulkan_context_init(&renderer.ctx, window, allocator)
+
 	window_set_window_user_pointer(window, renderer.window)
+	input_system_init(&renderer.input_system, allocator)
 	event_handler := Event_Handler {
 		data     = renderer,
 		on_event = renderer_on_event,
 	}
 	window_set_event_handler(window, event_handler)
 
-	renderer.device = new(Device)
-	if err := device_init(renderer.device, renderer.window); err != .None {
-		fmt.println("Error on device: %v", err)
-		return
-	}
-
-	surface, _ := window_get_surface(renderer.window, renderer.device.instance)
-	swapchain_manager_init(
-		&renderer.swapchain_manager,
-		renderer.device,
-		surface,
-		{extent = window_get_extent(window^), vsync = true},
-	)
-
 	ui_context_init(
 		&renderer.ui_ctx,
-		renderer.device,
+		renderer.ctx.device,
 		renderer.window^,
-		renderer.swapchain_manager.format,
+		renderer.ctx.swapchain_manager.format,
 	)
-
-	{ 	// pool
-		builder := &Descriptor_Pool_Builder{}
-		descriptor_pool_builder_init(builder, renderer.device)
-		descriptor_pool_builder_set_max_sets(builder, MAX_FRAMES_IN_FLIGHT)
-		descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT)
-		renderer.pool, _ = descriptor_pool_build(builder)
-	}
-
-	for &buffer in renderer.ubos {
-		buffer_init(
-			&buffer,
-			renderer.device,
-			size_of(Global_Ubo),
-			1,
-			{.UNIFORM_BUFFER},
-			.Cpu_To_Gpu,
-		)
-
-		buffer_map(&buffer, renderer.device)
-	}
-
-	{
-		builder := &Descriptor_Set_Layout_Builder{}
-		descriptor_layout_builder_init(builder, renderer.device)
-		descriptor_layout_builder_add_binding(builder, 0, .UNIFORM_BUFFER, {.VERTEX})
-		renderer.global_descriptor_layout, _ = descriptor_layout_build(builder)
-	}
-
-	{ 	// descriptor sets
-		writer := &Descriptor_Writer{}
-		descriptor_writer_init(
-			writer,
-			renderer.global_descriptor_layout,
-			renderer.pool,
-			renderer.device,
-		)
-
-		for buffer, i in renderer.ubos {
-			buffer_info := vk.DescriptorBufferInfo {
-				buffer = buffer.handle,
-				offset = 0,
-				range  = vk.DeviceSize(size_of(Global_Ubo)),
-			}
-			descriptor_writer_write_buffer(writer, 0, &buffer_info)
-
-			renderer.descriptor_sets[i], _ = descriptor_writer_build(writer)
-		}
-	}
 
 	{ 	// create shaders
 		shader: Shader
-		shader_init(&shader, renderer.device, "main", "main", "shaders/vert.spv", {.VERTEX})
+		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/vert.spv", {.VERTEX})
 		append(&renderer.shaders, shader)
 
-		shader_init(&shader, renderer.device, "main", "main", "shaders/frag.spv", {.FRAGMENT})
+		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/frag.spv", {.FRAGMENT})
 		append(&renderer.shaders, shader)
 	}
 
-	renderer.scene = create_scene(renderer.device)
+	renderer.scene = create_scene(renderer.ctx.device)
 
 	render_graph_init(
 		&renderer.render_graph,
-		renderer.device,
-		&renderer.swapchain_manager,
+		renderer.ctx.device,
+		&renderer.ctx.swapchain_manager,
 		allocator,
 	)
 	{ 	// create graphics stage
@@ -151,7 +77,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		graphics_stage_init(stage, "main", allocator)
 		graphics_stage_use_shader(stage, renderer.shaders[0])
 		graphics_stage_use_shader(stage, renderer.shaders[1])
-		graphics_stage_use_format(stage, renderer.swapchain_manager.format)
+		graphics_stage_use_format(stage, renderer.ctx.swapchain_manager.format)
 		graphics_stage_use_vertex_buffer_binding(
 			stage,
 			0,
@@ -166,7 +92,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				size = size_of(Push_Constants),
 			},
 		)
-		render_stage_use_descriptor_layout(stage, renderer.global_descriptor_layout.handle)
+		render_stage_use_descriptor_layout(stage, renderer.ctx.descriptor_layout.handle)
 		render_stage_add_color_attachment(
 			stage,
 			load_op = .CLEAR,
@@ -197,34 +123,17 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
-	vk.DeviceWaitIdle(renderer.device.logical_device.ptr)
-	render_graph_destroy(&renderer.render_graph)
-	scene_destroy(&renderer.scene, renderer.device)
+	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
+	render_graph_destroy(&renderer.render_graph)
+	scene_destroy(&renderer.scene, renderer.ctx.device)
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
 	delete(renderer.shaders)
-	renderer.shaders = nil
-
-	for &ubo in renderer.ubos {
-		buffer_destroy(&ubo, renderer.device)
-	}
-
-	ui_context_destroy(&renderer.ui_ctx, renderer.device)
-
-	descriptor_layout_destroy(&renderer.global_descriptor_layout, renderer.device^)
-
-	swapchain_manager_destroy(&renderer.swapchain_manager)
-
-	window_destroy(renderer.window^, renderer.device.instance.ptr)
-
-	device_destroy(renderer.device)
-
-	input_system_destroy(&renderer.input_system)
-
-	free(renderer.device)
-	renderer.device = nil
+	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
+	window_destroy(renderer.window^, renderer.ctx.device.instance.ptr)
+	ctx_destroy(&renderer.ctx)
 }
 
 // FIXME: in the future change this
@@ -284,25 +193,16 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer_handle_resizing(renderer)
 	}
 
-	imgui_vulkan.NewFrame()
-	imgui_glfw.NewFrame()
-	imgui.NewFrame()
+	cmd, image_index, err := ctx_begin_frame(&renderer.ctx)
 
-	cmd, image_index, err := begin_frame(renderer)
-	if err != nil {
-		return
-	}
+	if err != nil do return
 
 	ubo := &Global_Ubo {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,
 		inverse_view = renderer.camera.inverse_view,
 	}
-	buffer_write(&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame], ubo)
-	buffer_flush(
-		&renderer.ubos[renderer.swapchain_manager.frame_manager.current_frame],
-		renderer.device^,
-	)
+	ctx_update_uniform_buffer(&renderer.ctx, ubo)
 
 
 	_ = vk_check(
@@ -310,48 +210,15 @@ renderer_render :: proc(renderer: ^Renderer) {
 		"Failed to begin command buffer",
 	)
 
-
 	render_graph_render(
 		&renderer.render_graph,
 		cmd,
 		image_index,
-		{
-			renderer = renderer,
-			descriptor_set = renderer.descriptor_sets[renderer.swapchain_manager.frame_manager.current_frame],
-		},
+		{renderer = renderer, descriptor_set = ctx_get_descriptor_set(renderer.ctx)},
 	)
 
 	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
-	swapchain_present(&renderer.swapchain_manager, {cmd}, image_index)
-}
-
-@(private = "file")
-begin_frame :: proc(
-	renderer: ^Renderer,
-) -> (
-	cmd: vk.CommandBuffer,
-	image_index: u32,
-	err: Render_Error,
-) {
-	frame := frame_manager_get_frame(&renderer.swapchain_manager.frame_manager)
-
-	frame_wait(frame, renderer.device)
-
-	result := swapchain_acquire_next_image(
-		&renderer.swapchain_manager,
-		frame.sync.image_available,
-	) or_return
-
-	_ = vk_check(
-		vk.ResetFences(renderer.device.logical_device.ptr, 1, &frame.sync.in_flight_fence),
-		"Error reseting in_flight_fence",
-	)
-
-	cmd = frame.commands.primary_buffer
-	_ = vk_check(vk.ResetCommandBuffer(cmd, {}), "Error reseting command buffer")
-
-
-	return cmd, result.image_index, nil
+	ctx_swapchain_present(&renderer.ctx, cmd, image_index)
 }
 
 @(private = "file")
@@ -361,7 +228,7 @@ renderer_handle_resizing :: proc(
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
-	return swapchain_recreate(&renderer.swapchain_manager, extent.width, extent.height, allocator)
+	return ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator)
 }
 
 @(private = "file")

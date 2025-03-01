@@ -1,8 +1,10 @@
 package raytracer
 
+import "core:fmt"
 import vkb "external:odin-vk-bootstrap"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
+_ :: fmt
 
 Device :: struct {
 	instance:        ^vkb.Instance,
@@ -48,9 +50,6 @@ device_init :: proc(
 			vkb.instance_request_validation_layers(&builder)
 			vkb.instance_use_default_debug_messenger(&builder)
 		}
-
-		vkb.instance_enable_extension(&builder, "VK_KHR_acceleration_structure")
-		vkb.instance_enable_extension(&builder, "VK_KHR_raytracing_pipeline")
 
 		ok: bool
 		if device.instance, ok = vkb.build_instance(&builder); !ok {

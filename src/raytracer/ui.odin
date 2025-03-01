@@ -78,6 +78,9 @@ ui_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	imgui_vulkan.NewFrame()
+	imgui_glfw.NewFrame()
+	imgui.NewFrame()
 
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {

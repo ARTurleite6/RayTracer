@@ -205,7 +205,11 @@ descriptor_writer_build :: proc(
 		pSetLayouts        = &writer.layout.handle,
 	}
 
-	if vk.AllocateDescriptorSets(writer.device.logical_device.ptr, &alloc_info, &set) != .SUCCESS {
+	if vk_check(
+		   vk.AllocateDescriptorSets(writer.device.logical_device.ptr, &alloc_info, &set),
+		   "Failed to allocate Descriptor Set",
+	   ) !=
+	   .SUCCESS {
 		return 0, .Descriptor_Set_Creation_Failed
 	}
 
