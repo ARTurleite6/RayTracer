@@ -308,7 +308,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 		cmd,
 		image_index,
 		{
-			scene = &renderer.scene,
+			renderer = renderer,
 			descriptor_set = renderer.descriptor_sets[renderer.swapchain_manager.frame_manager.current_frame],
 		},
 	)
@@ -359,8 +359,6 @@ renderer_handle_resizing :: proc(
 @(private = "file")
 renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	renderer := cast(^Renderer)handler.data
-
-	log.debugf("Received event: %v", event)
 
 	switch v in event {
 	case Mouse_Button_Event:

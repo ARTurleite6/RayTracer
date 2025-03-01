@@ -1,5 +1,7 @@
 package raytracer
 
+import "core:slice"
+import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
@@ -7,6 +9,10 @@ import vk "vendor:vulkan"
 
 UI_Context :: struct {
 	pool: vk.DescriptorPool,
+}
+
+UI_Stage :: struct {
+	using base: Render_Stage,
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
@@ -60,4 +66,74 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	imgui_vulkan.Shutdown()
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
+}
+
+ui_stage_init :: proc(stage: ^UI_Stage, name: string, allocator := context.allocator) {
+	render_stage_init(stage, name, stage, allocator)
+}
+
+ui_stage_render :: proc(
+	graph: Render_Graph,
+	ui_stage: ^UI_Stage,
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+	render_data: Render_Data,
+) {
+	imgui_vulkan.NewFrame()
+	imgui_glfw.NewFrame()
+	imgui.NewFrame()
+
+	if imgui.BeginMainMenuBar() {
+		if imgui.BeginMenu("File") {
+			if imgui.MenuItem("Exit", "Q") {
+				window_set_should_close(render_data.renderer.window^)
+			}
+			imgui.EndMenu()
+		}
+
+		imgui.EndMainMenuBar()
+	}
+
+	if imgui.Begin("Scene Properties") {
+		scene := &render_data.renderer.scene
+
+		if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+			@(static) selected_object := -1
+
+			if imgui.BeginListBox("##ObjectList", {0, 100}) {
+				for object, i in scene.objects {
+					is_selected := selected_object == i
+
+					if imgui.Selectable(
+						strings.clone_to_cstring(object.name, context.temp_allocator),
+						is_selected,
+					) {
+						selected_object = i
+					}
+
+					if is_selected {
+						imgui.SetItemDefaultFocus()
+					}
+				}
+
+				imgui.EndListBox()
+			}
+			if selected_object >= 0 && selected_object < len(scene.objects) {
+				object := &scene.objects[selected_object]
+
+				imgui.Separator()
+				imgui.Text("Transform")
+
+				position := object.transform.position
+				if imgui.DragFloat3("Position", &position, 0.01) {
+					object_update_position(object, position)
+				}
+			}
+		}
+
+	}
+	imgui.End()
+
+	imgui.Render()
+	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
 }
