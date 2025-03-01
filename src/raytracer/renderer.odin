@@ -3,6 +3,9 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
+import imgui "external:odin-imgui"
+import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
+import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
@@ -281,6 +284,10 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer_handle_resizing(renderer)
 	}
 
+	imgui_vulkan.NewFrame()
+	imgui_glfw.NewFrame()
+	imgui.NewFrame()
+
 	cmd, image_index, err := begin_frame(renderer)
 	if err != nil {
 		return
@@ -302,6 +309,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
 		"Failed to begin command buffer",
 	)
+
 
 	render_graph_render(
 		&renderer.render_graph,

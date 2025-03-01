@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
@@ -79,9 +78,6 @@ ui_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	imgui_vulkan.NewFrame()
-	imgui_glfw.NewFrame()
-	imgui.NewFrame()
 
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
@@ -94,9 +90,18 @@ ui_stage_render :: proc(
 		imgui.EndMainMenuBar()
 	}
 
-	if imgui.Begin("Scene Properties") {
-		scene := &render_data.renderer.scene
+	render_statistics(render_data.renderer.scene)
 
+	render_scene_properties(render_data.renderer.scene)
+
+
+	imgui.Render()
+	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+}
+
+@(private = "file")
+render_scene_properties :: proc(scene: Scene) {
+	if imgui.Begin("Scene Properties") {
 		if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
 			@(static) selected_object := -1
 
@@ -133,7 +138,32 @@ ui_stage_render :: proc(
 
 	}
 	imgui.End()
+}
 
-	imgui.Render()
-	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+@(private = "file")
+render_statistics :: proc(scene: Scene) {
+	io := imgui.GetIO()
+
+	if imgui.Begin("Performance") {
+		imgui.Text(
+			"Application average %.3f ms/frame, (%.1f FPS)",
+			1000.0 / io.Framerate,
+			io.Framerate,
+		)
+
+		imgui.PlotLines("Frame Times", &io.DeltaTime, 120, 0, nil, 0.0, 0.050, {0., 80}, 4)
+
+		if imgui.CollapsingHeader("Detailed Statistics") {
+			imgui.Text("ImGui:")
+			imgui.Text("- Vertices: %d", io.MetricsRenderVertices)
+			imgui.Text("- Indices: %d", io.MetricsRenderIndices)
+			imgui.Text("- Draw calls: %d", io.MetricsRenderWindows)
+
+			imgui.Separator()
+			imgui.Text("Renderer:")
+			imgui.Text("- Objects: %d", len(scene.objects))
+			imgui.Text("- Meshes: %d", len(scene.meshes))
+		}
+	}
+	imgui.End()
 }
