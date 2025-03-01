@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
@@ -7,6 +8,10 @@ import vk "vendor:vulkan"
 
 UI_Context :: struct {
 	pool: vk.DescriptorPool,
+}
+
+UI_Stage :: struct {
+	using base: Render_Stage,
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
@@ -60,4 +65,105 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	imgui_vulkan.Shutdown()
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
+}
+
+ui_stage_init :: proc(stage: ^UI_Stage, name: string, allocator := context.allocator) {
+	render_stage_init(stage, name, stage, allocator)
+}
+
+ui_stage_render :: proc(
+	graph: Render_Graph,
+	ui_stage: ^UI_Stage,
+	cmd: vk.CommandBuffer,
+	image_index: u32,
+	render_data: Render_Data,
+) {
+
+	if imgui.BeginMainMenuBar() {
+		if imgui.BeginMenu("File") {
+			if imgui.MenuItem("Exit", "Q") {
+				window_set_should_close(render_data.renderer.window^)
+			}
+			imgui.EndMenu()
+		}
+
+		imgui.EndMainMenuBar()
+	}
+
+	render_statistics(render_data.renderer.scene)
+
+	render_scene_properties(render_data.renderer.scene)
+
+
+	imgui.Render()
+	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+}
+
+@(private = "file")
+render_scene_properties :: proc(scene: Scene) {
+	if imgui.Begin("Scene Properties") {
+		if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+			@(static) selected_object := -1
+
+			if imgui.BeginListBox("##ObjectList", {0, 100}) {
+				for object, i in scene.objects {
+					is_selected := selected_object == i
+
+					if imgui.Selectable(
+						strings.clone_to_cstring(object.name, context.temp_allocator),
+						is_selected,
+					) {
+						selected_object = i
+					}
+
+					if is_selected {
+						imgui.SetItemDefaultFocus()
+					}
+				}
+
+				imgui.EndListBox()
+			}
+			if selected_object >= 0 && selected_object < len(scene.objects) {
+				object := &scene.objects[selected_object]
+
+				imgui.Separator()
+				imgui.Text("Transform")
+
+				position := object.transform.position
+				if imgui.DragFloat3("Position", &position, 0.01) {
+					object_update_position(object, position)
+				}
+			}
+		}
+
+	}
+	imgui.End()
+}
+
+@(private = "file")
+render_statistics :: proc(scene: Scene) {
+	io := imgui.GetIO()
+
+	if imgui.Begin("Performance") {
+		imgui.Text(
+			"Application average %.3f ms/frame, (%.1f FPS)",
+			1000.0 / io.Framerate,
+			io.Framerate,
+		)
+
+		imgui.PlotLines("Frame Times", &io.DeltaTime, 120, 0, nil, 0.0, 0.050, {0., 80}, 4)
+
+		if imgui.CollapsingHeader("Detailed Statistics") {
+			imgui.Text("ImGui:")
+			imgui.Text("- Vertices: %d", io.MetricsRenderVertices)
+			imgui.Text("- Indices: %d", io.MetricsRenderIndices)
+			imgui.Text("- Draw calls: %d", io.MetricsRenderWindows)
+
+			imgui.Separator()
+			imgui.Text("Renderer:")
+			imgui.Text("- Objects: %d", len(scene.objects))
+			imgui.Text("- Meshes: %d", len(scene.meshes))
+		}
+	}
+	imgui.End()
 }

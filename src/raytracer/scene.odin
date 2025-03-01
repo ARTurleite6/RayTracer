@@ -101,6 +101,7 @@ scene_add_object :: proc(
 		transform  = transform,
 		mesh_index = mesh_index,
 	}
+	object_update_model_matrix(&object)
 
 	append(&scene.objects, object)
 	return len(scene.objects) - 1
@@ -110,7 +111,7 @@ scene_add_object :: proc(
 scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.PipelineLayout) {
 	for &object in scene.objects {
 
-		transform := glm.MATRIX4F32_IDENTITY
+		transform := object.transform.model_matrix // glm.MATRIX4F32_IDENTITY
 		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 1, 0}) *
 		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 0, 1})
 
@@ -134,6 +135,15 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 	}
 }
 
+object_update_position :: proc(object: ^Object, new_pos: Vec3) {
+	object.transform.position = new_pos
+	object_update_model_matrix(object)
+}
+
+object_update_model_matrix :: proc(object: ^Object) {
+	transform := &object.transform
+	transform.model_matrix = glm.matrix4_translate(transform.position)
+}
 
 @(private)
 create_scene :: proc(device: ^Device) -> (scene: Scene) {

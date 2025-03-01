@@ -1,0 +1,10 @@
+// Static tasks configuration.
+//
+// Example:
+[
+  {
+    "label": "Run project",
+    "command": "python3 build.py --build-mode=debug -r",
+    "shell": "system"
+  }
+]
