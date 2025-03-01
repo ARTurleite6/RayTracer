@@ -49,6 +49,9 @@ device_init :: proc(
 			vkb.instance_use_default_debug_messenger(&builder)
 		}
 
+		vkb.instance_enable_extension(&builder, "VK_KHR_acceleration_structure")
+		vkb.instance_enable_extension(&builder, "VK_KHR_raytracing_pipeline")
+
 		ok: bool
 		if device.instance, ok = vkb.build_instance(&builder); !ok {
 			err = .Instance_Creation_Failed
