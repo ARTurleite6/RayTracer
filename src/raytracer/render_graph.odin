@@ -35,6 +35,7 @@ Render_Data :: struct {
 Render_Stage_Variant :: union {
 	^Graphics_Stage,
 	^UI_Stage,
+	^Raytracing_Stage,
 }
 
 Vertex_Buffer_Binding :: struct {
@@ -189,7 +190,6 @@ render_stage_add_color_attachment :: proc(
 		},
 	)
 }
-
 
 @(private = "file")
 record_command_buffer :: proc(

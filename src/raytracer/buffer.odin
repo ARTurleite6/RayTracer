@@ -31,7 +31,11 @@ vertex_buffer_init :: proc(buffer: ^Buffer, device: ^Device, vertices: []Vertex)
 		raw_data(vertices),
 		size_of(Vertex),
 		len(vertices),
-		{.VERTEX_BUFFER},
+		{
+			.VERTEX_BUFFER,
+			.SHADER_DEVICE_ADDRESS,
+			.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+		},
 	) or_return
 
 	return .None
@@ -164,4 +168,13 @@ buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
 		vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size),
 		"Failed to upload data to uniform buffer",
 	)
+}
+
+buffer_get_device_address :: proc(device: Device, buffer: Buffer) -> vk.DeviceAddress {
+	address_info := vk.BufferDeviceAddressInfo {
+		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
+		buffer = buffer.handle,
+	}
+
+	return vk.GetBufferDeviceAddress(device.logical_device.ptr, &address_info)
 }

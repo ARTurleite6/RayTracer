@@ -65,6 +65,8 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	}
 
 	renderer.scene = create_scene(renderer.ctx.device)
+	scene_create_acceleration_structures(&renderer.scene, renderer.ctx.device)
+
 
 	render_graph_init(
 		&renderer.render_graph,

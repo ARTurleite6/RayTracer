@@ -1,6 +1,8 @@
 package raytracer
 
+import "base:runtime"
 import glm "core:math/linalg"
+// import vma "external:odin-vma"
 import vk "vendor:vulkan"
 
 Vertex :: struct {
@@ -24,10 +26,18 @@ VERTEX_INPUT_ATTRIBUTE_DESCRIPTION := [?]vk.VertexInputAttributeDescription {
 	},
 }
 
+Acceleration_Structure :: struct {
+	handler: vk.AccelerationStructureKHR,
+	buffer:  Buffer,
+}
+
 Scene :: struct {
 	// TODO
-	meshes:  [dynamic]Mesh,
-	objects: [dynamic]Object,
+	meshes:          [dynamic]Mesh,
+	objects:         [dynamic]Object,
+	bottom_level_as: [dynamic]Acceleration_Structure,
+	top_level_as:    Acceleration_Structure,
+	instance_buffer: Buffer,
 }
 
 Object :: struct {
@@ -67,18 +77,17 @@ Push_Constants :: struct {
 scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
 	scene.meshes = make([dynamic]Mesh, allocator)
 	scene.objects = make([dynamic]Object, allocator)
+	scene.bottom_level_as = make([dynamic]Acceleration_Structure, allocator)
 }
 
 scene_destroy :: proc(scene: ^Scene, device: ^Device) {
 	for &mesh in scene.meshes {
 		mesh_destroy(&mesh, device)
 	}
-
 	delete(scene.meshes)
 	delete(scene.objects)
-
-	scene.meshes = nil
-	scene.objects = nil
+	delete(scene.bottom_level_as)
+	scene^ = {}
 }
 
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
@@ -135,6 +144,19 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 	}
 }
 
+scene_create_acceleration_structures :: proc(scene: ^Scene, device: ^Device) {
+	cmd := device_begin_single_time_commands(device, device.command_pool)
+
+	for mesh in scene.meshes {
+		as, _ := create_bottom_level_as(device, mesh, cmd)
+		append(&scene.bottom_level_as, as)
+	}
+
+	create_top_level_as(device, scene, cmd)
+
+	defer device_end_single_time_commands(device, device.command_pool, cmd)
+}
+
 object_update_position :: proc(object: ^Object, new_pos: Vec3) {
 	object.transform.position = new_pos
 	object_update_model_matrix(object)
@@ -175,7 +197,11 @@ mesh_init :: proc(
 			raw_data(indices),
 			size_of(u32),
 			len(indices),
-			{.INDEX_BUFFER},
+			{
+				.INDEX_BUFFER,
+				.SHADER_DEVICE_ADDRESS,
+				.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+			},
 		) or_return
 		mesh.index_count = u32(len(indices))
 	}
@@ -290,4 +316,272 @@ create_cube :: proc(device: ^Device) -> (mesh: Mesh) {
 
 	mesh_init(&mesh, device, vertices, indices, "Cube")
 	return mesh
+}
+
+@(require_results)
+create_bottom_level_as :: proc(
+	device: ^Device,
+	mesh: Mesh,
+	cmd: vk.CommandBuffer,
+) -> (
+	as: Acceleration_Structure,
+	err: Buffer_Error,
+) {
+	vertex_address := buffer_get_device_address(device^, mesh.vertex_buffer)
+	index_address := buffer_get_device_address(device^, mesh.index_buffer)
+
+	geometry := vk.AccelerationStructureGeometryKHR {
+		sType = .ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		geometryType = .TRIANGLES,
+		geometry = {
+			triangles = {
+				sType = .ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
+				vertexFormat = .R32G32B32_SFLOAT,
+				vertexData = {deviceAddress = vertex_address},
+				vertexStride = size_of(Vertex),
+				maxVertex = mesh.vertex_count - 1,
+				indexType = .UINT32,
+				indexData = {deviceAddress = index_address},
+			},
+		},
+		flags = {.OPAQUE},
+	}
+
+	primitive_count := u32(mesh.index_count / 3)
+	build_range_info := vk.AccelerationStructureBuildRangeInfoKHR {
+		primitiveCount  = primitive_count,
+		primitiveOffset = 0,
+		firstVertex     = 0,
+	}
+
+	build_geometry_info := vk.AccelerationStructureBuildGeometryInfoKHR {
+		sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		type          = .BOTTOM_LEVEL,
+		flags         = {.PREFER_FAST_TRACE},
+		geometryCount = 1,
+		pGeometries   = &geometry,
+	}
+
+	size_info := vk.AccelerationStructureBuildSizesInfoKHR {
+		sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+	}
+
+	vk.GetAccelerationStructureBuildSizesKHR(
+		device.logical_device.ptr,
+		.DEVICE,
+		&build_geometry_info,
+		&primitive_count,
+		&size_info,
+	)
+
+	buffer_init(
+		&as.buffer,
+		device,
+		size_info.accelerationStructureSize,
+		1,
+		{.ACCELERATION_STRUCTURE_STORAGE_KHR, .SHADER_DEVICE_ADDRESS},
+		.Gpu_Only,
+	) or_return
+
+	create_info := vk.AccelerationStructureCreateInfoKHR {
+		sType  = .ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+		buffer = as.buffer.handle,
+		size   = size_info.accelerationStructureSize,
+		type   = .BOTTOM_LEVEL,
+	}
+
+	_ = vk_check(
+		vk.CreateAccelerationStructureKHR(
+			device.logical_device.ptr,
+			&create_info,
+			nil,
+			&as.handler,
+		),
+		"Error creating bottom level acceleration structure",
+	)
+
+	scratch_buffer: Buffer
+	buffer_init(
+		&scratch_buffer,
+		device,
+		size_info.buildScratchSize,
+		1,
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+		.Gpu_Only,
+	) or_return
+	defer buffer_destroy(&scratch_buffer, device)
+
+	scratch_address := buffer_get_device_address(device^, scratch_buffer)
+
+	build_geometry_info.mode = .BUILD
+	build_geometry_info.dstAccelerationStructure = as.handler
+	build_geometry_info.scratchData.deviceAddress = scratch_address
+
+	p_build_range_info: [^]vk.AccelerationStructureBuildRangeInfoKHR = &build_range_info
+	vk.CmdBuildAccelerationStructuresKHR(cmd, 1, &build_geometry_info, &p_build_range_info)
+
+	memory_barrier := vk.MemoryBarrier {
+		sType         = .MEMORY_BARRIER,
+		srcAccessMask = {.ACCELERATION_STRUCTURE_WRITE_KHR},
+		dstAccessMask = {.ACCELERATION_STRUCTURE_READ_KHR},
+	}
+
+	vk.CmdPipelineBarrier(
+		cmd,
+		{.ACCELERATION_STRUCTURE_BUILD_KHR}, // srcStageMask
+		{.ACCELERATION_STRUCTURE_BUILD_KHR}, // dstStageMask
+		{}, // dependencyFlags
+		1, // memoryBarrierCount
+		&memory_barrier, // pMemoryBarriers
+		0, // bufferMemoryBarrierCount
+		nil, // pBufferMemoryBarriers
+		0, // imageMemoryBarrierCount
+		nil, // pImageMemoryBarriers
+	)
+
+	return as, nil
+}
+
+create_top_level_as :: proc(
+	device: ^Device,
+	scene: ^Scene,
+	cmd: vk.CommandBuffer,
+) -> (
+	err: Buffer_Error,
+) {
+	instances := make(
+		[dynamic]vk.AccelerationStructureInstanceKHR,
+		0,
+		len(scene.objects),
+		context.temp_allocator,
+	)
+
+	for &object, i in scene.objects {
+		mesh_idx := object.mesh_index
+		blas := scene.bottom_level_as[mesh_idx]
+
+		blas_address_info := vk.AccelerationStructureDeviceAddressInfoKHR {
+			sType                 = .ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+			accelerationStructure = blas.handler,
+		}
+
+		blas_address := vk.GetAccelerationStructureDeviceAddressKHR(
+			device.logical_device.ptr,
+			&blas_address_info,
+		)
+
+		transform := glm.transpose(object.transform.model_matrix)
+		transform_matrix: vk.TransformMatrixKHR
+		runtime.mem_copy(&transform_matrix, &transform, size_of(vk.TransformMatrixKHR))
+
+		append_elem(
+			&instances,
+			vk.AccelerationStructureInstanceKHR {
+				transform = vk.TransformMatrixKHR{mat = transmute([3][4]f32)transform_matrix},
+				instanceCustomIndexAndMask = u32(i),
+				instanceShaderBindingTableRecordOffsetAndFlags = 0,
+				accelerationStructureReference = u64(blas_address),
+			},
+		)
+	}
+
+	buffer_init_with_staging_buffer(
+		&scene.instance_buffer,
+		device,
+		raw_data(instances),
+		size_of(vk.AccelerationStructureInstanceKHR),
+		len(instances),
+		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+	) or_return
+
+	instance_address := buffer_get_device_address(device^, scene.instance_buffer)
+
+	geometry := vk.AccelerationStructureGeometryKHR {
+		sType = .ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+		geometryType = .INSTANCES,
+		geometry = {
+			instances = {
+				sType = .ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+				data = {deviceAddress = instance_address},
+			},
+		},
+	}
+
+	build_geometry_info := vk.AccelerationStructureBuildGeometryInfoKHR {
+		sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		type          = .TOP_LEVEL,
+		flags         = {.PREFER_FAST_TRACE},
+		geometryCount = 1,
+		pGeometries   = &geometry,
+	}
+
+	instance_count := u32(len(scene.objects))
+
+	size_info := vk.AccelerationStructureBuildSizesInfoKHR {
+		sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR,
+	}
+	vk.GetAccelerationStructureBuildSizesKHR(
+		device.logical_device.ptr,
+		.DEVICE,
+		&build_geometry_info,
+		&instance_count,
+		&size_info,
+	)
+
+	buffer_init(
+		&scene.top_level_as.buffer,
+		device,
+		size_info.accelerationStructureSize,
+		1,
+		{.ACCELERATION_STRUCTURE_STORAGE_KHR, .SHADER_DEVICE_ADDRESS},
+		.Gpu_Only,
+	) or_return
+
+	create_info := vk.AccelerationStructureCreateInfoKHR {
+		sType  = .ACCELERATION_STRUCTURE_CREATE_INFO_KHR,
+		buffer = scene.top_level_as.buffer.handle,
+		size   = size_info.accelerationStructureSize,
+		type   = .TOP_LEVEL,
+	}
+
+	_ = vk_check(
+		vk.CreateAccelerationStructureKHR(
+			device.logical_device.ptr,
+			&create_info,
+			nil,
+			&scene.top_level_as.handler,
+		),
+		"Failed to create top level acceleration structure",
+	)
+
+	scratch_buffer: Buffer
+	buffer_init(
+		&scratch_buffer,
+		device,
+		size_info.buildScratchSize,
+		1,
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+		.Gpu_Only,
+	) or_return
+	defer buffer_destroy(&scratch_buffer, device)
+
+	scratch_address := buffer_get_device_address(device^, scratch_buffer)
+
+	build_range_info := vk.AccelerationStructureBuildRangeInfoKHR {
+		primitiveCount  = instance_count,
+		primitiveOffset = 0,
+		firstVertex     = 0,
+		transformOffset = 0,
+	}
+
+	// Update build info and build TLAS
+	build_geometry_info.mode = .BUILD
+	build_geometry_info.dstAccelerationStructure = scene.top_level_as.handler
+	build_geometry_info.scratchData.deviceAddress = scratch_address
+
+	p_build_range_info: [^]vk.AccelerationStructureBuildRangeInfoKHR = &build_range_info
+	vk.CmdBuildAccelerationStructuresKHR(cmd, 1, &build_geometry_info, &p_build_range_info)
+
+
+	return nil
 }
