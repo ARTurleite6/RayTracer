@@ -22,15 +22,14 @@ Frame_Error :: enum {
 	Sync_Creation_Failed,
 }
 
-
 Vulkan_Context :: struct {
-	device:            ^Device,
-	swapchain_manager: Swapchain_Manager,
-	descriptor_layout: Descriptor_Set_Layout,
-	descriptor_pool:   vk.DescriptorPool,
+	device:             ^Device,
+	swapchain_manager:  Swapchain_Manager,
+	descriptor_pool:    vk.DescriptorPool,
+	descriptor_manager: Descriptor_Set_Manager,
 	//frames
-	frames:            [MAX_FRAMES_IN_FLIGHT]Frame_Data,
-	current_frame:     int,
+	frames:             [MAX_FRAMES_IN_FLIGHT]Frame_Data,
+	current_frame:      int,
 }
 
 Frame_Data :: struct {
@@ -42,8 +41,6 @@ Frame_Data :: struct {
 
 	// Uniform Buffer
 	uniform_buffer:  Buffer,
-	// descriptor set
-	descriptor_set:  vk.DescriptorSet,
 }
 
 vulkan_context_init :: proc(
@@ -66,6 +63,13 @@ vulkan_context_init :: proc(
 
 	frames_data_init(ctx) or_return
 
+	descriptor_pool_init(
+		&ctx.descriptor_pool,
+		ctx.device,
+		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
+		1000,
+	)
+	descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
 	ctx_descriptor_sets_init(ctx)
 
 	return nil
@@ -77,9 +81,6 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 	for &f in ctx.frames {
 		buffer_destroy(&f.uniform_buffer, ctx.device)
 	}
-
-	vk.DestroyDescriptorSetLayout(ctx.device.logical_device.ptr, ctx.descriptor_layout.handle, nil)
-	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 
 	swapchain_manager_destroy(&ctx.swapchain_manager)
 
@@ -175,10 +176,6 @@ ctx_swapchain_present :: proc(
 	return nil
 }
 
-ctx_get_descriptor_set :: proc(ctx: Vulkan_Context) -> vk.DescriptorSet {
-	return ctx.frames[ctx.current_frame].descriptor_set
-}
-
 ctx_handle_resize :: proc(
 	ctx: ^Vulkan_Context,
 	new_width, new_height: u32,
@@ -197,13 +194,7 @@ ctx_handle_resize :: proc(
 }
 
 ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
-	{ 	// pool
-		builder := &Descriptor_Pool_Builder{}
-		descriptor_pool_builder_init(builder, ctx.device)
-		descriptor_pool_builder_set_max_sets(builder, MAX_FRAMES_IN_FLIGHT)
-		descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT)
-		ctx.descriptor_pool, _ = descriptor_pool_build(builder)
-	}
+	raytracing_descriptors_init(ctx)
 
 	{ 	// init uniform buffers
 		for &f in ctx.frames {
@@ -221,26 +212,42 @@ ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
 	}
 
 	{
-		builder := &Descriptor_Set_Layout_Builder{}
-		descriptor_layout_builder_init(builder, ctx.device)
-		descriptor_layout_builder_add_binding(builder, 0, .UNIFORM_BUFFER, {.VERTEX})
-		ctx.descriptor_layout, _ = descriptor_layout_build(builder)
+		layout: Descriptor_Set_Layout
+		descriptor_set_layout_init(
+			&layout,
+			ctx.device,
+			{
+				{
+					binding = 0,
+					descriptorType = .UNIFORM_BUFFER,
+					descriptorCount = 1,
+					stageFlags = {.VERTEX},
+				},
+			},
+		)
+		descriptor_manager_register_descriptor_sets(
+			&ctx.descriptor_manager,
+			"camera",
+			layout,
+			MAX_FRAMES_IN_FLIGHT,
+		)
 	}
 
 	{ 	// descriptor sets
-		writer := &Descriptor_Writer{}
-		descriptor_writer_init(writer, ctx.descriptor_layout, ctx.descriptor_pool, ctx.device)
-
-		for &f in ctx.frames {
+		for &f, i in ctx.frames {
 			buffer := f.uniform_buffer
 			buffer_info := vk.DescriptorBufferInfo {
 				buffer = buffer.handle,
 				offset = 0,
 				range  = vk.DeviceSize(size_of(Global_Ubo)),
 			}
-			descriptor_writer_write_buffer(writer, 0, &buffer_info)
-
-			f.descriptor_set, _ = descriptor_writer_build(writer)
+			descriptor_manager_write_buffer(
+				&ctx.descriptor_manager,
+				"camera",
+				u32(i),
+				0,
+				&buffer_info,
+			)
 		}
 	}
 }
@@ -348,5 +355,43 @@ frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 		vk.DestroyFence(device, f.in_flight_fence, nil)
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)
+	}
+}
+
+@(private = "file")
+raytracing_descriptors_init :: proc(ctx: ^Vulkan_Context) {
+	{
+		layout: Descriptor_Set_Layout
+		descriptor_set_layout_init(
+			&layout,
+			ctx.device,
+			bindings = {
+				{
+					binding = 0,
+					descriptorType = .ACCELERATION_STRUCTURE_KHR,
+					descriptorCount = 1,
+					stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
+				},
+				{
+					binding = 1,
+					descriptorType = .STORAGE_IMAGE,
+					descriptorCount = 1,
+					stageFlags = {.RAYGEN_KHR},
+				},
+				{
+					binding = 2,
+					descriptorType = .UNIFORM_BUFFER,
+					descriptorCount = 1,
+					stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
+				},
+			},
+		)
+
+		descriptor_manager_register_descriptor_sets(
+			&ctx.descriptor_manager,
+			"raytracing_main",
+			layout,
+			MAX_FRAMES_IN_FLIGHT,
+		)
 	}
 }

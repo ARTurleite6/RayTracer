@@ -94,7 +94,10 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				size = size_of(Push_Constants),
 			},
 		)
-		render_stage_use_descriptor_layout(stage, renderer.ctx.descriptor_layout.handle)
+		render_stage_use_descriptor_layout(
+			stage,
+			descriptor_manager_get_descriptor_layout(renderer.ctx.descriptor_manager, "camera").handle,
+		)
 		render_stage_add_color_attachment(
 			stage,
 			load_op = .CLEAR,
@@ -227,7 +230,11 @@ renderer_render :: proc(renderer: ^Renderer) {
 		&renderer.render_graph,
 		cmd,
 		image_index,
-		{renderer = renderer, descriptor_set = ctx_get_descriptor_set(renderer.ctx)},
+		{
+			renderer = renderer,
+			descriptor_manager = &renderer.ctx.descriptor_manager,
+			frame_index = u32(renderer.ctx.current_frame),
+		},
 	)
 
 	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")

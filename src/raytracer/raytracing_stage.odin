@@ -31,7 +31,13 @@ raytracing_render :: proc(
 ) {
 	vk.CmdBindPipeline(cmd, .RAY_TRACING_KHR, stage.pipeline.handle)
 
-	descriptor_set := render_data.descriptor_set
+	descriptor_set := descriptor_manager_get_descriptor_set_index(
+		render_data.descriptor_manager^,
+		"raytracing_main",
+		render_data.frame_index,
+	)
+
+	// descriptor_set := render_data.descriptor_set
 	vk.CmdBindDescriptorSets(
 		cmd,
 		.RAY_TRACING_KHR,
@@ -44,7 +50,9 @@ raytracing_render :: proc(
 	)
 
 	// Get properties for SBT
-	rt_props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR
+	rt_props := vk.PhysicalDeviceRayTracingPipelinePropertiesKHR {
+		sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR,
+	}
 	props2: vk.PhysicalDeviceProperties2 = {
 		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
 		pNext = &rt_props,
@@ -174,7 +182,7 @@ simple_raytracing_pipeline :: proc(
 			binding = 2,
 			descriptorType = .UNIFORM_BUFFER,
 			descriptorCount = 1,
-			stageFlags = {.RAYGEN_KHR},
+			stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
 		},
 	}
 

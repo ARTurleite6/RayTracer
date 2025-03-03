@@ -28,8 +28,9 @@ Render_Stage :: struct {
 
 // TODO: see if this is needed
 Render_Data :: struct {
-	renderer:       ^Renderer,
-	descriptor_set: vk.DescriptorSet,
+	renderer:           ^Renderer,
+	descriptor_manager: ^Descriptor_Set_Manager,
+	frame_index:        u32,
 }
 
 Render_Stage_Variant :: union {

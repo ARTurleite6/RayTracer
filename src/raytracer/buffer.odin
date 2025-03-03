@@ -143,10 +143,10 @@ buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {
 		vma.map_memory(device.allocator, buffer.allocation, &buffer.mapped_data),
 		"Failed to map buffer",
 	); result != .SUCCESS {
-		return buffer.mapped_data, .Mapping_Failed
+		return nil, .Mapping_Failed
 	}
 
-	return nil, .None
+	return buffer.mapped_data, .None
 }
 
 buffer_unmap :: proc(buffer: ^Buffer, device: ^Device) {

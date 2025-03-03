@@ -1,9 +1,11 @@
 package raytracer
 
+import "core:fmt"
 import "core:mem"
 import "core:mem/tlsf"
 import "core:slice"
 import vk "vendor:vulkan"
+_ :: fmt
 
 align_up :: proc(x, align: u32) -> u32 {
 	return u32(tlsf.align_up(uint(x), uint(align)))

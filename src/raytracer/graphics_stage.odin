@@ -71,19 +71,22 @@ graphics_stage_render :: proc(
 ) {
 
 	vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
-	if render_data.descriptor_set != 0 {
-		descriptor_set := render_data.descriptor_set
-		vk.CmdBindDescriptorSets(
-			cmd,
-			.GRAPHICS,
-			graphics_stage.pipeline.layout,
-			0,
-			1,
-			&descriptor_set,
-			0,
-			nil,
-		)
-	}
+	descriptor_set := descriptor_manager_get_descriptor_set_index(
+		render_data.descriptor_manager^,
+		"camera",
+		render_data.frame_index,
+	)
+
+	vk.CmdBindDescriptorSets(
+		cmd,
+		.GRAPHICS,
+		graphics_stage.pipeline.layout,
+		0,
+		1,
+		&descriptor_set,
+		0,
+		nil,
+	)
 
 	scene_draw(&render_data.renderer.scene, cmd, graphics_stage.pipeline.layout)
 }

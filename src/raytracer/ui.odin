@@ -15,22 +15,25 @@ UI_Stage :: struct {
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
-	builder := &Descriptor_Pool_Builder{}
-	descriptor_pool_builder_init(builder, device)
-	descriptor_pool_builder_set_max_sets(builder, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .SAMPLER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .COMBINED_IMAGE_SAMPLER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .SAMPLED_IMAGE, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_IMAGE, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_TEXEL_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_TEXEL_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER_DYNAMIC, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_BUFFER_DYNAMIC, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .INPUT_ATTACHMENT, 1000)
-	descriptor_pool_builder_set_flags(builder, {.FREE_DESCRIPTOR_SET})
-	ctx.pool, _ = descriptor_pool_build(builder)
+	descriptor_pool_init(
+		&ctx.pool,
+		device,
+		{
+			{.SAMPLER, 1000},
+			{.COMBINED_IMAGE_SAMPLER, 1000},
+			{.SAMPLED_IMAGE, 1000},
+			{.STORAGE_IMAGE, 1000},
+			{.UNIFORM_TEXEL_BUFFER, 1000},
+			{.STORAGE_TEXEL_BUFFER, 1000},
+			{.UNIFORM_BUFFER, 1000},
+			{.STORAGE_BUFFER, 1000},
+			{.UNIFORM_BUFFER_DYNAMIC, 1000},
+			{.STORAGE_BUFFER_DYNAMIC, 1000},
+			{.INPUT_ATTACHMENT, 1000},
+		},
+		1000,
+		{.FREE_DESCRIPTOR_SET},
+	)
 
 	imgui.CreateContext()
 	imgui_vulkan.LoadFunctions(
