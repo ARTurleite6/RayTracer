@@ -103,6 +103,17 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
 			},
 		)
+		// render_graph_add_stage(&renderer.render_graph, stage)
+	}
+
+	{
+		stage, _ := simple_raytracing_pipeline(
+			renderer,
+			"shaders/rgen.spv",
+			"shaders/rmiss.spv",
+			"shaders/rchit.spv",
+		)
+
 		render_graph_add_stage(&renderer.render_graph, stage)
 	}
 

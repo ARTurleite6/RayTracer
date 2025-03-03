@@ -84,6 +84,18 @@ device_init :: proc(
 		)
 		vkb.selector_add_required_extension(&selector, vk.KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)
 		vkb.selector_set_minimum_version(&selector, vk.API_VERSION_1_3)
+		vkb.selector_set_required_features_12(&selector, {bufferDeviceAddress = true})
+		vkb.selector_set_required_features_13(
+			&selector,
+			{dynamicRendering = true, synchronization2 = true},
+		)
+		vkb.selector_add_required_extension_features(
+			&selector,
+			vk.PhysicalDeviceRayTracingPipelineFeaturesKHR {
+				sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+				rayTracingPipeline = true,
+			},
+		)
 		vkb.selector_add_required_extension_features(
 			&selector,
 			vk.PhysicalDeviceAccelerationStructureFeaturesKHR {
@@ -91,12 +103,6 @@ device_init :: proc(
 				accelerationStructure = true,
 			},
 		)
-		vkb.selector_set_required_features(&selector, {})
-		vkb.selector_set_required_features_13(
-			&selector,
-			{dynamicRendering = true, synchronization2 = true},
-		)
-		vkb.selector_set_required_features_12(&selector, {bufferDeviceAddress = true})
 		vkb.selector_set_surface(&selector, surface)
 
 		ok: bool

@@ -95,6 +95,8 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 			build_graphics_pipeline(v, graph.device^)
 		case ^UI_Stage:
 		// for now we dont have nothing in here
+		case ^Raytracing_Stage:
+			build_raytracing_pipeline(v, graph.device^)
 		}
 	}
 }
@@ -156,6 +158,7 @@ render_stage_destroy :: proc(stage: ^Render_Stage, device: Device) {
 		free(v)
 	case ^UI_Stage:
 		free(v)
+	case ^Raytracing_Stage:
 	}
 	delete(stage.reads)
 	delete(stage.descriptor_layouts)
@@ -205,6 +208,8 @@ record_command_buffer :: proc(
 		graphics_stage_render(graph, v, cmd, image_index, render_data)
 	case ^UI_Stage:
 		ui_stage_render(graph, v, cmd, image_index, render_data)
+	case ^Raytracing_Stage:
+		raytracing_render(graph, v, cmd, image_index, render_data)
 	}
 	end_render_pass(graph, cmd, image_index)
 }

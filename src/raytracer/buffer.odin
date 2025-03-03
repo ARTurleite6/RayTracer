@@ -138,22 +138,27 @@ buffer_destroy :: proc(buffer: ^Buffer, device: ^Device) {
 	}
 }
 
-buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> Buffer_Error {
+buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {
 	if result := vk_check(
 		vma.map_memory(device.allocator, buffer.allocation, &buffer.mapped_data),
 		"Failed to map buffer",
 	); result != .SUCCESS {
-		return .Mapping_Failed
+		return buffer.mapped_data, .Mapping_Failed
 	}
 
-	return .None
+	return nil, .None
 }
 
 buffer_unmap :: proc(buffer: ^Buffer, device: ^Device) {
 	vma.unmap_memory(device.allocator, buffer.allocation)
 }
 
-buffer_write :: proc(buffer: ^Buffer, data: rawptr, size := vk.WHOLE_SIZE) {
+buffer_write :: proc(
+	buffer: ^Buffer,
+	data: rawptr,
+	size := vk.WHOLE_SIZE,
+	offset: vk.DeviceSize = 0,
+) {
 	assert(buffer.mapped_data != nil, "Buffer must be mapped before writing to it")
 
 	if size == vk.WHOLE_SIZE {

@@ -10,8 +10,11 @@ build_odin_commands = {
 
 def build_shaders():
     print("Building shaders...")
-    result = subprocess.run(["glslc", "shaders/simple.vert", "-o", "shaders/vert.spv"], capture_output=True, text=True)
-    result = subprocess.run(["glslc", "shaders/simple.frag", "-o", "shaders/frag.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "--target-env=vulkan1.2", "shaders/simple.vert", "-o", "shaders/vert.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "--target-env=vulkan1.2", "shaders/simple.frag", "-o", "shaders/frag.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "--target-env=vulkan1.2", "shaders/simple.rgen", "-o", "shaders/rgen.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "--target-env=vulkan1.2", "shaders/simple.rmiss", "-o", "shaders/rmiss.spv"], capture_output=True, text=True)
+    result = subprocess.run(["glslc", "--target-env=vulkan1.2", "shaders/simple.rchit", "-o", "shaders/rchit.spv"], capture_output=True, text=True)
     print("Output:", result.stdout)
     print("Error:", result.stderr)
 
