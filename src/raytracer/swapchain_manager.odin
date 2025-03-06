@@ -84,6 +84,8 @@ swapchain_init :: proc(
 		return .Creation_Failed
 	}
 
+	vkb.swapchain_builder_add_image_usage_flags(&builder, {.TRANSFER_DST})
+
 	defer vkb.destroy_swapchain_builder(&builder)
 
 	vkb.swapchain_builder_set_old_swapchain(&builder, manager.handle)
@@ -197,31 +199,4 @@ swapchain_acquire_next_image :: proc(
 	}
 
 	return
-}
-
-image_transition :: proc(cmd: vk.CommandBuffer, transition: Image_Transition) {
-	barrier := vk.ImageMemoryBarrier2 {
-		sType = .IMAGE_MEMORY_BARRIER_2,
-		srcStageMask = transition.src_stage,
-		srcAccessMask = transition.src_access,
-		dstStageMask = transition.dst_stage,
-		dstAccessMask = transition.dst_access,
-		oldLayout = transition.old_layout,
-		newLayout = transition.new_layout,
-		image = transition.image,
-		subresourceRange = {
-			aspectMask = {.COLOR},
-			baseMipLevel = 0,
-			levelCount = 1,
-			baseArrayLayer = 0,
-			layerCount = 1,
-		},
-	}
-
-	dependency_info := vk.DependencyInfo {
-		sType                   = .DEPENDENCY_INFO,
-		imageMemoryBarrierCount = 1,
-		pImageMemoryBarriers    = &barrier,
-	}
-	vk.CmdPipelineBarrier2(cmd, &dependency_info)
 }

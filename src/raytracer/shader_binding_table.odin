@@ -67,6 +67,7 @@ sbt_build :: proc(sbt: ^Shader_Binding_Table) -> (err: Buffer_Error) {
 
 	for &section in sbt.sections {
 		current_offset = align_up(current_offset, base_alignment)
+		section.offset = current_offset
 
 		max_data_size: u32 = 0
 
@@ -127,7 +128,8 @@ sbt_build :: proc(sbt: ^Shader_Binding_Table) -> (err: Buffer_Error) {
 		data := cast(^[]u8)mapped_data
 		section_data := slice.ptr_add(data, int(section.offset))
 
-		section.region.deviceAddress = buffer_get_device_address(sbt.device^, sbt.buffer)
+		section.region.deviceAddress =
+			buffer_get_device_address(sbt.buffer, sbt.device^) + vk.DeviceAddress(section.offset)
 
 		for record, i in section.records {
 			record_offset := i * int(section.region.stride)

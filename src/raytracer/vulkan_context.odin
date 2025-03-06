@@ -5,7 +5,7 @@ import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 _ :: fmt
 
-MAX_FRAMES_IN_FLIGHT :: 3
+MAX_FRAMES_IN_FLIGHT :: 1
 
 Vulkan_Error :: union {
 	Device_Error,
@@ -23,13 +23,17 @@ Frame_Error :: enum {
 }
 
 Vulkan_Context :: struct {
-	device:             ^Device,
-	swapchain_manager:  Swapchain_Manager,
-	descriptor_pool:    vk.DescriptorPool,
-	descriptor_manager: Descriptor_Set_Manager,
+	device:                ^Device,
+	swapchain_manager:     Swapchain_Manager,
+	descriptor_pool:       vk.DescriptorPool,
+	descriptor_manager:    Descriptor_Set_Manager,
 	//frames
-	frames:             [MAX_FRAMES_IN_FLIGHT]Frame_Data,
-	current_frame:      int,
+	frames:                [MAX_FRAMES_IN_FLIGHT]Frame_Data,
+	current_frame:         int,
+
+	// raytracing images
+	raytracing_image:      Image,
+	raytracing_image_view: vk.ImageView,
 }
 
 Frame_Data :: struct {
@@ -70,12 +74,33 @@ vulkan_context_init :: proc(
 		1000,
 	)
 	descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
+
 	ctx_descriptor_sets_init(ctx)
+
+	{
+		image_init(&ctx.raytracing_image, ctx, .B8G8R8A8_UNORM, ctx.swapchain_manager.extent)
+		image_view_init(&ctx.raytracing_image_view, ctx.raytracing_image, ctx)
+
+		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
+		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
+		image_transition_layout_stage_access(
+			cmd,
+			ctx.raytracing_image.handle,
+			.UNDEFINED,
+			.GENERAL,
+			{.ALL_COMMANDS},
+			{.ALL_COMMANDS},
+			{},
+			{},
+		)
+	}
 
 	return nil
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context) {
+	descriptor_manager_destroy(&ctx.descriptor_manager)
+
 	frames_data_destroy(ctx)
 
 	for &f in ctx.frames {
@@ -85,6 +110,46 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 	swapchain_manager_destroy(&ctx.swapchain_manager)
 
 	device_destroy(ctx.device)
+}
+
+ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.AccelerationStructureKHR) {
+	layout: Descriptor_Set_Layout
+
+	descriptor_set_layout_init(
+		&layout,
+		ctx.device,
+		{
+			{ 	// TLAS
+				binding         = 0,
+				descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+				descriptorCount = 1,
+				stageFlags      = {.RAYGEN_KHR},
+			},
+			{ 	// Output Image
+				binding         = 1,
+				descriptorType  = .STORAGE_IMAGE,
+				descriptorCount = 1,
+				stageFlags      = {.RAYGEN_KHR},
+			},
+		},
+	)
+
+	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "raytracing_main", layout)
+	descriptor_manager_write_acceleration_structure(
+		&ctx.descriptor_manager,
+		"raytracing_main",
+		0,
+		0,
+		tlas,
+	)
+	descriptor_manager_write_image(
+		&ctx.descriptor_manager,
+		"raytracing_main",
+		0,
+		1,
+		ctx.raytracing_image_view,
+	)
+
 }
 
 ctx_begin_frame :: proc(
@@ -194,8 +259,6 @@ ctx_handle_resize :: proc(
 }
 
 ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
-	raytracing_descriptors_init(ctx)
-
 	{ 	// init uniform buffers
 		for &f in ctx.frames {
 			buffer_init(
@@ -221,7 +284,7 @@ ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
 					binding = 0,
 					descriptorType = .UNIFORM_BUFFER,
 					descriptorCount = 1,
-					stageFlags = {.VERTEX},
+					stageFlags = {.VERTEX, .RAYGEN_KHR},
 				},
 			},
 		)
@@ -236,17 +299,13 @@ ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
 	{ 	// descriptor sets
 		for &f, i in ctx.frames {
 			buffer := f.uniform_buffer
-			buffer_info := vk.DescriptorBufferInfo {
-				buffer = buffer.handle,
-				offset = 0,
-				range  = vk.DeviceSize(size_of(Global_Ubo)),
-			}
 			descriptor_manager_write_buffer(
 				&ctx.descriptor_manager,
 				"camera",
 				u32(i),
 				0,
-				&buffer_info,
+				buffer.handle,
+				vk.DeviceSize(size_of(Global_Ubo)),
 			)
 		}
 	}
@@ -355,43 +414,5 @@ frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 		vk.DestroyFence(device, f.in_flight_fence, nil)
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)
-	}
-}
-
-@(private = "file")
-raytracing_descriptors_init :: proc(ctx: ^Vulkan_Context) {
-	{
-		layout: Descriptor_Set_Layout
-		descriptor_set_layout_init(
-			&layout,
-			ctx.device,
-			bindings = {
-				{
-					binding = 0,
-					descriptorType = .ACCELERATION_STRUCTURE_KHR,
-					descriptorCount = 1,
-					stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
-				},
-				{
-					binding = 1,
-					descriptorType = .STORAGE_IMAGE,
-					descriptorCount = 1,
-					stageFlags = {.RAYGEN_KHR},
-				},
-				{
-					binding = 2,
-					descriptorType = .UNIFORM_BUFFER,
-					descriptorCount = 1,
-					stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
-				},
-			},
-		)
-
-		descriptor_manager_register_descriptor_sets(
-			&ctx.descriptor_manager,
-			"raytracing_main",
-			layout,
-			MAX_FRAMES_IN_FLIGHT,
-		)
 	}
 }

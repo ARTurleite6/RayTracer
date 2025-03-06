@@ -175,7 +175,7 @@ buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
 	)
 }
 
-buffer_get_device_address :: proc(device: Device, buffer: Buffer) -> vk.DeviceAddress {
+buffer_get_device_address :: proc(buffer: Buffer, device: Device) -> vk.DeviceAddress {
 	address_info := vk.BufferDeviceAddressInfo {
 		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
 		buffer = buffer.handle,

@@ -81,6 +81,19 @@ ui_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .UNDEFINED,
+		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		src_stage = {.TOP_OF_PIPE},
+		dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		src_access = {},
+		dst_access = {.COLOR_ATTACHMENT_WRITE},
+	)
+
+	begin_render_pass(graph, ui_stage, cmd, image_index)
+
 	imgui_vulkan.NewFrame()
 	imgui_glfw.NewFrame()
 	imgui.NewFrame()
@@ -103,6 +116,19 @@ ui_stage_render :: proc(
 
 	imgui.Render()
 	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+
+	end_render_pass(graph, cmd, image_index)
+
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		new_layout = .PRESENT_SRC_KHR,
+		src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		dst_stage = {.BOTTOM_OF_PIPE},
+		src_access = {.COLOR_ATTACHMENT_WRITE},
+		dst_access = {},
+	)
 }
 
 @(private = "file")

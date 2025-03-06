@@ -3,15 +3,17 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
+import "core:os"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
 
 Global_Ubo :: struct {
-	projection:   Mat4,
-	view:         Mat4,
-	inverse_view: Mat4,
+	projection:         Mat4,
+	view:               Mat4,
+	inverse_view:       Mat4,
+	inverse_projection: Mat4,
 }
 
 Render_Error :: union {
@@ -65,8 +67,9 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	}
 
 	renderer.scene = create_scene(renderer.ctx.device)
-	scene_create_acceleration_structures(&renderer.scene, renderer.ctx.device)
+	scene_create_as(&renderer.scene, renderer.ctx.device)
 
+	ctx_create_rt_descriptor_set(&renderer.ctx, &renderer.scene.rt_builder.tlas.handle)
 
 	render_graph_init(
 		&renderer.render_graph,
@@ -75,17 +78,21 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		allocator,
 	)
 	{ 	// create graphics stage
+
 		stage := new(Graphics_Stage)
-		graphics_stage_init(stage, "main", allocator)
-		graphics_stage_use_shader(stage, renderer.shaders[0])
-		graphics_stage_use_shader(stage, renderer.shaders[1])
-		graphics_stage_use_format(stage, renderer.ctx.swapchain_manager.format)
-		graphics_stage_use_vertex_buffer_binding(
+		graphics_stage_init(
 			stage,
-			0,
-			VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:],
-			VERTEX_INPUT_BINDING_DESCRIPTION,
+			"main",
+			renderer.shaders[:],
+			renderer.ctx.swapchain_manager.format,
+			vertex_bindings = {
+				{
+					attribute_description = VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:],
+					binding_description = VERTEX_INPUT_BINDING_DESCRIPTION,
+				},
+			},
 		)
+
 		render_stage_use_push_constant_range(
 			stage,
 			vk.PushConstantRange {
@@ -98,6 +105,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			stage,
 			descriptor_manager_get_descriptor_layout(renderer.ctx.descriptor_manager, "camera").handle,
 		)
+
 		render_stage_add_color_attachment(
 			stage,
 			load_op = .CLEAR,
@@ -106,17 +114,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
 			},
 		)
-		// render_graph_add_stage(&renderer.render_graph, stage)
-	}
-
-	{
-		stage, _ := simple_raytracing_pipeline(
-			renderer,
-			"shaders/rgen.spv",
-			"shaders/rmiss.spv",
-			"shaders/rchit.spv",
-		)
-
 		render_graph_add_stage(&renderer.render_graph, stage)
 	}
 
@@ -142,7 +139,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
 	render_graph_destroy(&renderer.render_graph)
-	scene_destroy(&renderer.scene, renderer.ctx.device)
+	// scene_destroy(&renderer.scene, renderer.ctx.device)
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
@@ -217,6 +214,7 @@ renderer_render :: proc(renderer: ^Renderer) {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,
 		inverse_view = renderer.camera.inverse_view,
+		inverse_projection = renderer.camera.inverse_proj,
 	}
 	ctx_update_uniform_buffer(&renderer.ctx, ubo)
 
@@ -272,7 +270,7 @@ renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 	if result != .SUCCESS {
 		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
-		return result
+		os.exit(1)
 	}
 	return nil
 }

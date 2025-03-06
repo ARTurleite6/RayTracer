@@ -95,9 +95,8 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 		case ^Graphics_Stage:
 			build_graphics_pipeline(v, graph.device^)
 		case ^UI_Stage:
-		// for now we dont have nothing in here
 		case ^Raytracing_Stage:
-			build_raytracing_pipeline(v, graph.device^)
+		// for now we dont have nothing in here
 		}
 	}
 }
@@ -108,34 +107,9 @@ render_graph_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	image_transition(
-		cmd,
-		{
-			image = graph.swapchain.images[image_index],
-			old_layout = .UNDEFINED,
-			new_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			src_stage = {.TOP_OF_PIPE},
-			dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			src_access = {},
-			dst_access = {.COLOR_ATTACHMENT_WRITE},
-		},
-	)
-
 	for stage in graph.stages {
 		record_command_buffer(graph^, stage^, cmd, image_index, render_data)
 	}
-	image_transition(
-		cmd,
-		{
-			image = graph.swapchain.images[image_index],
-			old_layout = .COLOR_ATTACHMENT_OPTIMAL,
-			new_layout = .PRESENT_SRC_KHR,
-			src_stage = {.COLOR_ATTACHMENT_OUTPUT},
-			dst_stage = {.BOTTOM_OF_PIPE},
-			src_access = {.COLOR_ATTACHMENT_WRITE},
-			dst_access = {},
-		},
-	)
 }
 
 render_stage_init :: proc(
@@ -203,19 +177,15 @@ record_command_buffer :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	begin_render_pass(graph, stage, cmd, image_index)
 	#partial switch v in stage.variant {
 	case ^Graphics_Stage:
 		graphics_stage_render(graph, v, cmd, image_index, render_data)
 	case ^UI_Stage:
 		ui_stage_render(graph, v, cmd, image_index, render_data)
-	case ^Raytracing_Stage:
-		raytracing_render(graph, v, cmd, image_index, render_data)
 	}
-	end_render_pass(graph, cmd, image_index)
 }
 
-@(private = "file")
+@(private)
 begin_render_pass :: proc(
 	render_graph: Render_Graph,
 	stage: Render_Stage,
@@ -259,7 +229,7 @@ begin_render_pass :: proc(
 	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 }
 
-@(private = "file")
+@(private)
 end_render_pass :: proc(graph: Render_Graph, cmd: vk.CommandBuffer, image_index: u32) {
 	vk.CmdEndRendering(cmd)
 }
