@@ -16,11 +16,31 @@
  */
 
 #version 460
-#extension GL_EXT_ray_tracing : enable
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+
+struct Material {
+    vec3 albedo;
+};
+
+struct ObjectData {
+    uint material_index;
+};
 
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
+layout(set = 2, binding = 0, scalar) buffer MaterialsBuffer {
+    Material materials[];
+};
+
+layout(set = 2, binding = 1, scalar) buffer ObjectsData {
+    ObjectData objects[];
+};
+
 void main()
 {
-    payload = vec3(1.0, 0.0, 0.0);
+    ObjectData object = objects[gl_InstanceCustomIndexEXT];
+    Material mat = materials[object.material_index];
+    payload = mat.albedo;
 }

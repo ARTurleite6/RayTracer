@@ -123,7 +123,7 @@ descriptor_manager_write_buffer :: proc(
 	index: u32,
 	binding: u32,
 	buffer: vk.Buffer,
-	range: vk.DeviceSize,
+	range: vk.DeviceSize = vk.DeviceSize(vk.WHOLE_SIZE),
 	offset: vk.DeviceSize = 0,
 	// layout: vk.ImageLayout,
 ) {

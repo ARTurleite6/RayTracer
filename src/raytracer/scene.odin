@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:log"
 import glm "core:math/linalg"
 // import vma "external:odin-vma"
 import vk "vendor:vulkan"
@@ -27,16 +26,26 @@ VERTEX_INPUT_ATTRIBUTE_DESCRIPTION := [?]vk.VertexInputAttributeDescription {
 }
 
 Scene :: struct {
-	meshes:          [dynamic]Mesh,
-	objects:         [dynamic]Object,
-	instance_buffer: Buffer,
-	rt_builder:      Raytracing_Builder,
+	meshes:             [dynamic]Mesh,
+	objects:            [dynamic]Object,
+	materials:          [dynamic]Material,
+
+	// GPU buffers
+	object_data_buffer: Buffer,
+	material_buffer:    Buffer,
+	instance_buffer:    Buffer,
+	rt_builder:         Raytracing_Builder,
 }
 
 Object :: struct {
-	name:       string,
-	transform:  Transform,
-	mesh_index: int,
+	name:           string,
+	transform:      Transform,
+	mesh_index:     int,
+	material_index: int,
+}
+
+Object_Data :: struct {
+	material_index: u32,
 }
 
 Transform :: struct {
@@ -58,18 +67,34 @@ Mesh_Error :: union {
 	Buffer_Error,
 }
 
+Material :: struct {
+	name:   string,
+	albedo: Vec3,
+}
+
 Scene_UBO :: struct {
 	view:       Mat4,
 	projection: Mat4,
 }
 
-Push_Constants :: struct {
+Graphics_Push_Constant :: struct {
 	model_matrix: Mat4,
+}
+
+Raytracing_Push_Constant :: struct {
+	clear_color: Vec3,
 }
 
 scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
 	scene.meshes = make([dynamic]Mesh, allocator)
 	scene.objects = make([dynamic]Object, allocator)
+	scene.materials = make([dynamic]Material, allocator)
+
+	append(
+		&scene.materials,
+		Material{name = "blue", albedo = {0.0, 1.0, 0.0}},
+		Material{name = "red", albedo = {1.0, 0.0, 0.0}},
+	)
 }
 
 scene_destroy :: proc(scene: ^Scene, device: ^Device) {
@@ -80,9 +105,108 @@ scene_destroy :: proc(scene: ^Scene, device: ^Device) {
 	for &mesh in scene.meshes {
 		mesh_destroy(&mesh, device)
 	}
+
+	buffer_destroy(&scene.material_buffer, device)
 	delete(scene.meshes)
 	delete(scene.objects)
+	delete(scene.materials)
 	scene^ = {}
+}
+
+scene_create_buffers :: proc(scene: ^Scene, device: ^Device) -> (err: Buffer_Error) {
+	scene_create_material_buffers(scene, device) or_return
+	return scene_create_object_data_buffers(scene, device)
+}
+
+scene_update_descriptor_writes :: proc(scene: Scene, descriptor_manager: ^Descriptor_Set_Manager) {
+	descriptor_manager_write_buffer(
+		descriptor_manager,
+		"scene_data",
+		0,
+		0,
+		scene.material_buffer.handle,
+		vk.DeviceSize(vk.WHOLE_SIZE),
+	)
+
+	// Update object data buffer binding
+	descriptor_manager_write_buffer(
+		descriptor_manager,
+		"scene_data",
+		0,
+		1,
+		scene.object_data_buffer.handle,
+		vk.DeviceSize(vk.WHOLE_SIZE),
+	)
+}
+
+scene_update_material :: proc(
+	scene: ^Scene,
+	material_index: int,
+	device: ^Device,
+	descriptor_manager: ^Descriptor_Set_Manager = nil,
+) -> (
+	err: Buffer_Error,
+) {
+	assert(
+		material_index >= 0 && material_index <= len(scene.materials),
+		"material index not valid",
+	)
+	buffer_destroy(&scene.material_buffer, device)
+
+	scene_create_material_buffers(scene, device) or_return
+
+	if descriptor_manager != nil {
+		descriptor_manager_write_buffer(
+			descriptor_manager,
+			"scene_data",
+			0, // set index
+			0, // binding index for materials
+			scene.material_buffer.handle,
+			vk.DeviceSize(vk.WHOLE_SIZE),
+		)
+	}
+	return .None
+}
+
+scene_create_material_buffers :: proc(scene: ^Scene, device: ^Device) -> (err: Buffer_Error) {
+	Material_Data :: struct {
+		albedo: Vec3,
+	}
+	materials := make([]Material_Data, len(scene.materials), context.temp_allocator)
+
+	for mat, i in scene.materials {
+		materials[i].albedo = mat.albedo
+	}
+
+	buffer_init_with_staging_buffer(
+		&scene.material_buffer,
+		device,
+		raw_data(materials),
+		size_of(Material_Data),
+		len(materials),
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+	) or_return
+	return .None
+}
+
+scene_create_object_data_buffers :: proc(scene: ^Scene, device: ^Device) -> (err: Buffer_Error) {
+	objects := make([]Object_Data, len(scene.objects), context.temp_allocator)
+	for obj, i in scene.objects {
+		objects[i] = {
+			material_index = u32(obj.material_index),
+		}
+	}
+
+	buffer_init_with_staging_buffer(
+		&scene.object_data_buffer,
+		device,
+		raw_data(objects),
+		size_of(Object_Data),
+		len(objects),
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+	) or_return
+
+	return .None
 }
 
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
@@ -94,6 +218,7 @@ scene_add_object :: proc(
 	scene: ^Scene,
 	name: string,
 	mesh_index: int,
+	material_index: int,
 	transform: Transform,
 ) -> (
 	idx: int,
@@ -101,9 +226,10 @@ scene_add_object :: proc(
 	assert(mesh_index >= 0 && mesh_index < len(scene.meshes), "Invalid mesh index") // TODO: Move this to a error handling
 
 	object := Object {
-		name       = name,
-		transform  = transform,
-		mesh_index = mesh_index,
+		name           = name,
+		transform      = transform,
+		mesh_index     = mesh_index,
+		material_index = material_index,
 	}
 	object_update_model_matrix(&object)
 
@@ -113,9 +239,7 @@ scene_add_object :: proc(
 
 scene_create_as :: proc(scene: ^Scene, device: ^Device) {
 	create_bottom_level_as(&scene.rt_builder, scene^, device)
-	log.debugf("Created bottom level acceleration structure %v", scene.rt_builder)
 	create_top_level_as(&scene.rt_builder, scene^, device)
-	log.debugf("Created top level acceleration structure %v", scene.rt_builder)
 }
 
 // TODO: probably in the future would it be nice to change this, to not pass the pipeline_layout
@@ -126,7 +250,7 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 1, 0}) *
 		// glm.matrix4_rotate_f32(90 * glm.DEG_PER_RAD, {0, 0, 1})
 
-		push_constant := Push_Constants {
+		push_constant := Graphics_Push_Constant {
 			model_matrix = transform,
 		}
 
@@ -135,7 +259,7 @@ scene_draw :: proc(scene: ^Scene, cmd: vk.CommandBuffer, pipeline_layout: vk.Pip
 			pipeline_layout,
 			{.VERTEX},
 			0,
-			size_of(Push_Constants),
+			size_of(Graphics_Push_Constant),
 			&push_constant,
 		)
 
@@ -162,7 +286,8 @@ create_scene :: proc(device: ^Device) -> (scene: Scene) {
 	quad_mesh := create_cube(device)
 	mesh_index := scene_add_mesh(&scene, quad_mesh)
 
-	scene_add_object(&scene, "quad", mesh_index, {})
+	scene_add_object(&scene, "quad", mesh_index, 1, {})
+	scene_add_object(&scene, "quad", mesh_index, 0, Transform{position = {-2, 0, 0}})
 
 	return scene
 }

@@ -20,7 +20,11 @@
 
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
+layout(push_constant) uniform Push {
+    vec3 clear_color;
+} push;
+
 void main()
 {
-    payload = vec3(0.0, 0.0, 0.2);
+    payload = push.clear_color * 0.8;
 }

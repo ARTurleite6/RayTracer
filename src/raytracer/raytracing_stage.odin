@@ -80,6 +80,11 @@ raytracing_render :: proc(
 			"camera",
 			render_data.frame_index,
 		),
+		descriptor_manager_get_descriptor_set_index(
+			render_data.descriptor_manager^,
+			"scene_data",
+			render_data.frame_index,
+		),
 	}
 
 	vk.CmdBindDescriptorSets(
@@ -91,6 +96,15 @@ raytracing_render :: proc(
 		raw_data(descs[:]),
 		0,
 		nil,
+	)
+
+	vk.CmdPushConstants(
+		cmd,
+		stage.pipeline.layout,
+		{.CLOSEST_HIT_KHR, .MISS_KHR},
+		0,
+		size_of(Raytracing_Push_Constant),
+		&Raytracing_Push_Constant{clear_color = {0.2, 0.2, 0.2}},
 	)
 
 	vk.CmdBindPipeline(cmd, .RAY_TRACING_KHR, stage.pipeline.handle)
@@ -179,9 +193,11 @@ raytracing_render :: proc(
 
 create_rt_pipeline :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 	layout_create_info := vk.PipelineLayoutCreateInfo {
-		sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount = u32(len(stage.descriptor_layouts)),
-		pSetLayouts    = raw_data(stage.descriptor_layouts),
+		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+		setLayoutCount         = u32(len(stage.descriptor_layouts)),
+		pSetLayouts            = raw_data(stage.descriptor_layouts),
+		pushConstantRangeCount = u32(len(stage.push_constants)),
+		pPushConstantRanges    = raw_data(stage.push_constants),
 	}
 
 	_ = vk_check(

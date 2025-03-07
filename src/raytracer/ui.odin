@@ -111,7 +111,11 @@ ui_stage_render :: proc(
 
 	render_statistics(render_data.renderer.scene)
 
-	render_scene_properties(render_data.renderer.scene)
+	render_scene_properties(
+		&render_data.renderer.scene,
+		render_data.descriptor_manager,
+		render_data.renderer.ctx.device,
+	)
 
 
 	imgui.Render()
@@ -132,9 +136,46 @@ ui_stage_render :: proc(
 }
 
 @(private = "file")
-render_scene_properties :: proc(scene: Scene) {
+render_scene_properties :: proc(
+	scene: ^Scene,
+	descriptor_manager: ^Descriptor_Set_Manager,
+	device: ^Device,
+) {
 	if imgui.Begin("Scene Properties") {
-		if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+		if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
+			@(static) selected_material := -1
+			if imgui.BeginListBox("##MaterialList", {0, 100}) {
+				for material, i in scene.materials {
+					is_selected := selected_material == i
+					if imgui.Selectable(
+						strings.clone_to_cstring(material.name, context.temp_allocator),
+						is_selected,
+					) {
+						selected_material = i
+					}
+
+					if is_selected {
+						imgui.SetItemDefaultFocus()
+					}
+				}
+				imgui.EndListBox()
+			}
+			if selected_material >= 0 && selected_material < len(scene.materials) {
+				material := &scene.materials[selected_material]
+
+				imgui.Separator()
+				// imgui.Text("Albedo")
+				albedo := material.albedo
+				if imgui.ColorPicker3("Albedo", &albedo) {
+					material.albedo = albedo
+
+					scene_update_material(scene, selected_material, device, descriptor_manager)
+				}
+			}
+		}
+
+
+		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1
 
 			if imgui.BeginListBox("##ObjectList", {0, 100}) {

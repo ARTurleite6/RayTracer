@@ -77,6 +77,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	renderer.scene = create_scene(renderer.ctx.device)
 	scene_create_as(&renderer.scene, renderer.ctx.device)
+	scene_create_buffers(&renderer.scene, renderer.ctx.device)
 
 	ctx_create_rt_descriptor_set(&renderer.ctx, &renderer.scene.rt_builder.tlas.handle)
 
@@ -107,7 +108,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			vk.PushConstantRange {
 				stageFlags = {.VERTEX},
 				offset = 0,
-				size = size_of(Push_Constants),
+				size = size_of(Graphics_Push_Constant),
 			},
 		)
 		render_stage_use_descriptor_layout(
@@ -166,8 +167,25 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			renderer.ctx.descriptor_manager,
 			"camera",
 		)
+
+		scene_layout := descriptor_manager_get_descriptor_layout(
+			renderer.ctx.descriptor_manager,
+			"scene_data",
+		)
+
+		scene_update_descriptor_writes(renderer.scene, &renderer.ctx.descriptor_manager)
+
 		render_stage_use_descriptor_layout(stage, descriptor_layout.handle)
 		render_stage_use_descriptor_layout(stage, camera_layout.handle)
+		render_stage_use_descriptor_layout(stage, scene_layout.handle)
+		render_stage_use_push_constant_range(
+			stage,
+			vk.PushConstantRange {
+				stageFlags = {.MISS_KHR, .CLOSEST_HIT_KHR},
+				offset = 0,
+				size = size_of(Raytracing_Push_Constant),
+			},
+		)
 
 		render_graph_add_stage(&renderer.render_graph, stage)
 	}

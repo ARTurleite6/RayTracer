@@ -154,6 +154,26 @@ ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.Acceleratio
 		ctx.raytracing_image_view,
 	)
 
+	descriptor_set_layout_init(
+		&layout,
+		ctx.device,
+		{
+			{
+				binding = 0,
+				descriptorType = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.CLOSEST_HIT_KHR},
+			},
+			{
+				binding = 1,
+				descriptorType = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.CLOSEST_HIT_KHR},
+			},
+		},
+	)
+
+	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "scene_data", layout)
 }
 
 ctx_begin_frame :: proc(

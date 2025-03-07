@@ -36,12 +36,12 @@ create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, devic
 		context.temp_allocator,
 	)
 
-	for obj in scene.objects {
+	for obj, i in scene.objects {
 		ray_inst := vk.AccelerationStructureInstanceKHR {
 			transform                              = matrix_to_transform_matrix_khr(
 				obj.transform.model_matrix,
 			),
-			instanceCustomIndex                    = u32(obj.mesh_index),
+			instanceCustomIndex                    = u32(i),
 			mask                                   = 0xFF,
 			instanceShaderBindingTableRecordOffset = 0,
 			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
