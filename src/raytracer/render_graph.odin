@@ -96,6 +96,7 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 			build_graphics_pipeline(v, graph.device^)
 		case ^UI_Stage:
 		case ^Raytracing_Stage:
+			create_rt_pipeline(v, graph.device)
 		// for now we dont have nothing in here
 		}
 	}
@@ -177,11 +178,13 @@ record_command_buffer :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	#partial switch v in stage.variant {
+	switch v in stage.variant {
 	case ^Graphics_Stage:
-		graphics_stage_render(graph, v, cmd, image_index, render_data)
+	// graphics_stage_render(graph, v, cmd, image_index, render_data)
 	case ^UI_Stage:
 		ui_stage_render(graph, v, cmd, image_index, render_data)
+	case ^Raytracing_Stage:
+		raytracing_render(graph, v, cmd, image_index, render_data)
 	}
 }
 

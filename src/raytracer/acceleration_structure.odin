@@ -33,14 +33,16 @@ create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, devic
 
 	for obj in scene.objects {
 		ray_inst := vk.AccelerationStructureInstanceKHR {
-			transform                                      = matrix_to_transform_matrix_khr(
+			transform                              = matrix_to_transform_matrix_khr(
 				obj.transform.model_matrix,
 			),
-			instanceCustomIndexAndMask                     = (0xFF << 24) | u32(obj.mesh_index),
-			instanceShaderBindingTableRecordOffsetAndFlags = (u32(
-					vk.GeometryInstanceFlagsKHR{.TRIANGLE_FACING_CULL_DISABLE},
-				) <<
-				24) | 0,
+			instanceCustomIndex                    = u32(obj.mesh_index),
+			mask                                   = 0xFF,
+			instanceShaderBindingTableRecordOffset = 0,
+			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
+			accelerationStructureReference         = u64(
+				get_blas_device_address(rt_builder.as[obj.mesh_index], device.logical_device.ptr),
+			),
 		}
 
 		append(&tlas, ray_inst)
@@ -60,47 +62,34 @@ build_tlas :: proc(
 
 	count_instance := u32(len(instances))
 
-	cmd := device_begin_single_time_commands(device, device.command_pool)
-	defer device_end_single_time_commands(device, device.command_pool, cmd)
-
 	instances_buffer: Buffer
 	buffer_init_with_staging_buffer(
 		&instances_buffer,
 		device,
 		raw_data(instances),
-		size_of(vk.AccelerationStructureKHR),
-		1,
+		size_of(vk.AccelerationStructureInstanceKHR),
+		int(count_instance),
 		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 	)
+	{
+		cmd := device_begin_single_time_commands(device, device.command_pool)
+		defer device_end_single_time_commands(device, device.command_pool, cmd)
 
-	memory_barrier := vk.MemoryBarrier2 {
-		sType         = .MEMORY_BARRIER_2,
-		srcStageMask  = {.TRANSFER},
-		dstStageMask  = {.ACCELERATION_STRUCTURE_BUILD_KHR},
-		srcAccessMask = {.TRANSFER_WRITE},
-		dstAccessMask = {.ACCELERATION_STRUCTURE_WRITE_KHR},
+
+		scratch_buffer: Buffer
+		cmd_create_tlas(
+			rt_builder,
+			cmd,
+			count_instance,
+			buffer_get_device_address(instances_buffer, device^),
+			&scratch_buffer,
+			flags,
+			update,
+			false,
+			device,
+		)
 	}
 
-	dependency_info := vk.DependencyInfo {
-		sType              = .DEPENDENCY_INFO,
-		memoryBarrierCount = 1,
-		pMemoryBarriers    = &memory_barrier,
-	}
-
-	vk.CmdPipelineBarrier2(cmd, &dependency_info)
-
-	scratch_buffer: Buffer
-	cmd_create_tlas(
-		rt_builder,
-		cmd,
-		count_instance,
-		buffer_get_device_address(instances_buffer, device^),
-		&scratch_buffer,
-		flags,
-		update,
-		false,
-		device,
-	)
 }
 
 create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
@@ -109,8 +98,6 @@ create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, de
 	for &mesh in scene.meshes {
 		append(&inputs, mesh_to_geometry(&mesh, device^))
 	}
-	fmt.println(inputs)
-
 	build_blas(rt_builder, inputs[:], {.PREFER_FAST_TRACE}, device)
 }
 
@@ -152,7 +139,7 @@ build_blas :: proc(
 
 		total_size += info.size_info.accelerationStructureSize
 		max_scratch_size += max(info.size_info.buildScratchSize, max_scratch_size)
-		number_compactions += .ALLOW_COMPACTION in info.build_info.flags
+		number_compactions += 1 if .ALLOW_COMPACTION in info.build_info.flags else 0
 	}
 
 	scratch_buffer: Buffer
@@ -206,8 +193,8 @@ build_blas :: proc(
 			}
 
 			if query_pool != 0 {
-				cmd := device_begin_single_time_commands(device, device.command_pool)
-				defer device_end_single_time_commands(device, device.command_pool, cmd)
+				// cmd := device_begin_single_time_commands(device, device.command_pool)
+				// defer device_end_single_time_commands(device, device.command_pool, cmd)
 
 				// compact
 			}
@@ -358,7 +345,6 @@ cmd_create_blas :: proc(
 		infos[idx].build_info.dstAccelerationStructure = infos[idx].as.handle
 		infos[idx].build_info.scratchData.deviceAddress = scratch_address
 
-		fmt.println(infos[idx].range_info)
 		range_infos: [^]vk.AccelerationStructureBuildRangeInfoKHR = &infos[idx].range_info
 		vk.CmdBuildAccelerationStructuresKHR(cmd, 1, &infos[idx].build_info, &range_infos)
 
@@ -430,4 +416,16 @@ matrix_to_transform_matrix_khr :: proc(m: Mat4) -> vk.TransformMatrixKHR {
 	runtime.mem_copy(&out_matrix, &temp, size_of(vk.TransformMatrixKHR))
 
 	return out_matrix
+}
+
+get_blas_device_address :: proc(
+	as: Acceleration_Structure,
+	device: vk.Device,
+) -> vk.DeviceAddress {
+	info := vk.AccelerationStructureDeviceAddressInfoKHR {
+		sType                 = .ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR,
+		accelerationStructure = as.handle,
+	}
+
+	return vk.GetAccelerationStructureDeviceAddressKHR(device, &info)
 }

@@ -134,7 +134,6 @@ descriptor_manager_write_acceleration_structure :: proc(
 	index: u32,
 	binding: u32,
 	acceleration_structure: ^vk.AccelerationStructureKHR,
-	// layout: vk.ImageLayout,
 ) {
 	_descriptor_manager_write(manager, name, index, binding, acceleration_structure)
 }
@@ -189,7 +188,6 @@ _descriptor_manager_write :: proc(
 			accelerationStructureCount = 1,
 			pAccelerationStructures    = value,
 		}
-
 		write.pNext = &accel_info
 	}
 

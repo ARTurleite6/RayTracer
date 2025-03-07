@@ -34,7 +34,7 @@ graphics_stage_init :: proc(
 				sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 				stage = shader.type,
 				module = shader.module,
-				pName = strings.clone_to_cstring(shader.name, context.temp_allocator),
+				pName = strings.clone_to_cstring(shader.name),
 			},
 		)
 	}

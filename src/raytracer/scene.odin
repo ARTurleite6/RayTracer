@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:log"
 import glm "core:math/linalg"
 // import vma "external:odin-vma"
 import vk "vendor:vulkan"
@@ -109,7 +110,9 @@ scene_add_object :: proc(
 
 scene_create_as :: proc(scene: ^Scene, device: ^Device) {
 	create_bottom_level_as(&scene.rt_builder, scene^, device)
+	log.debugf("Created bottom level acceleration structure %v", scene.rt_builder)
 	create_top_level_as(&scene.rt_builder, scene^, device)
+	log.debugf("Created top level acceleration structure %v", scene.rt_builder)
 }
 
 // TODO: probably in the future would it be nice to change this, to not pass the pipeline_layout

@@ -3,7 +3,6 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
-import "core:os"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
@@ -33,6 +32,9 @@ Renderer :: struct {
 	shaders:         [dynamic]Shader,
 	ui_ctx:          UI_Context,
 
+	// ray tracing propertis
+	rt_properties:   vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+
 	// time
 	last_frame_time: f64,
 	delta_time:      f32,
@@ -41,6 +43,13 @@ Renderer :: struct {
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
+
+	renderer.rt_properties.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+	props := vk.PhysicalDeviceProperties2 {
+		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
+		pNext = &renderer.rt_properties,
+	}
+	vk.GetPhysicalDeviceProperties2(renderer.ctx.device.physical_device.ptr, &props)
 
 	window_set_window_user_pointer(window, renderer.window)
 	input_system_init(&renderer.input_system, allocator)
@@ -114,6 +123,52 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
 			},
 		)
+		render_graph_add_stage(&renderer.render_graph, stage)
+	}
+
+	{
+		stage := new(Raytracing_Stage)
+
+		shader: [3]Shader
+		shader_init(
+			&shader[0],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rgen.spv",
+			{.RAYGEN_KHR},
+		)
+		shader_init(
+			&shader[1],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rmiss.spv",
+			{.MISS_KHR},
+		)
+		shader_init(
+			&shader[2],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rchit.spv",
+			{.CLOSEST_HIT_KHR},
+		)
+
+		raytracing_init(stage, "raytracing", shader[:], renderer.rt_properties)
+
+		descriptor_layout := descriptor_manager_get_descriptor_layout(
+			renderer.ctx.descriptor_manager,
+			"raytracing_main",
+		)
+
+		camera_layout := descriptor_manager_get_descriptor_layout(
+			renderer.ctx.descriptor_manager,
+			"camera",
+		)
+		render_stage_use_descriptor_layout(stage, descriptor_layout.handle)
+		render_stage_use_descriptor_layout(stage, camera_layout.handle)
+
 		render_graph_add_stage(&renderer.render_graph, stage)
 	}
 
@@ -259,6 +314,7 @@ renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	case Key_Event:
 		input_system_register_key(&renderer.input_system, v.key, v.action)
 	case Resize_Event:
+		log.debugf("Received event %v", v)
 		window_resize(renderer.window, v.width, v.height)
 	case Mouse_Event:
 		renderer_handle_mouse(renderer, v.x, v.y)
@@ -270,7 +326,7 @@ renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 	if result != .SUCCESS {
 		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
-		os.exit(1)
+		return result
 	}
 	return nil
 }

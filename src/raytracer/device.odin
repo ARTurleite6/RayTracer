@@ -250,6 +250,5 @@ device_end_single_time_commands :: proc(
 	)
 
 	_ = vk_check(vk.QueueWaitIdle(device.graphics_queue), "Failed to wait on graphics queue")
-
 	vk.FreeCommandBuffers(device.logical_device.ptr, pool, 1, &cmd)
 }
