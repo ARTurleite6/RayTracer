@@ -2,6 +2,7 @@ package raytracer
 
 import "core:fmt"
 import "core:mem"
+import "core:slice"
 import vk "vendor:vulkan"
 _ :: fmt
 
@@ -21,6 +22,18 @@ Descriptor_Set_Write_Info :: union {
 	^vk.DescriptorBufferInfo,
 	^vk.DescriptorImageInfo,
 	^vk.AccelerationStructureKHR,
+}
+
+Descriptor_Set_Layout :: struct {
+	handle:   vk.DescriptorSetLayout,
+	bindings: map[u32]vk.DescriptorSetLayoutBinding,
+}
+
+Descriptor_Writer :: struct {
+	layout: Descriptor_Set_Layout,
+	pool:   vk.DescriptorPool,
+	device: ^Device,
+	writes: [dynamic]vk.WriteDescriptorSet,
 }
 
 descriptor_manager_init :: proc(
@@ -192,5 +205,72 @@ _descriptor_manager_write :: proc(
 	}
 
 	vk.UpdateDescriptorSets(manager.device.logical_device.ptr, 1, &write, 0, nil)
+	return .None
+}
+
+descriptor_set_layout_init :: proc(
+	layout: ^Descriptor_Set_Layout,
+	device: ^Device,
+	bindings: []vk.DescriptorSetLayoutBinding,
+	allocator := context.allocator,
+) -> Pipeline_Error {
+	layout.bindings = make(map[u32]vk.DescriptorSetLayoutBinding, allocator)
+
+	for binding in bindings {
+		layout.bindings[binding.binding] = binding
+	}
+
+	binding_values, _ := slice.map_values(layout.bindings, context.temp_allocator)
+	create_info := vk.DescriptorSetLayoutCreateInfo {
+		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		bindingCount = u32(len(binding_values)),
+		pBindings    = raw_data(binding_values),
+	}
+
+	if vk_check(
+		   vk.CreateDescriptorSetLayout(
+			   device.logical_device.ptr,
+			   &create_info,
+			   nil,
+			   &layout.handle,
+		   ),
+		   "Failed to create descriptor layout",
+	   ) !=
+	   .SUCCESS {
+		return .Layout_Creation_Failed
+	}
+
+	return nil
+}
+
+descriptor_layout_destroy :: proc(layout: ^Descriptor_Set_Layout, device: Device) {
+	delete(layout.bindings)
+	vk.DestroyDescriptorSetLayout(device.logical_device.ptr, layout.handle, nil)
+	layout^ = {}
+}
+
+descriptor_pool_init :: proc(
+	pool: ^vk.DescriptorPool,
+	device: ^Device,
+	pool_sizes: []vk.DescriptorPoolSize,
+	max_sets: u32,
+	flags: vk.DescriptorPoolCreateFlags = {},
+) -> Pipeline_Error {
+	create_info := vk.DescriptorPoolCreateInfo {
+		sType         = .DESCRIPTOR_POOL_CREATE_INFO,
+		poolSizeCount = u32(len(pool_sizes)),
+		pPoolSizes    = raw_data(pool_sizes),
+		maxSets       = max_sets,
+		flags         = flags,
+	}
+
+	if vk_check(
+		   vk.CreateDescriptorPool(device.logical_device.ptr, &create_info, nil, pool),
+		   "Failed to create descriptor pool",
+	   ) !=
+	   .SUCCESS {
+		return .Pool_Creation_Failed
+	}
+
 	return .None
 }
