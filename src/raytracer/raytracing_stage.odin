@@ -51,6 +51,17 @@ raytracing_init :: proc(
 	}
 }
 
+raytracing_destroy :: proc(stage: ^Raytracing_Stage, device: ^Device) {
+	for shader in stage.shaders {
+		delete(shader.pName)
+	}
+
+	delete(stage.shaders)
+	buffer_destroy(&stage.sbt.raygen_buffer, device)
+	buffer_destroy(&stage.sbt.miss_buffer, device)
+	buffer_destroy(&stage.sbt.hit_buffer, device)
+}
+
 raytracing_render :: proc(
 	graph: Render_Graph,
 	stage: ^Raytracing_Stage,

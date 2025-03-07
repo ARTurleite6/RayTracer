@@ -73,12 +73,15 @@ scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
 }
 
 scene_destroy :: proc(scene: ^Scene, device: ^Device) {
+	// for as in scene.rt_builder.as {
+	// }
+	delete(scene.rt_builder.as)
+
 	for &mesh in scene.meshes {
 		mesh_destroy(&mesh, device)
 	}
 	delete(scene.meshes)
 	delete(scene.objects)
-	// delete(scene.bottom_level_as)
 	scene^ = {}
 }
 

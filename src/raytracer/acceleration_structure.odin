@@ -29,7 +29,12 @@ Build_Acceleration_Structure :: struct {
 }
 
 create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
-	tlas := make([dynamic]vk.AccelerationStructureInstanceKHR, 0, len(scene.objects))
+	tlas := make(
+		[dynamic]vk.AccelerationStructureInstanceKHR,
+		0,
+		len(scene.objects),
+		context.temp_allocator,
+	)
 
 	for obj in scene.objects {
 		ray_inst := vk.AccelerationStructureInstanceKHR {
@@ -93,7 +98,7 @@ build_tlas :: proc(
 }
 
 create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
-	inputs := make([dynamic]Bottom_Level_Input, 0, len(scene.meshes))
+	inputs := make([dynamic]Bottom_Level_Input, 0, len(scene.meshes), context.temp_allocator)
 
 	for &mesh in scene.meshes {
 		append(&inputs, mesh_to_geometry(&mesh, device^))
@@ -107,7 +112,7 @@ build_blas :: proc(
 	flags: vk.BuildAccelerationStructureFlagsKHR,
 	device: ^Device,
 ) {
-	build_infos := make([]Build_Acceleration_Structure, len(inputs))
+	build_infos := make([]Build_Acceleration_Structure, len(inputs), context.temp_allocator)
 
 	n_blas := u32(len(inputs))
 	total_size: vk.DeviceSize

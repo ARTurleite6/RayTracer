@@ -68,20 +68,6 @@ image_view_init :: proc(image_view: ^vk.ImageView, image: Image, ctx: ^Vulkan_Co
 		vk.CreateImageView(ctx.device.logical_device.ptr, &create_info, nil, image_view),
 		"Failed to create ray tracing image view",
 	)
-
-	// cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-	// defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-
-	// image_transition(
-	// 	cmd,
-	// 	image = image.handle,
-	// 	old_layout = .UNDEFINED,
-	// 	new_layout = .GENERAL,
-	// 	src_access = {},
-	// 	dst_access = {},
-	// 	src_stage = {.ALL_COMMANDS},
-	// 	dst_stage = {.ALL_COMMANDS},
-	// )
 }
 
 image_view_destroy :: proc(img_view: vk.ImageView, ctx: Vulkan_Context) {

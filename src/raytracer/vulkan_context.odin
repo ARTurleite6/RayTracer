@@ -109,7 +109,11 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 
 	swapchain_manager_destroy(&ctx.swapchain_manager)
 
+	image_destroy(&ctx.raytracing_image, ctx^)
+	vk.DestroyImageView(ctx.device.logical_device.ptr, ctx.raytracing_image_view, nil)
+
 	device_destroy(ctx.device)
+	free(ctx.device)
 }
 
 ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.AccelerationStructureKHR) {

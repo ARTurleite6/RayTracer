@@ -79,7 +79,7 @@ render_graph_init :: proc(
 
 render_graph_destroy :: proc(graph: ^Render_Graph) {
 	for stage in graph.stages {
-		render_stage_destroy(stage, graph.device^)
+		render_stage_destroy(stage, graph.device)
 	}
 	delete(graph.stages)
 	graph.stages = nil
@@ -127,14 +127,16 @@ render_stage_init :: proc(
 	stage.variant = variant
 }
 
-render_stage_destroy :: proc(stage: ^Render_Stage, device: Device) {
+render_stage_destroy :: proc(stage: ^Render_Stage, device: ^Device) {
 	switch v in stage.variant {
 	case ^Graphics_Stage:
-		graphics_stage_destroy(v, device)
+		// graphics_stage_destroy(v, device^)
 		free(v)
 	case ^UI_Stage:
 		free(v)
 	case ^Raytracing_Stage:
+		// 	raytracing_destroy(v, device)
+		free(v)
 	}
 	delete(stage.reads)
 	delete(stage.descriptor_layouts)

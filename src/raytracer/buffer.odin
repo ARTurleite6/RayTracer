@@ -128,14 +128,12 @@ buffer_init_with_staging_buffer :: proc(
 buffer_destroy :: proc(buffer: ^Buffer, device: ^Device) {
 	if buffer.mapped_data != nil {
 		vma.unmap_memory(device.allocator, buffer.allocation)
-		buffer.mapped_data = nil
 	}
 
 	if buffer.handle != 0 {
 		vma.destroy_buffer(device.allocator, buffer.handle, buffer.allocation)
-		buffer.handle = 0
-		buffer.allocation = nil
 	}
+	buffer^ = {}
 }
 
 buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {

@@ -50,7 +50,8 @@ descriptor_manager_init :: proc(
 
 descriptor_manager_destroy :: proc(manager: ^Descriptor_Set_Manager) {
 	for _, &d in manager.descriptor_sets {
-		vk.DestroyDescriptorSetLayout(manager.device.logical_device.ptr, d.layout.handle, nil)
+		descriptor_layout_destroy(&d.layout, manager.device.logical_device.ptr)
+		delete(d.sets)
 	}
 	delete(manager.descriptor_sets)
 
@@ -243,9 +244,9 @@ descriptor_set_layout_init :: proc(
 	return nil
 }
 
-descriptor_layout_destroy :: proc(layout: ^Descriptor_Set_Layout, device: Device) {
+descriptor_layout_destroy :: proc(layout: ^Descriptor_Set_Layout, device: vk.Device) {
 	delete(layout.bindings)
-	vk.DestroyDescriptorSetLayout(device.logical_device.ptr, layout.handle, nil)
+	vk.DestroyDescriptorSetLayout(device, layout.handle, nil)
 	layout^ = {}
 }
 

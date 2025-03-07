@@ -194,13 +194,14 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
 	render_graph_destroy(&renderer.render_graph)
-	// scene_destroy(&renderer.scene, renderer.ctx.device)
+	scene_destroy(&renderer.scene, renderer.ctx.device)
+	input_system_destroy(&renderer.input_system)
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
 	delete(renderer.shaders)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
-	window_destroy(renderer.window^, renderer.ctx.device.instance.ptr)
+	window_destroy(renderer.window^)
 	ctx_destroy(&renderer.ctx)
 }
 

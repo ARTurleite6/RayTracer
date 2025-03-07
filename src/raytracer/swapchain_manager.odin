@@ -69,6 +69,7 @@ swapchain_manager_init :: proc(
 		return create_err
 	}
 
+
 	return nil
 }
 
@@ -125,6 +126,8 @@ swapchain_init :: proc(
 swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	vkb.swapchain_destroy_image_views(manager.handle, manager.image_views)
 	vkb.destroy_swapchain(manager.handle)
+
+	vk.DestroySurfaceKHR(manager.device.instance.ptr, manager.surface, nil)
 	delete(manager.images)
 	delete(manager.image_views)
 
