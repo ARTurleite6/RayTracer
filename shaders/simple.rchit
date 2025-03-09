@@ -48,7 +48,7 @@ void main()
     const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
     payload.color = mat.albedo;
-    payload.emission = mat.emission_color * mat.emission_power;
+    payload.material = mat;
     payload.hitPosition = worldPos;
     payload.hitNormal = worldNrm;
     payload.hit = true;

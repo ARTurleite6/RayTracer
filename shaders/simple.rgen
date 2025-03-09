@@ -80,7 +80,8 @@ void main() {
         }
 
         throughput *= payload.color;
-        finalColor += payload.emission;
+        Material mat = payload.material;
+        finalColor += mat.emission_color * mat.emission_power;
 
         rayOrigin = payload.hitPosition;
 

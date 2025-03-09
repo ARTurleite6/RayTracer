@@ -1,17 +1,17 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : enable
 
-struct RayPayload {
-    vec3 color;
-    vec3 emission;
-    vec3 hitPosition;
-    vec3 hitNormal;
-    bool hit;
-};
-
 struct Material {
     vec3 albedo;
     vec3 emission_color;
     float emission_power;
+};
+
+struct RayPayload {
+    vec3 color;
+    Material material;
+    vec3 hitPosition;
+    vec3 hitNormal;
+    bool hit;
 };
 
 struct ObjectData {
