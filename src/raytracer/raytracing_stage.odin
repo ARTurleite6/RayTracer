@@ -2,6 +2,7 @@ package raytracer
 
 import "base:runtime"
 import "core:fmt"
+import glm "core:math/linalg"
 import "core:mem/tlsf"
 import "core:strings"
 import vma "external:odin-vma"
@@ -101,10 +102,16 @@ raytracing_render :: proc(
 	vk.CmdPushConstants(
 		cmd,
 		stage.pipeline.layout,
-		{.CLOSEST_HIT_KHR, .MISS_KHR},
+		{.RAYGEN_KHR},
 		0,
 		size_of(Raytracing_Push_Constant),
-		&Raytracing_Push_Constant{clear_color = {0.2, 0.2, 0.2}},
+		&Raytracing_Push_Constant {
+			clear_color = {0.2, 0.2, 0.2},
+			light_pos = glm.vector_normalize(Vec3{-1.0, -4.0, -1.0}),
+			light_intensity = 1,
+			ambient_strength = 0.1,
+			accumulation_frame = render_data.renderer.accumulation_frame,
+		},
 	)
 
 	vk.CmdBindPipeline(cmd, .RAY_TRACING_KHR, stage.pipeline.handle)
@@ -159,22 +166,24 @@ raytracing_render :: proc(
 		{.TRANSFER_READ},
 	)
 
-	copy_region := vk.ImageCopy {
-		srcSubresource = {{.COLOR}, 0, 0, 1},
-		dstSubresource = {{.COLOR}, 0, 0, 1},
-		extent         = {extent.width, extent.height, 1},
+	blit_region := vk.ImageBlit {
+		srcSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
+		srcOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(extent.width), i32(extent.height), 1}},
+		dstSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
+		dstOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(extent.width), i32(extent.height), 1}},
 	}
 
-	vk.CmdCopyImage(
+	// Perform blit operation
+	vk.CmdBlitImage(
 		cmd,
 		storage_image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
 		1,
-		&copy_region,
+		&blit_region,
+		.LINEAR, // Use LINEAR for better quality conversion
 	)
-
 	image_transition_layout(cmd, swapchain_image, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR)
 
 	// Transition ray tracing output image back to general layout

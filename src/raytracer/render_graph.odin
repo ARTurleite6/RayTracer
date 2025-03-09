@@ -19,7 +19,6 @@ Color_Attachment :: struct {
 
 Render_Stage :: struct {
 	name:               string,
-	reads:              [dynamic]Render_Resource,
 	descriptor_layouts: [dynamic]vk.DescriptorSetLayout,
 	push_constants:     [dynamic]vk.PushConstantRange,
 	color_attachments:  [dynamic]Color_Attachment,
@@ -43,10 +42,6 @@ Vertex_Buffer_Binding :: struct {
 	value:                 u32,
 	binding_description:   vk.VertexInputBindingDescription,
 	attribute_description: []vk.VertexInputAttributeDescription,
-}
-
-Render_Resource :: union {
-	Buffer,
 }
 
 Pipeline_Error :: enum {
@@ -120,7 +115,6 @@ render_stage_init :: proc(
 	allocator := context.allocator,
 ) {
 	stage.name = name
-	stage.reads = make([dynamic]Render_Resource, allocator)
 	stage.descriptor_layouts = make([dynamic]vk.DescriptorSetLayout, allocator)
 	stage.push_constants = make([dynamic]vk.PushConstantRange, allocator)
 	stage.color_attachments = make([dynamic]Color_Attachment, allocator)
@@ -138,7 +132,6 @@ render_stage_destroy :: proc(stage: ^Render_Stage, device: ^Device) {
 		// 	raytracing_destroy(v, device)
 		free(v)
 	}
-	delete(stage.reads)
 	delete(stage.descriptor_layouts)
 	delete(stage.push_constants)
 	delete(stage.color_attachments)
@@ -182,7 +175,7 @@ record_command_buffer :: proc(
 ) {
 	switch v in stage.variant {
 	case ^Graphics_Stage:
-	// graphics_stage_render(graph, v, cmd, image_index, render_data)
+		graphics_stage_render(graph, v, cmd, image_index, render_data)
 	case ^UI_Stage:
 		ui_stage_render(graph, v, cmd, image_index, render_data)
 	case ^Raytracing_Stage:

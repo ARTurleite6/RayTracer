@@ -84,6 +84,7 @@ device_init :: proc(
 		)
 		vkb.selector_add_required_extension(&selector, vk.KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)
 		vkb.selector_set_minimum_version(&selector, vk.API_VERSION_1_3)
+		vkb.selector_set_required_features(&selector, {shaderInt64 = true})
 		vkb.selector_set_required_features_12(&selector, {bufferDeviceAddress = true})
 		vkb.selector_set_required_features_13(
 			&selector,

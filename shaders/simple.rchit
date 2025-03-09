@@ -1,34 +1,22 @@
-/* Copyright (c) 2019-2024, Sascha Willems
- *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Licensed under the Apache License, Version 2.0 the "License";
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_GOOGLE_include_directive : enable
 
-struct Material {
-    vec3 albedo;
+#include "ray_common.glsl"
+
+hitAttributeEXT vec2 attribs;
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
+
+layout(buffer_reference, scalar) buffer Vertices {
+    Vertex v[];
 };
 
-struct ObjectData {
-    uint material_index;
+layout(buffer_reference, scalar) buffer Indices {
+    ivec3 indices[];
 };
-
-layout(location = 0) rayPayloadInEXT vec3 payload;
 
 layout(set = 2, binding = 0, scalar) buffer MaterialsBuffer {
     Material materials[];
@@ -42,5 +30,26 @@ void main()
 {
     ObjectData object = objects[gl_InstanceCustomIndexEXT];
     Material mat = materials[object.material_index];
-    payload = mat.albedo;
+
+    Vertices vert = Vertices(object.vertex_address);
+    Indices indices = Indices(object.index_address);
+
+    ivec3 ind = indices.indices[gl_PrimitiveID];
+
+    Vertex v0 = vert.v[ind.x];
+    Vertex v1 = vert.v[ind.y];
+    Vertex v2 = vert.v[ind.z];
+
+    const vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+    const vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
+    vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
+
+    const vec3 norm = v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z;
+    const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
+
+    payload.color = mat.albedo;
+    payload.emission = mat.emission_color * mat.emission_power;
+    payload.hitPosition = worldPos;
+    payload.hitNormal = worldNrm;
+    payload.hit = true;
 }

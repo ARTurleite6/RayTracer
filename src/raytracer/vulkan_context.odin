@@ -78,7 +78,7 @@ vulkan_context_init :: proc(
 	ctx_descriptor_sets_init(ctx)
 
 	{
-		image_init(&ctx.raytracing_image, ctx, .B8G8R8A8_UNORM, ctx.swapchain_manager.extent)
+		image_init(&ctx.raytracing_image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
 		image_view_init(&ctx.raytracing_image_view, ctx.raytracing_image, ctx)
 
 		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
@@ -146,6 +146,7 @@ ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.Acceleratio
 		0,
 		tlas,
 	)
+
 	descriptor_manager_write_image(
 		&ctx.descriptor_manager,
 		"raytracing_main",

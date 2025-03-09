@@ -22,22 +22,23 @@ Render_Error :: union {
 }
 
 Renderer :: struct {
-	ctx:             Vulkan_Context,
-	window:          ^Window,
-	scene:           Scene,
-	camera:          Camera,
-	render_graph:    Render_Graph,
-	input_system:    Input_System,
+	ctx:                Vulkan_Context,
+	window:             ^Window,
+	scene:              Scene,
+	camera:             Camera,
+	render_graph:       Render_Graph,
+	input_system:       Input_System,
 	// TODO: probably move this in the future
-	shaders:         [dynamic]Shader,
-	ui_ctx:          UI_Context,
+	shaders:            [dynamic]Shader,
+	ui_ctx:             UI_Context,
 
 	// ray tracing propertis
-	rt_properties:   vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	rt_properties:      vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 
 	// time
-	last_frame_time: f64,
-	delta_time:      f32,
+	last_frame_time:    f64,
+	delta_time:         f32,
+	accumulation_frame: u32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
@@ -124,7 +125,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
 			},
 		)
-		render_graph_add_stage(&renderer.render_graph, stage)
+		// render_graph_add_stage(&renderer.render_graph, stage)
 	}
 
 	{
@@ -181,7 +182,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		render_stage_use_push_constant_range(
 			stage,
 			vk.PushConstantRange {
-				stageFlags = {.MISS_KHR, .CLOSEST_HIT_KHR},
+				stageFlags = {.RAYGEN_KHR},
 				offset = 0,
 				size = size_of(Raytracing_Push_Constant),
 			},
@@ -227,6 +228,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
 	move_camera := input_system_is_mouse_key_pressed(renderer.input_system, .MOUSE_BUTTON_2)
 	if move_camera {
+		renderer.accumulation_frame = 0
 		window_set_input_mode(renderer.window^, .Locked)
 	} else {
 		window_set_input_mode(renderer.window^, .Normal)
@@ -250,27 +252,38 @@ renderer_update :: proc(renderer: ^Renderer) {
 	glfw.PollEvents()
 	window_update(renderer.window^)
 
+	moved: bool
 	if input_system_is_key_pressed(renderer.input_system, .W) {
+		moved = true
 		camera_move(&renderer.camera, .Front, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .S) {
+		moved = true
 		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .D) {
+		moved = true
 		camera_move(&renderer.camera, .Right, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .A) {
+		moved = true
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Space) {
+		moved = true
 		camera_move(&renderer.camera, .Up, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Left_Shift) {
+		moved = true
 		camera_move(&renderer.camera, .Down, renderer.delta_time)
 	}
 
 	if input_system_is_key_pressed(renderer.input_system, .Q) {
 		window_set_should_close(renderer.window^)
+	}
+
+	if moved {
+		renderer.accumulation_frame = 0
 	}
 }
 
@@ -311,6 +324,8 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, cmd, image_index)
+
+	renderer.accumulation_frame += 1
 }
 
 @(private = "file")
@@ -333,7 +348,6 @@ renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	case Key_Event:
 		input_system_register_key(&renderer.input_system, v.key, v.action)
 	case Resize_Event:
-		log.debugf("Received event %v", v)
 		window_resize(renderer.window, v.width, v.height)
 	case Mouse_Event:
 		renderer_handle_mouse(renderer, v.x, v.y)

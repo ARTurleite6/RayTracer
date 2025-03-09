@@ -10,11 +10,11 @@ Image :: struct {
 }
 
 image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, extent: vk.Extent2D) {
-	image.format = .B8G8R8A8_UNORM
+	image.format = format
 	image_info := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,
 		imageType = .D2,
-		format = .B8G8R8A8_UNORM,
+		format = image.format,
 		extent = {width = extent.width, height = extent.height, depth = 1},
 		mipLevels = 1,
 		arrayLayers = 1,

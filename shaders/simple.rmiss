@@ -17,14 +17,13 @@
 
 #version 460
 #extension GL_EXT_ray_tracing : enable
+#extension GL_GOOGLE_include_directive : enable
 
-layout(location = 0) rayPayloadInEXT vec3 payload;
+#include "ray_common.glsl"
 
-layout(push_constant) uniform Push {
-    vec3 clear_color;
-} push;
+layout(location = 0) rayPayloadInEXT RayPayload payload;
 
 void main()
 {
-    payload = push.clear_color * 0.8;
+    payload.hit = false;
 }
