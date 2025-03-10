@@ -15,22 +15,25 @@ UI_Stage :: struct {
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
-	builder := &Descriptor_Pool_Builder{}
-	descriptor_pool_builder_init(builder, device)
-	descriptor_pool_builder_set_max_sets(builder, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .SAMPLER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .COMBINED_IMAGE_SAMPLER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .SAMPLED_IMAGE, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_IMAGE, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_TEXEL_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_TEXEL_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_BUFFER, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .UNIFORM_BUFFER_DYNAMIC, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .STORAGE_BUFFER_DYNAMIC, 1000)
-	descriptor_pool_builder_add_pool_size(builder, .INPUT_ATTACHMENT, 1000)
-	descriptor_pool_builder_set_flags(builder, {.FREE_DESCRIPTOR_SET})
-	ctx.pool, _ = descriptor_pool_build(builder)
+	descriptor_pool_init(
+		&ctx.pool,
+		device,
+		{
+			{.SAMPLER, 1000},
+			{.COMBINED_IMAGE_SAMPLER, 1000},
+			{.SAMPLED_IMAGE, 1000},
+			{.STORAGE_IMAGE, 1000},
+			{.UNIFORM_TEXEL_BUFFER, 1000},
+			{.STORAGE_TEXEL_BUFFER, 1000},
+			{.UNIFORM_BUFFER, 1000},
+			{.STORAGE_BUFFER, 1000},
+			{.UNIFORM_BUFFER_DYNAMIC, 1000},
+			{.STORAGE_BUFFER_DYNAMIC, 1000},
+			{.INPUT_ATTACHMENT, 1000},
+		},
+		1000,
+		{.FREE_DESCRIPTOR_SET},
+	)
 
 	imgui.CreateContext()
 	imgui_vulkan.LoadFunctions(
@@ -78,6 +81,22 @@ ui_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .UNDEFINED,
+		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		src_stage = {.TOP_OF_PIPE},
+		dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		src_access = {},
+		dst_access = {.COLOR_ATTACHMENT_WRITE},
+	)
+
+	begin_render_pass(graph, ui_stage, cmd, image_index)
+
+	imgui_vulkan.NewFrame()
+	imgui_glfw.NewFrame()
+	imgui.NewFrame()
 
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
@@ -92,17 +111,71 @@ ui_stage_render :: proc(
 
 	render_statistics(render_data.renderer.scene)
 
-	render_scene_properties(render_data.renderer.scene)
+	render_scene_properties(
+		&render_data.renderer.scene,
+		render_data.descriptor_manager,
+		render_data.renderer.ctx.device,
+	)
 
 
 	imgui.Render()
 	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+
+	end_render_pass(graph, cmd, image_index)
+
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		new_layout = .PRESENT_SRC_KHR,
+		src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		dst_stage = {.BOTTOM_OF_PIPE},
+		src_access = {.COLOR_ATTACHMENT_WRITE},
+		dst_access = {},
+	)
 }
 
 @(private = "file")
-render_scene_properties :: proc(scene: Scene) {
+render_scene_properties :: proc(
+	scene: ^Scene,
+	descriptor_manager: ^Descriptor_Set_Manager,
+	device: ^Device,
+) {
 	if imgui.Begin("Scene Properties") {
-		if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+		if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
+			@(static) selected_material := -1
+			if imgui.BeginListBox("##MaterialList", {0, 100}) {
+				for material, i in scene.materials {
+					is_selected := selected_material == i
+					if imgui.Selectable(
+						strings.clone_to_cstring(material.name, context.temp_allocator),
+						is_selected,
+					) {
+						selected_material = i
+					}
+
+					if is_selected {
+						imgui.SetItemDefaultFocus()
+					}
+				}
+				imgui.EndListBox()
+			}
+			if selected_material >= 0 && selected_material < len(scene.materials) {
+				material := &scene.materials[selected_material]
+
+				imgui.Separator()
+				// imgui.Text("Albedo")
+				albedo := material.albedo
+				if imgui.ColorPicker3("Albedo", &albedo) {
+					material.albedo = albedo
+
+					scene_update_material(scene, selected_material, device, descriptor_manager)
+				}
+			}
+		}
+
+
+		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1
 
 			if imgui.BeginListBox("##ObjectList", {0, 100}) {

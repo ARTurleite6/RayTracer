@@ -31,7 +31,11 @@ vertex_buffer_init :: proc(buffer: ^Buffer, device: ^Device, vertices: []Vertex)
 		raw_data(vertices),
 		size_of(Vertex),
 		len(vertices),
-		{.VERTEX_BUFFER},
+		{
+			.VERTEX_BUFFER,
+			.SHADER_DEVICE_ADDRESS,
+			.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+		},
 	) or_return
 
 	return .None
@@ -124,32 +128,35 @@ buffer_init_with_staging_buffer :: proc(
 buffer_destroy :: proc(buffer: ^Buffer, device: ^Device) {
 	if buffer.mapped_data != nil {
 		vma.unmap_memory(device.allocator, buffer.allocation)
-		buffer.mapped_data = nil
 	}
 
 	if buffer.handle != 0 {
 		vma.destroy_buffer(device.allocator, buffer.handle, buffer.allocation)
-		buffer.handle = 0
-		buffer.allocation = nil
 	}
+	buffer^ = {}
 }
 
-buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> Buffer_Error {
+buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {
 	if result := vk_check(
 		vma.map_memory(device.allocator, buffer.allocation, &buffer.mapped_data),
 		"Failed to map buffer",
 	); result != .SUCCESS {
-		return .Mapping_Failed
+		return nil, .Mapping_Failed
 	}
 
-	return .None
+	return buffer.mapped_data, .None
 }
 
 buffer_unmap :: proc(buffer: ^Buffer, device: ^Device) {
 	vma.unmap_memory(device.allocator, buffer.allocation)
 }
 
-buffer_write :: proc(buffer: ^Buffer, data: rawptr, size := vk.WHOLE_SIZE) {
+buffer_write :: proc(
+	buffer: ^Buffer,
+	data: rawptr,
+	size := vk.WHOLE_SIZE,
+	offset: vk.DeviceSize = 0,
+) {
 	assert(buffer.mapped_data != nil, "Buffer must be mapped before writing to it")
 
 	if size == vk.WHOLE_SIZE {
@@ -164,4 +171,13 @@ buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
 		vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size),
 		"Failed to upload data to uniform buffer",
 	)
+}
+
+buffer_get_device_address :: proc(buffer: Buffer, device: Device) -> vk.DeviceAddress {
+	address_info := vk.BufferDeviceAddressInfo {
+		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
+		buffer = buffer.handle,
+	}
+
+	return vk.GetBufferDeviceAddress(device.logical_device.ptr, &address_info)
 }

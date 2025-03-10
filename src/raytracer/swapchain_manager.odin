@@ -6,15 +6,14 @@ import vk "vendor:vulkan"
 _ :: fmt
 
 Swapchain_Manager :: struct {
-	device:        ^Device,
-	handle:        ^vkb.Swapchain,
-	surface:       vk.SurfaceKHR,
-	frame_manager: Frame_Manager,
-	images:        []vk.Image,
-	image_views:   []vk.ImageView,
-	extent:        vk.Extent2D,
-	format:        vk.Format,
-	present_mode:  vk.PresentModeKHR,
+	device:       ^Device,
+	handle:       ^vkb.Swapchain,
+	surface:      vk.SurfaceKHR,
+	images:       []vk.Image,
+	image_views:  []vk.ImageView,
+	extent:       vk.Extent2D,
+	format:       vk.Format,
+	present_mode: vk.PresentModeKHR,
 }
 
 Swapchain_Config :: struct {
@@ -70,6 +69,7 @@ swapchain_manager_init :: proc(
 		return create_err
 	}
 
+
 	return nil
 }
 
@@ -84,6 +84,8 @@ swapchain_init :: proc(
 	if !ok {
 		return .Creation_Failed
 	}
+
+	vkb.swapchain_builder_add_image_usage_flags(&builder, {.TRANSFER_DST})
 
 	defer vkb.destroy_swapchain_builder(&builder)
 
@@ -118,95 +120,18 @@ swapchain_init :: proc(
 	manager.extent = manager.handle.extent
 	manager.format = manager.handle.image_format
 	manager.present_mode = manager.handle.present_mode
-
-	if resizing {
-		frame_manager_handle_resize(&manager.frame_manager) or_return
-	} else {
-		frame_manager_init(&manager.frame_manager, manager.device) or_return
-	}
-
 	return nil
 }
 
 swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
-	frame_manager_destroy(&manager.frame_manager)
 	vkb.swapchain_destroy_image_views(manager.handle, manager.image_views)
 	vkb.destroy_swapchain(manager.handle)
+
+	vk.DestroySurfaceKHR(manager.device.instance.ptr, manager.surface, nil)
 	delete(manager.images)
 	delete(manager.image_views)
-	manager.images = nil
-	manager.image_views = nil
-}
 
-swapchain_present :: proc(
-	manager: ^Swapchain_Manager,
-	command_buffers: []vk.CommandBuffer,
-	image_index: u32,
-) -> Swapchain_Error {
-	frame := frame_manager_get_frame(&manager.frame_manager)
-	{ 	// submit to graphics queue
-		submit_info := vk.SubmitInfo {
-			sType                = .SUBMIT_INFO,
-			waitSemaphoreCount   = 1,
-			pWaitSemaphores      = &frame.sync.image_available,
-			pWaitDstStageMask    = raw_data(
-				[]vk.PipelineStageFlags{{vk.PipelineStageFlag.COLOR_ATTACHMENT_OUTPUT}},
-			),
-			commandBufferCount   = u32(len(command_buffers)),
-			pCommandBuffers      = raw_data(command_buffers),
-			signalSemaphoreCount = 1,
-			pSignalSemaphores    = &frame.sync.render_finished,
-		}
-		_ = vk_check(
-			vk.QueueSubmit(
-				manager.device.graphics_queue,
-				1,
-				&submit_info,
-				frame.sync.in_flight_fence,
-			),
-			"Failed to submit to graphics queue",
-		)
-	}
-
-	{ 	// present
-		image_index := image_index
-		present_info := vk.PresentInfoKHR {
-			sType              = .PRESENT_INFO_KHR,
-			waitSemaphoreCount = 1,
-			pWaitSemaphores    = &frame.sync.render_finished,
-			swapchainCount     = 1,
-			pSwapchains        = &manager.handle.ptr,
-			pImageIndices      = &image_index,
-		}
-
-		result := vk_check(
-			vk.QueuePresentKHR(manager.device.present_queue, &present_info),
-			"Failed to present",
-		)
-		#partial switch result {
-		case .SUCCESS:
-		case .ERROR_OUT_OF_DATE_KHR:
-			return .Out_Of_Date
-		case .SUBOPTIMAL_KHR:
-			return .Suboptimal_Surface
-		}
-
-		frame_manager_advance(&manager.frame_manager)
-	}
-
-	return nil
-}
-
-swapchain_manager_get_image :: proc(
-	manager: Swapchain_Manager,
-	image_index: u32,
-) -> (
-	image: vk.Image,
-	image_view: vk.ImageView,
-) {
-	assert(int(image_index) < len(manager.images), "Invalid image index")
-
-	return manager.images[image_index], manager.image_views[image_index]
+	manager^ = {}
 }
 
 swapchain_recreate :: proc(
@@ -216,8 +141,6 @@ swapchain_recreate :: proc(
 ) -> (
 	err: Swapchain_Error,
 ) {
-	_ = vk_check(vk.DeviceWaitIdle(manager.device.logical_device.ptr), "Failed to wait on device")
-
 	old_swapchain := manager.handle
 	old_images := manager.images
 	old_image_views := manager.image_views
@@ -279,31 +202,4 @@ swapchain_acquire_next_image :: proc(
 	}
 
 	return
-}
-
-image_transition :: proc(cmd: vk.CommandBuffer, transition: Image_Transition) {
-	barrier := vk.ImageMemoryBarrier2 {
-		sType = .IMAGE_MEMORY_BARRIER_2,
-		srcStageMask = transition.src_stage,
-		srcAccessMask = transition.src_access,
-		dstStageMask = transition.dst_stage,
-		dstAccessMask = transition.dst_access,
-		oldLayout = transition.old_layout,
-		newLayout = transition.new_layout,
-		image = transition.image,
-		subresourceRange = {
-			aspectMask = {.COLOR},
-			baseMipLevel = 0,
-			levelCount = 1,
-			baseArrayLayer = 0,
-			layerCount = 1,
-		},
-	}
-
-	dependency_info := vk.DependencyInfo {
-		sType                   = .DEPENDENCY_INFO,
-		imageMemoryBarrierCount = 1,
-		pImageMemoryBarriers    = &barrier,
-	}
-	vk.CmdPipelineBarrier2(cmd, &dependency_info)
 }

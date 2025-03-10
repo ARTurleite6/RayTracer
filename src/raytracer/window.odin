@@ -60,10 +60,7 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 	return
 }
 
-window_destroy :: proc(window: Window, instance: vk.Instance) {
-	if window.surface != 0 {
-		vk.DestroySurfaceKHR(instance, window.surface, nil)
-	}
+window_destroy :: proc(window: Window) {
 	glfw.DestroyWindow(window.handle)
 	glfw.Terminate()
 }

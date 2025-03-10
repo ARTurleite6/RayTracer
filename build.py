@@ -8,12 +8,35 @@ build_odin_commands = {
     'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -debug"
   }
 
+shaders = [
+    {
+        "src": "shaders/simple.vert",
+        "out": "shaders/vert.spv",
+    },
+    {
+        "src": "shaders/simple.frag",
+        "out": "shaders/frag.spv",
+    },
+    {
+        "src": "shaders/simple.rgen",
+        "out": "shaders/rgen.spv",
+    },
+    {
+        "src": "shaders/simple.rmiss",
+        "out": "shaders/rmiss.spv",
+    },
+    {
+        "src": "shaders/simple.rchit",
+        "out": "shaders/rchit.spv",
+    }
+]
+
 def build_shaders():
     print("Building shaders...")
-    result = subprocess.run(["glslc", "shaders/simple.vert", "-o", "shaders/vert.spv"], capture_output=True, text=True)
-    result = subprocess.run(["glslc", "shaders/simple.frag", "-o", "shaders/frag.spv"], capture_output=True, text=True)
-    print("Output:", result.stdout)
-    print("Error:", result.stderr)
+    for shader in shaders:
+        result = subprocess.run(["glslc", "--target-env=vulkan1.2", shader["src"], "-o", shader["out"]], capture_output=True, text=True)
+        print("Output:", result.stdout)
+        print("Error:", result.stderr)
 
 def main():
     parser = OptionParser()

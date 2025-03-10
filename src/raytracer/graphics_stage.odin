@@ -1,20 +1,43 @@
 package raytracer
 
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 import vk "vendor:vulkan"
+_ :: fmt
 
 Graphics_Stage :: struct {
 	using base:      Render_Stage,
 	pipeline:        Pipeline,
 	shaders:         [dynamic]vk.PipelineShaderStageCreateInfo,
-	vertex_bindings: [dynamic]Vertex_Buffer_Binding,
+	vertex_bindings: []Vertex_Buffer_Binding,
 	format:          vk.Format,
 }
 
-graphics_stage_init :: proc(stage: ^Graphics_Stage, name: string, allocator := context.allocator) {
+graphics_stage_init :: proc(
+	stage: ^Graphics_Stage,
+	name: string,
+	shaders: []Shader,
+	format: vk.Format,
+	vertex_bindings: []Vertex_Buffer_Binding = {},
+	allocator := context.allocator,
+) {
 	render_stage_init(stage, name, stage, allocator = allocator)
-	stage.vertex_bindings = make([dynamic]Vertex_Buffer_Binding, allocator)
+	stage.format = format
+
+	stage.vertex_bindings = slice.clone(vertex_bindings, allocator)
+
+	for shader in shaders {
+		append(
+			&stage.shaders,
+			vk.PipelineShaderStageCreateInfo {
+				sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+				stage = shader.type,
+				module = shader.module,
+				pName = strings.clone_to_cstring(shader.name),
+			},
+		)
+	}
 }
 
 graphics_stage_destroy :: proc(stage: ^Graphics_Stage, device: Device) {
@@ -27,39 +50,6 @@ graphics_stage_destroy :: proc(stage: ^Graphics_Stage, device: Device) {
 	stage.vertex_bindings = nil
 }
 
-graphics_stage_use_vertex_buffer_binding :: proc(
-	stage: ^Graphics_Stage,
-	binding: u32,
-	attribute_description: []vk.VertexInputAttributeDescription,
-	binding_description: vk.VertexInputBindingDescription,
-) {
-	append(
-		&stage.vertex_bindings,
-		Vertex_Buffer_Binding {
-			value = binding,
-			attribute_description = attribute_description,
-			binding_description = binding_description,
-		},
-	)
-}
-
-
-graphics_stage_use_format :: proc(stage: ^Graphics_Stage, format: vk.Format) {
-	stage.format = format
-}
-
-graphics_stage_use_shader :: proc(stage: ^Graphics_Stage, shader: Shader) {
-	append(
-		&stage.shaders,
-		vk.PipelineShaderStageCreateInfo {
-			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-			stage = shader.type,
-			module = shader.module,
-			pName = strings.clone_to_cstring(shader.name, context.temp_allocator),
-		},
-	)
-}
-
 graphics_stage_render :: proc(
 	graph: Render_Graph,
 	graphics_stage: ^Graphics_Stage,
@@ -67,23 +57,50 @@ graphics_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .UNDEFINED,
+		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		src_stage = {.TOP_OF_PIPE},
+		dst_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		src_access = {},
+		dst_access = {.COLOR_ATTACHMENT_WRITE},
+	)
+	begin_render_pass(graph, graphics_stage, cmd, image_index)
 
 	vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
-	if render_data.descriptor_set != 0 {
-		descriptor_set := render_data.descriptor_set
-		vk.CmdBindDescriptorSets(
-			cmd,
-			.GRAPHICS,
-			graphics_stage.pipeline.layout,
-			0,
-			1,
-			&descriptor_set,
-			0,
-			nil,
-		)
-	}
+	descriptor_set := descriptor_manager_get_descriptor_set_index(
+		render_data.descriptor_manager^,
+		"camera",
+		render_data.frame_index,
+	)
+
+	vk.CmdBindDescriptorSets(
+		cmd,
+		.GRAPHICS,
+		graphics_stage.pipeline.layout,
+		0,
+		1,
+		&descriptor_set,
+		0,
+		nil,
+	)
 
 	scene_draw(&render_data.renderer.scene, cmd, graphics_stage.pipeline.layout)
+
+	end_render_pass(graph, cmd, image_index)
+
+	image_transition(
+		cmd,
+		image = graph.swapchain.images[image_index],
+		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
+		new_layout = .PRESENT_SRC_KHR,
+		src_stage = {.COLOR_ATTACHMENT_OUTPUT},
+		dst_stage = {.BOTTOM_OF_PIPE},
+		src_access = {.COLOR_ATTACHMENT_WRITE},
+		dst_access = {},
+	)
 }
 
 
