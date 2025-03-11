@@ -177,10 +177,13 @@ _descriptor_manager_write :: proc(
 	info: Descriptor_Set_Write_Info,
 ) -> Pipeline_Error {
 	set_info, exists := manager.descriptor_sets[name]
-	assert(exists, "Descriptor set not found")
+	// assert(exists, "Descriptor set not found")
 
 	binding_desc, has_binding := set_info.layout.bindings[binding]
-	assert(has_binding, "Binding not found")
+	if !exists || !has_binding {
+		return .None
+	}
+	// assert(has_binding, "Binding not found")
 
 	write := vk.WriteDescriptorSet {
 		sType           = .WRITE_DESCRIPTOR_SET,

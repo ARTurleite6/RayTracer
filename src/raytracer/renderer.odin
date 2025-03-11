@@ -32,7 +32,7 @@ Renderer :: struct {
 	shaders:            [dynamic]Shader,
 	ui_ctx:             UI_Context,
 
-	// ray tracing propertis
+	// ray tracing properties
 	rt_properties:      vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 
 	// time
@@ -68,6 +68,10 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	)
 
 	{ 	// create shaders
+		data := #load("../../shaders/vert.spv", []u8)
+		shader2: Shader2
+		shader_init2(&shader2, renderer.ctx.device, transmute([]u32)data, len(data))
+
 		shader: Shader
 		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/vert.spv", {.VERTEX})
 		append(&renderer.shaders, shader)
@@ -84,7 +88,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 
 	render_graph_init(
 		&renderer.render_graph,
-		renderer.ctx.device,
+		&renderer.ctx,
 		&renderer.ctx.swapchain_manager,
 		allocator,
 	)
@@ -292,11 +296,6 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer.window.framebuffer_resized = false
 		renderer_handle_resizing(renderer)
 	}
-
-	cmd, image_index, err := ctx_begin_frame(&renderer.ctx)
-
-	if err != nil do return
-
 	ubo := &Global_Ubo {
 		view = renderer.camera.view,
 		projection = renderer.camera.proj,
@@ -306,10 +305,11 @@ renderer_render :: proc(renderer: ^Renderer) {
 	ctx_update_uniform_buffer(&renderer.ctx, ubo)
 
 
-	_ = vk_check(
-		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
-		"Failed to begin command buffer",
-	)
+	image_index, err := ctx_begin_frame(&renderer.ctx)
+
+	cmd := ctx_request_command_buffer(&renderer.ctx)
+
+	if err != nil do return
 
 	render_graph_render(
 		&renderer.render_graph,

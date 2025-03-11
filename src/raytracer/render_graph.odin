@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:fmt"
-import "core:slice"
 import vk "vendor:vulkan"
 _ :: fmt
 
@@ -56,25 +55,23 @@ Pipeline_Error :: enum {
 
 
 Render_Graph :: struct {
-	stages:    [dynamic]^Render_Stage,
-	swapchain: ^Swapchain_Manager,
-	device:    ^Device,
+	stages: [dynamic]^Render_Stage,
+	ctx:    ^Vulkan_Context,
 }
 
 render_graph_init :: proc(
 	graph: ^Render_Graph,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 	swapchain: ^Swapchain_Manager,
 	allocator := context.allocator,
 ) {
 	graph.stages = make([dynamic]^Render_Stage, allocator)
-	graph.swapchain = swapchain
-	graph.device = device
+	graph.ctx = ctx
 }
 
 render_graph_destroy :: proc(graph: ^Render_Graph) {
 	for stage in graph.stages {
-		render_stage_destroy(stage, graph.device)
+		render_stage_destroy(stage, graph.ctx.device)
 	}
 	delete(graph.stages)
 	graph.stages = nil
@@ -88,10 +85,10 @@ render_graph_compile :: proc(graph: ^Render_Graph) {
 	for stage in graph.stages {
 		switch v in stage.variant {
 		case ^Graphics_Stage:
-			build_graphics_pipeline(v, graph.device^)
+			build_graphics_pipeline(v, graph.ctx.device^)
 		case ^UI_Stage:
 		case ^Raytracing_Stage:
-			create_rt_pipeline(v, graph.device)
+			create_rt_pipeline(v, graph.ctx.device)
 		// for now we dont have nothing in here
 		}
 	}
@@ -180,70 +177,5 @@ record_command_buffer :: proc(
 		ui_stage_render(graph, v, cmd, image_index, render_data)
 	case ^Raytracing_Stage:
 		raytracing_render(graph, v, cmd, image_index, render_data)
-	}
-}
-
-@(private)
-begin_render_pass :: proc(
-	render_graph: Render_Graph,
-	stage: Render_Stage,
-	cmd: vk.CommandBuffer,
-	image_index: u32,
-) {
-	image_view := render_graph.swapchain.image_views[image_index]
-
-	context.user_ptr = &image_view
-	color_attachments := slice.mapper(
-		stage.color_attachments[:],
-		proc(ca: Color_Attachment) -> vk.RenderingAttachmentInfo {
-			return color_attachment_to_rendering_info(ca, (cast(^vk.ImageView)context.user_ptr)^)
-		},
-		context.temp_allocator,
-	)
-
-	extent := render_graph.swapchain.extent
-	rendering_info := vk.RenderingInfo {
-		sType = .RENDERING_INFO,
-		renderArea = {offset = {0, 0}, extent = extent},
-		layerCount = 1,
-		colorAttachmentCount = u32(len(color_attachments)),
-		pColorAttachments = raw_data(color_attachments),
-	}
-
-	vk.CmdBeginRendering(cmd, &rendering_info)
-
-	viewport := vk.Viewport {
-		minDepth = 0,
-		maxDepth = 1,
-		width    = f32(extent.width),
-		height   = f32(extent.height),
-	}
-
-	scissor := vk.Rect2D {
-		extent = extent,
-	}
-
-	vk.CmdSetViewport(cmd, 0, 1, &viewport)
-	vk.CmdSetScissor(cmd, 0, 1, &scissor)
-}
-
-@(private)
-end_render_pass :: proc(graph: Render_Graph, cmd: vk.CommandBuffer, image_index: u32) {
-	vk.CmdEndRendering(cmd)
-}
-
-@(private = "file")
-@(require_results)
-color_attachment_to_rendering_info :: proc(
-	attachment: Color_Attachment,
-	image_view: vk.ImageView,
-) -> vk.RenderingAttachmentInfo {
-	return vk.RenderingAttachmentInfo {
-		sType = .RENDERING_ATTACHMENT_INFO,
-		imageView = image_view,
-		imageLayout = attachment.image_layout,
-		loadOp = attachment.load_op,
-		storeOp = attachment.store_op,
-		clearValue = attachment.clear_value,
 	}
 }

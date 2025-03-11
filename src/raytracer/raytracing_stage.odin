@@ -70,6 +70,9 @@ raytracing_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
+	cmd := Command_Buffer {
+		buffer = cmd,
+	}
 	descs := [?]vk.DescriptorSet {
 		descriptor_manager_get_descriptor_set_index(
 			render_data.descriptor_manager^,
@@ -89,7 +92,7 @@ raytracing_render :: proc(
 	}
 
 	vk.CmdBindDescriptorSets(
-		cmd,
+		cmd.buffer,
 		.RAY_TRACING_KHR,
 		stage.pipeline.layout,
 		0,
@@ -100,7 +103,7 @@ raytracing_render :: proc(
 	)
 
 	vk.CmdPushConstants(
-		cmd,
+		cmd.buffer,
 		stage.pipeline.layout,
 		{.RAYGEN_KHR},
 		0,
@@ -114,7 +117,7 @@ raytracing_render :: proc(
 		},
 	)
 
-	vk.CmdBindPipeline(cmd, .RAY_TRACING_KHR, stage.pipeline.handle)
+	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, stage.pipeline.handle)
 
 	handle_size_aligned := align_up(
 		stage.rt_properties.shaderGroupHandleSize,
@@ -122,19 +125,19 @@ raytracing_render :: proc(
 	)
 
 	raygen_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.raygen_buffer, graph.device^),
+		deviceAddress = buffer_get_device_address(stage.sbt.raygen_buffer, graph.ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.miss_buffer, graph.device^),
+		deviceAddress = buffer_get_device_address(stage.sbt.miss_buffer, graph.ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.hit_buffer, graph.device^),
+		deviceAddress = buffer_get_device_address(stage.sbt.hit_buffer, graph.ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
@@ -142,7 +145,7 @@ raytracing_render :: proc(
 
 	extent := render_data.renderer.ctx.swapchain_manager.extent
 	vk.CmdTraceRaysKHR(
-		cmd,
+		cmd.buffer,
 		&raygen_sbt_entry,
 		&miss_sbt_entry,
 		&hit_sbt_entry,
@@ -154,9 +157,19 @@ raytracing_render :: proc(
 
 	storage_image := render_data.renderer.ctx.raytracing_image.handle
 	swapchain_image := render_data.renderer.ctx.swapchain_manager.images[image_index]
-	image_transition_layout(cmd, swapchain_image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
-	image_transition_layout_stage_access(
+	ctx_transition_swapchain_image(
+		graph.ctx^,
 		cmd,
+		.UNDEFINED,
+		.TRANSFER_DST_OPTIMAL,
+		{.TOP_OF_PIPE},
+		{.TRANSFER},
+		{},
+		{.TRANSFER_WRITE},
+	)
+	// image_transition_layout(cmd, swapchain_image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+	image_transition_layout_stage_access(
+		cmd.buffer,
 		storage_image,
 		.GENERAL,
 		.TRANSFER_SRC_OPTIMAL,
@@ -175,7 +188,7 @@ raytracing_render :: proc(
 
 	// Perform blit operation
 	vk.CmdBlitImage(
-		cmd,
+		cmd.buffer,
 		storage_image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
@@ -184,11 +197,20 @@ raytracing_render :: proc(
 		&blit_region,
 		.LINEAR, // Use LINEAR for better quality conversion
 	)
-	image_transition_layout(cmd, swapchain_image, .TRANSFER_DST_OPTIMAL, .PRESENT_SRC_KHR)
+	ctx_transition_swapchain_image(
+		graph.ctx^,
+		cmd,
+		.TRANSFER_DST_OPTIMAL,
+		.PRESENT_SRC_KHR,
+		{.TRANSFER},
+		{.BOTTOM_OF_PIPE},
+		{.TRANSFER_WRITE},
+		{},
+	)
 
 	// Transition ray tracing output image back to general layout
 	image_transition_layout_stage_access(
-		cmd,
+		cmd.buffer,
 		storage_image,
 		.TRANSFER_SRC_OPTIMAL,
 		.GENERAL,

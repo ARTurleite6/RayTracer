@@ -81,9 +81,12 @@ ui_stage_render :: proc(
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	image_transition(
+	cmd := Command_Buffer {
+		buffer = cmd,
+	}
+	ctx_transition_swapchain_image(
+		graph.ctx^,
 		cmd,
-		image = graph.swapchain.images[image_index],
 		old_layout = .UNDEFINED,
 		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		src_stage = {.TOP_OF_PIPE},
@@ -92,7 +95,8 @@ ui_stage_render :: proc(
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
 
-	begin_render_pass(graph, ui_stage, cmd, image_index)
+	info := ctx_get_swapchain_render_pass(graph.ctx^, load_op = .LOAD)
+	command_buffer_begin_render_pass(&cmd, &info)
 
 	imgui_vulkan.NewFrame()
 	imgui_glfw.NewFrame()
@@ -119,13 +123,13 @@ ui_stage_render :: proc(
 
 
 	imgui.Render()
-	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd)
+	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd.buffer)
 
-	end_render_pass(graph, cmd, image_index)
+	command_buffer_end_render_pass(&cmd)
 
-	image_transition(
+	ctx_transition_swapchain_image(
+		graph.ctx^,
 		cmd,
-		image = graph.swapchain.images[image_index],
 		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		new_layout = .PRESENT_SRC_KHR,
 		src_stage = {.COLOR_ATTACHMENT_OUTPUT},

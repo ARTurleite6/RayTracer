@@ -1,9 +1,9 @@
 package raytracer
 
-import "core:fmt"
+import "core:log"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
-_ :: fmt
+_ :: log
 
 MAX_FRAMES_IN_FLIGHT :: 1
 
@@ -30,6 +30,7 @@ Vulkan_Context :: struct {
 	//frames
 	frames:                [MAX_FRAMES_IN_FLIGHT]Frame_Data,
 	current_frame:         int,
+	current_image:         u32,
 
 	// raytracing images
 	raytracing_image:      Image,
@@ -37,8 +38,7 @@ Vulkan_Context :: struct {
 }
 
 Frame_Data :: struct {
-	command_pool:    vk.CommandPool,
-	primary_buffer:  vk.CommandBuffer,
+	command_pool:    Command_Pool,
 	render_finished: vk.Semaphore,
 	image_available: vk.Semaphore,
 	in_flight_fence: vk.Fence,
@@ -116,6 +116,68 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 	free(ctx.device)
 }
 
+ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> vk.CommandBuffer {
+	frame := &ctx.frames[ctx.current_frame]
+	cmd := command_pool_request_command_buffer(&frame.command_pool)
+
+	begin_info := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+		flags = {.ONE_TIME_SUBMIT},
+	}
+
+	vk.BeginCommandBuffer(cmd, &begin_info)
+
+	return cmd
+}
+
+@(require_results)
+ctx_get_swapchain_render_pass :: proc(
+	ctx: Vulkan_Context,
+	clear_value: Vec4 = {},
+	load_op: vk.AttachmentLoadOp = .CLEAR,
+	store_op: vk.AttachmentStoreOp = .STORE,
+) -> vk.RenderingInfo {
+	image_view := ctx.swapchain_manager.image_views[ctx.current_image]
+
+	// TODO: probably find a more suitable way of doing this without allocating memory
+	color_attachment := new(vk.RenderingAttachmentInfo, context.temp_allocator)
+	color_attachment^ = {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = image_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp = load_op,
+		storeOp = store_op,
+		clearValue = {color = {float32 = clear_value}},
+	}
+
+	return vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = ctx.swapchain_manager.extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = color_attachment,
+	}
+}
+
+ctx_transition_swapchain_image :: proc(
+	ctx: Vulkan_Context,
+	cmd: Command_Buffer,
+	old_layout, new_layout: vk.ImageLayout,
+	src_stage, dst_stage: vk.PipelineStageFlags2,
+	src_access, dst_access: vk.AccessFlags2,
+) {
+	image_transition(
+		cmd.buffer,
+		image = ctx.swapchain_manager.images[ctx.current_image],
+		old_layout = old_layout,
+		new_layout = new_layout,
+		src_stage = src_stage,
+		dst_stage = dst_stage,
+		src_access = src_access,
+		dst_access = dst_access,
+	)
+}
+
 ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.AccelerationStructureKHR) {
 	layout: Descriptor_Set_Layout
 
@@ -177,13 +239,7 @@ ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.Acceleratio
 	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "scene_data", layout)
 }
 
-ctx_begin_frame :: proc(
-	ctx: ^Vulkan_Context,
-) -> (
-	cmd: vk.CommandBuffer,
-	image_index: u32,
-	err: Render_Error,
-) {
+ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_Error) {
 	frame := &ctx.frames[ctx.current_frame]
 	device := ctx.device.logical_device.ptr
 
@@ -193,16 +249,16 @@ ctx_begin_frame :: proc(
 	)
 
 	result := swapchain_acquire_next_image(&ctx.swapchain_manager, frame.image_available) or_return
+	ctx.current_image = result.image_index
 
 	_ = vk_check(
 		vk.ResetFences(device, 1, &frame.in_flight_fence),
 		"Error reseting in_flight_fence",
 	)
 
-	cmd = frame.primary_buffer
-	_ = vk_check(vk.ResetCommandBuffer(cmd, {}), "Error reseting command buffer")
+	command_pool_begin(&frame.command_pool)
 
-	return cmd, result.image_index, nil
+	return result.image_index, nil
 }
 
 ctx_update_uniform_buffer :: proc(ctx: ^Vulkan_Context, data: rawptr) {
@@ -337,46 +393,11 @@ ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
 }
 
 frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
+	graphics_queue_index := vkb.device_get_queue_index(ctx.device.logical_device, .Graphics)
+
 	for &f in ctx.frames {
 		{ 	// Create command pool and buffer
-			pool_info := vk.CommandPoolCreateInfo {
-				sType            = .COMMAND_POOL_CREATE_INFO,
-				flags            = {.RESET_COMMAND_BUFFER},
-				queueFamilyIndex = vkb.device_get_queue_index(
-					ctx.device.logical_device,
-					.Graphics,
-				),
-			}
-
-			if result := vk_check(
-				vk.CreateCommandPool(
-					ctx.device.logical_device.ptr,
-					&pool_info,
-					nil,
-					&f.command_pool,
-				),
-				"Failed to create command pool",
-			); result != .SUCCESS {
-				return .Command_Pool_Creation_Failed
-			}
-
-			buffer_info := vk.CommandBufferAllocateInfo {
-				sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-				commandPool        = f.command_pool,
-				level              = .PRIMARY,
-				commandBufferCount = 1,
-			}
-
-			if result := vk_check(
-				vk.AllocateCommandBuffers(
-					ctx.device.logical_device.ptr,
-					&buffer_info,
-					&f.primary_buffer,
-				),
-				"Failed to Allocate command buffer",
-			); result != .SUCCESS {
-				return .Command_Buffer_Creation_Failed
-			}
+			command_pool_init(&f.command_pool, ctx.device, graphics_queue_index)
 		}
 
 		{ 	// Create sync objects
@@ -434,8 +455,7 @@ frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
 frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 	device := ctx.device.logical_device.ptr
 	for &f in ctx.frames {
-		vk.FreeCommandBuffers(device, f.command_pool, 1, &f.primary_buffer)
-		vk.DestroyCommandPool(device, f.command_pool, nil)
+		command_pool_destroy(&f.command_pool)
 		vk.DestroyFence(device, f.in_flight_fence, nil)
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)

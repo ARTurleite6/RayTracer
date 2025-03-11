@@ -53,13 +53,17 @@ graphics_stage_destroy :: proc(stage: ^Graphics_Stage, device: Device) {
 graphics_stage_render :: proc(
 	graph: Render_Graph,
 	graphics_stage: ^Graphics_Stage,
-	cmd: vk.CommandBuffer,
+	buffer: vk.CommandBuffer,
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	image_transition(
+	cmd := Command_Buffer {
+		buffer = buffer,
+	}
+
+	ctx_transition_swapchain_image(
+		graph.ctx^,
 		cmd,
-		image = graph.swapchain.images[image_index],
 		old_layout = .UNDEFINED,
 		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		src_stage = {.TOP_OF_PIPE},
@@ -67,9 +71,11 @@ graphics_stage_render :: proc(
 		src_access = {},
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
-	begin_render_pass(graph, graphics_stage, cmd, image_index)
 
-	vk.CmdBindPipeline(cmd, .GRAPHICS, graphics_stage.pipeline.handle)
+	info := ctx_get_swapchain_render_pass(graph.ctx^)
+	command_buffer_begin_render_pass(&cmd, &info)
+	command_buffer_bind_pipeline(&cmd, .GRAPHICS, graphics_stage.pipeline.handle)
+
 	descriptor_set := descriptor_manager_get_descriptor_set_index(
 		render_data.descriptor_manager^,
 		"camera",
@@ -77,7 +83,7 @@ graphics_stage_render :: proc(
 	)
 
 	vk.CmdBindDescriptorSets(
-		cmd,
+		cmd.buffer,
 		.GRAPHICS,
 		graphics_stage.pipeline.layout,
 		0,
@@ -87,13 +93,13 @@ graphics_stage_render :: proc(
 		nil,
 	)
 
-	scene_draw(&render_data.renderer.scene, cmd, graphics_stage.pipeline.layout)
+	scene_draw(&render_data.renderer.scene, cmd.buffer, graphics_stage.pipeline.layout)
 
-	end_render_pass(graph, cmd, image_index)
+	command_buffer_end_render_pass(&cmd)
 
-	image_transition(
+	ctx_transition_swapchain_image(
+		graph.ctx^,
 		cmd,
-		image = graph.swapchain.images[image_index],
 		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		new_layout = .PRESENT_SRC_KHR,
 		src_stage = {.COLOR_ATTACHMENT_OUTPUT},
