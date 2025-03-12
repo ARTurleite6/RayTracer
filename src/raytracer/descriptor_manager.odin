@@ -1,256 +1,143 @@
 package raytracer
 
 import "core:fmt"
-import "core:mem"
 import "core:slice"
 import vk "vendor:vulkan"
 _ :: fmt
 
 Descriptor_Set_Manager :: struct {
-	descriptor_sets: map[string]Descriptor_Set_Info,
-	pool:            vk.DescriptorPool,
-	device:          ^Device,
-	allocator:       mem.Allocator,
+	raytracing_descriptor_set, scene_descriptor_set, camera_descriptor_set: vk.DescriptorSetLayout,
+	pool:                                                                   vk.DescriptorPool,
+	device:                                                                 ^Device,
 }
 
-Descriptor_Set_Info :: struct {
-	sets:   []vk.DescriptorSet,
-	layout: Descriptor_Set_Layout,
-}
-
-Descriptor_Set_Write_Info :: union {
-	^vk.DescriptorBufferInfo,
-	^vk.DescriptorImageInfo,
-	^vk.AccelerationStructureKHR,
-}
-
-Descriptor_Set_Layout :: struct {
-	handle:   vk.DescriptorSetLayout,
-	bindings: map[u32]vk.DescriptorSetLayoutBinding,
-}
-
-Descriptor_Writer :: struct {
-	layout: Descriptor_Set_Layout,
-	pool:   vk.DescriptorPool,
-	device: ^Device,
-	writes: [dynamic]vk.WriteDescriptorSet,
-}
-
-descriptor_manager_init :: proc(
-	manager: ^Descriptor_Set_Manager,
-	device: ^Device,
-	pool: vk.DescriptorPool,
-	allocator := context.allocator,
-) {
-	manager.descriptor_sets = make(map[string]Descriptor_Set_Info, allocator)
+descriptor_set_manager2_init :: proc(manager: ^Descriptor_Set_Manager, device: ^Device) {
 	manager.device = device
-	manager.pool = pool
-	manager.allocator = allocator
-}
+	descriptor_pool_init(
+		&manager.pool,
+		manager.device,
+		{
+			vk.DescriptorPoolSize{type = .ACCELERATION_STRUCTURE_KHR, descriptorCount = 1},
+			vk.DescriptorPoolSize{type = .STORAGE_IMAGE, descriptorCount = 1},
+			vk.DescriptorPoolSize{type = .STORAGE_BUFFER, descriptorCount = 2},
+		},
+		1000,
+	)
+	{ 	// raytracing descriptor set layout
+		bindings := [?]vk.DescriptorSetLayoutBinding {
+			{ 	// Acceleration structure (TLAS)
+				binding         = 0,
+				descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+				descriptorCount = 1,
+				stageFlags      = {.RAYGEN_KHR},
+			},
+			{ 	// Output Image
+				binding         = 1,
+				descriptorType  = .STORAGE_IMAGE,
+				descriptorCount = 1,
+				stageFlags      = {.RAYGEN_KHR},
+			},
+		}
 
-descriptor_manager_destroy :: proc(manager: ^Descriptor_Set_Manager) {
-	for _, &d in manager.descriptor_sets {
-		descriptor_layout_destroy(&d.layout, manager.device.logical_device.ptr)
-		delete(d.sets)
+		create_info := vk.DescriptorSetLayoutCreateInfo {
+			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			bindingCount = len(bindings),
+			pBindings    = raw_data(bindings[:]),
+		}
+
+		vk.CreateDescriptorSetLayout(
+			manager.device.logical_device.ptr,
+			&create_info,
+			nil,
+			&manager.raytracing_descriptor_set,
+		)
 	}
-	delete(manager.descriptor_sets)
 
-	manager^ = {}
+	{ 	// scene descriptor set layout
+		bindings := [?]vk.DescriptorSetLayoutBinding {
+			{ 	// Acceleration structure (TLAS)
+				binding         = 0,
+				descriptorType  = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags      = {.CLOSEST_HIT_KHR},
+			},
+			{ 	// Output Image
+				binding         = 1,
+				descriptorType  = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags      = {.CLOSEST_HIT_KHR},
+			},
+		}
+
+		create_info := vk.DescriptorSetLayoutCreateInfo {
+			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			bindingCount = len(bindings),
+			pBindings    = raw_data(bindings[:]),
+		}
+
+		vk.CreateDescriptorSetLayout(
+			manager.device.logical_device.ptr,
+			&create_info,
+			nil,
+			&manager.scene_descriptor_set,
+		)
+	}
+
+	{ 	// Camera
+		bindings := [?]vk.DescriptorSetLayoutBinding {
+			{ 	// Camera
+				binding         = 0,
+				descriptorType  = .UNIFORM_BUFFER,
+				descriptorCount = 1,
+				stageFlags      = {.RAYGEN_KHR},
+			},
+		}
+
+		create_info := vk.DescriptorSetLayoutCreateInfo {
+			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			bindingCount = len(bindings),
+			pBindings    = raw_data(bindings[:]),
+		}
+
+		vk.CreateDescriptorSetLayout(
+			manager.device.logical_device.ptr,
+			&create_info,
+			nil,
+			&manager.camera_descriptor_set,
+		)
+	}
 }
 
-descriptor_manager_get_descriptor_set_index :: proc(
+descriptor_set_manager_get_descriptor_layouts :: proc(
 	manager: Descriptor_Set_Manager,
-	name: string,
-	index: u32,
-) -> vk.DescriptorSet {
-	return manager.descriptor_sets[name].sets[index]
-}
-
-descriptor_manager_get_descriptor_layout :: proc(
-	manager: Descriptor_Set_Manager,
-	name: string,
-) -> Descriptor_Set_Layout {
-	return manager.descriptor_sets[name].layout
-}
-
-descriptor_manager_register_descriptor_sets :: proc(
-	manager: ^Descriptor_Set_Manager,
-	name: string,
-	layout: Descriptor_Set_Layout,
-	size: int = 1,
-) -> (
-	err: Pipeline_Error,
-) {
-	if _, exists := manager.descriptor_sets[name]; exists {
-		return .Descriptor_Set_Creation_Failed
-	}
-
-	info := Descriptor_Set_Info {
-		layout = layout,
-		sets   = make([]vk.DescriptorSet, size, manager.allocator),
-	}
-
-	for i in 0 ..< size {
-		alloc_info := vk.DescriptorSetAllocateInfo {
-			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-			descriptorPool     = manager.pool,
-			descriptorSetCount = 1,
-			pSetLayouts        = &info.layout.handle,
-		}
-
-		if vk_check(
-			   vk.AllocateDescriptorSets(
-				   manager.device.logical_device.ptr,
-				   &alloc_info,
-				   &info.sets[i],
-			   ),
-			   "Failed to allocate descriptor sets",
-		   ) !=
-		   .SUCCESS {
-			return .Descriptor_Set_Creation_Failed
-		}
-
-	}
-
-	manager.descriptor_sets[name] = info
-
-	return .None
-}
-
-descriptor_manager_write_buffer :: proc(
-	manager: ^Descriptor_Set_Manager,
-	name: string,
-	index: u32,
-	binding: u32,
-	buffer: vk.Buffer,
-	range: vk.DeviceSize = vk.DeviceSize(vk.WHOLE_SIZE),
-	offset: vk.DeviceSize = 0,
-	// layout: vk.ImageLayout,
-) {
-	info := vk.DescriptorBufferInfo {
-		buffer = buffer,
-		offset = offset,
-		range  = range,
-	}
-
-	_descriptor_manager_write(manager, name, index, binding, &info)
-}
-
-descriptor_manager_write :: proc {
-	descriptor_manager_write_buffer,
-	descriptor_manager_write_image,
-	descriptor_manager_write_acceleration_structure,
-}
-
-descriptor_manager_write_acceleration_structure :: proc(
-	manager: ^Descriptor_Set_Manager,
-	name: string,
-	index: u32,
-	binding: u32,
-	acceleration_structure: ^vk.AccelerationStructureKHR,
-) {
-	_descriptor_manager_write(manager, name, index, binding, acceleration_structure)
-}
-
-descriptor_manager_write_image :: proc(
-	manager: ^Descriptor_Set_Manager,
-	name: string,
-	index: u32,
-	binding: u32,
-	image_view: vk.ImageView,
-	// layout: vk.ImageLayout,
-) {
-	info := vk.DescriptorImageInfo {
-		imageView   = image_view,
-		imageLayout = .GENERAL,
-	}
-
-	_descriptor_manager_write(manager, name, index, binding, &info)
-}
-
-@(private = "file")
-_descriptor_manager_write :: proc(
-	manager: ^Descriptor_Set_Manager,
-	name: string,
-	index: u32,
-	binding: u32,
-	info: Descriptor_Set_Write_Info,
-) -> Pipeline_Error {
-	set_info, exists := manager.descriptor_sets[name]
-	// assert(exists, "Descriptor set not found")
-
-	binding_desc, has_binding := set_info.layout.bindings[binding]
-	if !exists || !has_binding {
-		return .None
-	}
-	// assert(has_binding, "Binding not found")
-
-	write := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = set_info.sets[index],
-		dstBinding      = binding,
-		descriptorCount = 1,
-		descriptorType  = binding_desc.descriptorType,
-	}
-
-	accel_info: vk.WriteDescriptorSetAccelerationStructureKHR
-	switch value in info {
-	case ^vk.DescriptorImageInfo:
-		write.pImageInfo = value
-	case ^vk.DescriptorBufferInfo:
-		write.pBufferInfo = value
-	case ^vk.AccelerationStructureKHR:
-		accel_info = {
-			sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-			accelerationStructureCount = 1,
-			pAccelerationStructures    = value,
-		}
-		write.pNext = &accel_info
-	}
-
-	vk.UpdateDescriptorSets(manager.device.logical_device.ptr, 1, &write, 0, nil)
-	return .None
-}
-
-descriptor_set_layout_init :: proc(
-	layout: ^Descriptor_Set_Layout,
-	device: ^Device,
-	bindings: []vk.DescriptorSetLayoutBinding,
 	allocator := context.allocator,
-) -> Pipeline_Error {
-	layout.bindings = make(map[u32]vk.DescriptorSetLayoutBinding, allocator)
-
-	for binding in bindings {
-		layout.bindings[binding.binding] = binding
+) -> []vk.DescriptorSetLayout {
+	descriptors := [?]vk.DescriptorSetLayout {
+		manager.raytracing_descriptor_set,
+		manager.scene_descriptor_set,
+		manager.camera_descriptor_set,
 	}
-
-	binding_values, _ := slice.map_values(layout.bindings, context.temp_allocator)
-	create_info := vk.DescriptorSetLayoutCreateInfo {
-		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = u32(len(binding_values)),
-		pBindings    = raw_data(binding_values),
-	}
-
-	if vk_check(
-		   vk.CreateDescriptorSetLayout(
-			   device.logical_device.ptr,
-			   &create_info,
-			   nil,
-			   &layout.handle,
-		   ),
-		   "Failed to create descriptor layout",
-	   ) !=
-	   .SUCCESS {
-		return .Layout_Creation_Failed
-	}
-
-	return nil
+	return slice.clone(descriptors[:], allocator)
 }
 
-descriptor_layout_destroy :: proc(layout: ^Descriptor_Set_Layout, device: vk.Device) {
-	delete(layout.bindings)
-	vk.DestroyDescriptorSetLayout(device, layout.handle, nil)
-	layout^ = {}
+descriptor_set_manager_allocate_descriptor_sets :: proc(
+	manager: Descriptor_Set_Manager,
+	allocator := context.allocator,
+) -> (
+	result: []vk.DescriptorSet,
+) {
+	layouts := descriptor_set_manager_get_descriptor_layouts(manager, context.temp_allocator)
+	alloc_info := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = manager.pool,
+		descriptorSetCount = 2,
+		pSetLayouts        = raw_data(layouts[:]),
+	}
+
+	result = make([]vk.DescriptorSet, len(layouts))
+	vk.AllocateDescriptorSets(manager.device.logical_device.ptr, &alloc_info, raw_data(result))
+
+	return result
 }
 
 descriptor_pool_init :: proc(

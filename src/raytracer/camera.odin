@@ -3,6 +3,7 @@ package raytracer
 import "core:log"
 import "core:math"
 import glm "core:math/linalg"
+import vk "vendor:vulkan"
 _ :: log
 
 CAMERA_SPEED :: f32(5.0)
@@ -31,12 +32,20 @@ Camera :: struct {
 	// mouse movement
 	last_mouse_position:                    Vec2,
 	sensivity:                              f32,
+
+	// vulkan resources
+	ubo_buffers:                            [MAX_FRAMES_IN_FLIGHT]Buffer,
+	descriptor_set_layout:                  vk.DescriptorSetLayout,
+	descriptor_sets:                        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	device:                                 ^Device,
 }
 
 camera_init :: proc(
 	camera: ^Camera,
 	position: Vec3,
 	aspect: f32,
+	device: ^Device,
+	descriptor_pool: vk.DescriptorPool,
 	target: Vec3 = {0, 0, 0},
 	up: Vec3 = {0, 1, 0},
 	fov: f32 = 45,
@@ -52,14 +61,89 @@ camera_init :: proc(
 		far       = far,
 		speed     = CAMERA_SPEED,
 		sensivity = CAMERA_SENSIVITY,
+		device    = device,
 	}
 	camera_look_at(camera, target, up)
 	camera_update_matrices(camera)
+
+	for &b in camera.ubo_buffers {
+		buffer_init(&b, camera.device, size_of(Scene_UBO), 1, {.UNIFORM_BUFFER}, .Gpu_To_Cpu)
+		buffer_map(&b, camera.device)
+	}
+	binding := vk.DescriptorSetLayoutBinding {
+		binding         = 0,
+		descriptorType  = .UNIFORM_BUFFER,
+		descriptorCount = 1,
+		stageFlags      = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+	}
+
+	create_info := vk.DescriptorSetLayoutCreateInfo {
+		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		bindingCount = 1,
+		pBindings    = &binding,
+	}
+
+	vk.CreateDescriptorSetLayout(
+		device.logical_device.ptr,
+		&create_info,
+		nil,
+		&camera.descriptor_set_layout,
+	)
+
+	layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
+	for &layout in layouts {
+		layout = camera.descriptor_set_layout
+	}
+
+	alloc_info := vk.DescriptorSetAllocateInfo {
+		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+		descriptorPool     = descriptor_pool,
+		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+		pSetLayouts        = raw_data(layouts[:]),
+	}
+
+	vk.AllocateDescriptorSets(
+		camera.device.logical_device.ptr,
+		&alloc_info,
+		raw_data(camera.descriptor_sets[:]),
+	)
+
+	for _, i in camera.ubo_buffers {
+		buffer_info := vk.DescriptorBufferInfo {
+			buffer = camera.ubo_buffers[i].handle,
+			offset = 0,
+			range  = size_of(Scene_UBO),
+		}
+
+		write := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			dstSet          = camera.descriptor_sets[i],
+			dstBinding      = 0,
+			dstArrayElement = 0,
+			descriptorType  = .UNIFORM_BUFFER,
+			descriptorCount = 1,
+			pBufferInfo     = &buffer_info,
+		}
+
+		vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
+	}
 }
 
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.forward = glm.normalize(target - camera.position)
 	camera.right = glm.cross(camera.forward, camera.up)
+}
+
+camera_update_buffers :: proc(camera: ^Camera, current_frame: int) {
+	ubo_data := Scene_UBO {
+		view       = camera.view,
+		projection = camera.proj,
+	}
+
+	data := &ubo_data
+	buffer := &camera.ubo_buffers[current_frame]
+	buffer_write(buffer, data)
+	buffer_flush(buffer, camera.device^)
 }
 
 camera_update_aspect_ratio :: proc(camera: ^Camera, aspect_ratio: f32) {

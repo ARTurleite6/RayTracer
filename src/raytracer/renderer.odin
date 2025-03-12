@@ -22,29 +22,31 @@ Render_Error :: union {
 }
 
 Renderer :: struct {
-	ctx:                Vulkan_Context,
-	window:             ^Window,
-	scene:              Scene,
-	camera:             Camera,
-	render_graph:       Render_Graph,
-	input_system:       Input_System,
+	ctx:                    Vulkan_Context,
+	window:                 ^Window,
+	scene:                  Scene,
+	camera:                 Camera,
+	input_system:           Input_System,
 	// TODO: probably move this in the future
-	shaders:            [dynamic]Shader,
-	ui_ctx:             UI_Context,
+	shaders:                [dynamic]Shader,
 
 	// ray tracing properties
-	rt_properties:      vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	rt_properties:          vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	descriptor_set_manager: Descriptor_Set_Manager,
+	ui_ctx:                 UI_Context,
+	rt_ctx:                 Raytracing_Context,
 
 	// time
-	last_frame_time:    f64,
-	delta_time:         f32,
-	accumulation_frame: u32,
+	last_frame_time:        f64,
+	delta_time:             f32,
+	accumulation_frame:     u32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
 
+	descriptor_set_manager2_init(&renderer.descriptor_set_manager, renderer.ctx.device)
 	renderer.rt_properties.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
 	props := vk.PhysicalDeviceProperties2 {
 		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
@@ -67,30 +69,10 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.ctx.swapchain_manager.format,
 	)
 
-	{ 	// create shaders
-		shader: Shader
-		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/vert.spv", {.VERTEX})
-		append(&renderer.shaders, shader)
-
-		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/frag.spv", {.FRAGMENT})
-		append(&renderer.shaders, shader)
-	}
-
 	renderer.scene = create_scene(renderer.ctx.device)
 	scene_create_as(&renderer.scene, renderer.ctx.device)
 	scene_create_buffers(&renderer.scene, renderer.ctx.device)
-
-	ctx_create_rt_descriptor_set(&renderer.ctx, &renderer.scene.rt_builder.tlas.handle)
-
-	render_graph_init(
-		&renderer.render_graph,
-		&renderer.ctx,
-		&renderer.ctx.swapchain_manager,
-		allocator,
-	)
 	{
-		stage := new(Raytracing_Stage)
-
 		shader: [3]Shader
 		shader_init(
 			&shader[0],
@@ -117,49 +99,29 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			{.CLOSEST_HIT_KHR},
 		)
 
-		raytracing_init(stage, "raytracing", shader[:], renderer.rt_properties)
-
-		descriptor_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"raytracing_main",
-		)
-
-		camera_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"camera",
-		)
-
-		scene_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"scene_data",
-		)
-
-		scene_update_descriptor_writes(renderer.scene, &renderer.ctx.descriptor_manager)
-
-		render_stage_use_descriptor_layout(stage, descriptor_layout.handle)
-		render_stage_use_descriptor_layout(stage, camera_layout.handle)
-		render_stage_use_descriptor_layout(stage, scene_layout.handle)
-		render_stage_use_push_constant_range(
-			stage,
-			vk.PushConstantRange {
-				stageFlags = {.RAYGEN_KHR},
-				offset = 0,
-				size = size_of(Raytracing_Push_Constant),
-			},
-		)
-
-		render_graph_add_stage(&renderer.render_graph, stage)
+		// rt_init(
+		// 	&renderer.rt_ctx,
+		// 	&renderer.ctx,
+		// 	renderer.descriptor_set_manager,
+		// 	push_constants = {
+		// 		{stageFlags = {.RAYGEN_KHR}, offset = 0, size = size_of(Raytracing_Push_Constant)},
+		// 	},
+		// 	shaders = shader[:],
+		// )
 	}
 
-	render_graph_compile(&renderer.render_graph)
-
-	camera_init(&renderer.camera, position = {0, 0, -3}, aspect = window_aspect_ratio(window^))
+	camera_init(
+		&renderer.camera,
+		{0, 0, -3},
+		window_aspect_ratio(window^),
+		renderer.ctx.device,
+		renderer.descriptor_set_manager.pool,
+	)
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
-	render_graph_destroy(&renderer.render_graph)
 	scene_destroy(&renderer.scene, renderer.ctx.device)
 	input_system_destroy(&renderer.input_system)
 	for &shader in renderer.shaders {
@@ -239,31 +201,14 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer.window.framebuffer_resized = false
 		renderer_handle_resizing(renderer)
 	}
-	ubo := &Global_Ubo {
-		view = renderer.camera.view,
-		projection = renderer.camera.proj,
-		inverse_view = renderer.camera.inverse_view,
-		inverse_projection = renderer.camera.inverse_proj,
-	}
-	ctx_update_uniform_buffer(&renderer.ctx, ubo)
 
+	camera_update_buffers(&renderer.camera, renderer.ctx.current_frame)
 
 	image_index, err := ctx_begin_frame(&renderer.ctx)
 
 	cmd := ctx_request_command_buffer(&renderer.ctx)
 
 	if err != nil do return
-
-	render_graph_render(
-		&renderer.render_graph,
-		cmd,
-		image_index,
-		{
-			renderer = renderer,
-			descriptor_manager = &renderer.ctx.descriptor_manager,
-			frame_index = u32(renderer.ctx.current_frame),
-		},
-	)
 
 	ui_render(renderer.ctx, &Command_Buffer{buffer = cmd}, renderer)
 

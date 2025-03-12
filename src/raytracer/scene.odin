@@ -120,56 +120,6 @@ scene_create_buffers :: proc(scene: ^Scene, device: ^Device) -> (err: Buffer_Err
 	return scene_create_object_data_buffers(scene, device)
 }
 
-scene_update_descriptor_writes :: proc(scene: Scene, descriptor_manager: ^Descriptor_Set_Manager) {
-	descriptor_manager_write_buffer(
-		descriptor_manager,
-		"scene_data",
-		0,
-		0,
-		scene.material_buffer.handle,
-		vk.DeviceSize(vk.WHOLE_SIZE),
-	)
-
-	// Update object data buffer binding
-	descriptor_manager_write_buffer(
-		descriptor_manager,
-		"scene_data",
-		0,
-		1,
-		scene.object_data_buffer.handle,
-		vk.DeviceSize(vk.WHOLE_SIZE),
-	)
-}
-
-scene_update_material :: proc(
-	scene: ^Scene,
-	material_index: int,
-	device: ^Device,
-	descriptor_manager: ^Descriptor_Set_Manager = nil,
-) -> (
-	err: Buffer_Error,
-) {
-	assert(
-		material_index >= 0 && material_index <= len(scene.materials),
-		"material index not valid",
-	)
-	buffer_destroy(&scene.material_buffer, device)
-
-	scene_create_material_buffers(scene, device) or_return
-
-	if descriptor_manager != nil {
-		descriptor_manager_write_buffer(
-			descriptor_manager,
-			"scene_data",
-			0, // set index
-			0, // binding index for materials
-			scene.material_buffer.handle,
-			vk.DeviceSize(vk.WHOLE_SIZE),
-		)
-	}
-	return .None
-}
-
 scene_create_material_buffers :: proc(scene: ^Scene, device: ^Device) -> (err: Buffer_Error) {
 	Material_Data :: struct {
 		albedo:         Vec3,

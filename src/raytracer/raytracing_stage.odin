@@ -1,7 +1,7 @@
 package raytracer
 
 import "base:runtime"
-import "core:fmt"
+import "core:log"
 import glm "core:math/linalg"
 import "core:mem/tlsf"
 import "core:strings"
@@ -12,12 +12,32 @@ align_up :: proc(x, align: u32) -> u32 {
 	return u32(tlsf.align_up(uint(x), uint(align)))
 }
 
-Raytracing_Stage :: struct {
-	using base:    Render_Stage,
-	shaders:       []vk.PipelineShaderStageCreateInfo,
-	pipeline:      Pipeline,
-	rt_properties: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
-	sbt:           Shader_Binding_Table,
+// TODO: see if this is needed
+Render_Data :: struct {
+	renderer: ^Renderer,
+}
+
+Pipeline_Error :: enum {
+	None = 0,
+	Cache_Creation_Failed,
+	Layout_Creation_Failed,
+	Pipeline_Creation_Failed,
+	Descriptor_Set_Creation_Failed,
+	Pool_Creation_Failed,
+	Shader_Creation_Failed,
+}
+
+Pipeline :: struct {
+	handle: vk.Pipeline,
+	layout: vk.PipelineLayout,
+}
+
+Raytracing_Context :: struct {
+	pipeline:        Pipeline,
+	sbt:             Shader_Binding_Table,
+	rt_properties:   vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	descriptor_sets: []vk.DescriptorSet,
+	vk_ctx:          ^Vulkan_Context,
 }
 
 Shader_Binding_Table :: struct {
@@ -31,80 +51,125 @@ Stage_Indices :: enum {
 	Closest_Hit,
 }
 
-raytracing_init :: proc(
-	stage: ^Raytracing_Stage,
-	name: string,
+rt_init :: proc(
+	rt_ctx: ^Raytracing_Context,
+	vk_ctx: ^Vulkan_Context,
+	descriptor_manager: Descriptor_Set_Manager,
+	push_constants: []vk.PushConstantRange,
 	shaders: []Shader,
-	rt_properties: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 ) {
-	render_stage_init(stage, name, stage)
+	rt_ctx.vk_ctx = vk_ctx
+	device := rt_ctx.vk_ctx.device.logical_device.ptr
+	descriptor_layouts := descriptor_set_manager_get_descriptor_layouts(
+		descriptor_manager,
+		context.temp_allocator,
+	)
+	log.debug(descriptor_layouts)
 
-	stage.shaders = make([]vk.PipelineShaderStageCreateInfo, len(shaders))
-	stage.rt_properties = rt_properties
+	layout_create_info := vk.PipelineLayoutCreateInfo {
+		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+		setLayoutCount         = u32(len(descriptor_layouts)),
+		pSetLayouts            = raw_data(descriptor_layouts[:]),
+		pushConstantRangeCount = u32(len(push_constants)),
+		pPushConstantRanges    = raw_data(push_constants),
+	}
 
+	_ = vk_check(
+		vk.CreatePipelineLayout(device, &layout_create_info, nil, &rt_ctx.pipeline.layout),
+		"Failed to create pipeline layout",
+	)
+
+	// TODO: probably this should be appart of the setup on the raytracing_stage_init
+	groups := [?]vk.RayTracingShaderGroupCreateInfoKHR {
+		{
+			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+			type = .GENERAL,
+			generalShader = u32(Stage_Indices.Raygen),
+			closestHitShader = ~u32(0),
+			anyHitShader = ~u32(0),
+			intersectionShader = ~u32(0),
+		},
+		{
+			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+			type = .GENERAL,
+			generalShader = u32(Stage_Indices.Miss),
+			closestHitShader = ~u32(0),
+			anyHitShader = ~u32(0),
+			intersectionShader = ~u32(0),
+		},
+		{
+			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+			type = .TRIANGLES_HIT_GROUP,
+			generalShader = ~u32(0),
+			closestHitShader = u32(Stage_Indices.Closest_Hit),
+			anyHitShader = ~u32(0),
+			intersectionShader = ~u32(0),
+		},
+	}
+
+	shader_stages := make([]vk.PipelineShaderStageCreateInfo, len(shaders), context.temp_allocator)
 	for shader, i in shaders {
-		stage.shaders[i] = {
+		shader_stages[i] = {
 			sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			stage  = shader.type,
 			module = shader.module,
-			pName  = strings.clone_to_cstring(shader.name),
+			pName  = strings.clone_to_cstring(shader.name, context.temp_allocator),
 		}
 	}
-}
-
-raytracing_destroy :: proc(stage: ^Raytracing_Stage, device: ^Device) {
-	for shader in stage.shaders {
-		delete(shader.pName)
+	create_info := vk.RayTracingPipelineCreateInfoKHR {
+		sType                        = .RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+		stageCount                   = u32(len(shader_stages)),
+		pStages                      = raw_data(shader_stages),
+		groupCount                   = u32(len(groups)),
+		pGroups                      = raw_data(groups[:]),
+		maxPipelineRayRecursionDepth = 1,
+		layout                       = rt_ctx.pipeline.layout,
 	}
 
-	delete(stage.shaders)
-	buffer_destroy(&stage.sbt.raygen_buffer, device)
-	buffer_destroy(&stage.sbt.miss_buffer, device)
-	buffer_destroy(&stage.sbt.hit_buffer, device)
+	_ = vk_check(
+		vk.CreateRayTracingPipelinesKHR(
+			device,
+			0,
+			0,
+			1,
+			&create_info,
+			nil,
+			&rt_ctx.pipeline.handle,
+		),
+		"Failed to create raytracing pipeline",
+	)
+
+	rt_ctx.descriptor_sets = descriptor_set_manager_allocate_descriptor_sets(descriptor_manager)
+
+	rt_create_shader_binding_table(rt_ctx, rt_ctx.vk_ctx.device)
+}
+
+rt_destroy :: proc(rt_ctx: ^Raytracing_Context) {
+	buffer_destroy(&rt_ctx.sbt.raygen_buffer, rt_ctx.vk_ctx.device)
+	buffer_destroy(&rt_ctx.sbt.miss_buffer, rt_ctx.vk_ctx.device)
+	buffer_destroy(&rt_ctx.sbt.hit_buffer, rt_ctx.vk_ctx.device)
 }
 
 raytracing_render :: proc(
-	graph: Render_Graph,
-	stage: ^Raytracing_Stage,
-	cmd: vk.CommandBuffer,
+	rt_ctx: Raytracing_Context,
+	cmd: Command_Buffer,
 	image_index: u32,
 	render_data: Render_Data,
 ) {
-	cmd := Command_Buffer {
-		buffer = cmd,
-	}
-	descs := [?]vk.DescriptorSet {
-		descriptor_manager_get_descriptor_set_index(
-			render_data.descriptor_manager^,
-			"raytracing_main",
-			render_data.frame_index,
-		),
-		descriptor_manager_get_descriptor_set_index(
-			render_data.descriptor_manager^,
-			"camera",
-			render_data.frame_index,
-		),
-		descriptor_manager_get_descriptor_set_index(
-			render_data.descriptor_manager^,
-			"scene_data",
-			render_data.frame_index,
-		),
-	}
-
 	vk.CmdBindDescriptorSets(
 		cmd.buffer,
 		.RAY_TRACING_KHR,
-		stage.pipeline.layout,
+		rt_ctx.pipeline.layout,
 		0,
-		u32(len(descs)),
-		raw_data(descs[:]),
+		u32(len(rt_ctx.descriptor_sets)),
+		raw_data(rt_ctx.descriptor_sets),
 		0,
 		nil,
 	)
 
 	vk.CmdPushConstants(
 		cmd.buffer,
-		stage.pipeline.layout,
+		rt_ctx.pipeline.layout,
 		{.RAYGEN_KHR},
 		0,
 		size_of(Raytracing_Push_Constant),
@@ -117,27 +182,27 @@ raytracing_render :: proc(
 		},
 	)
 
-	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, stage.pipeline.handle)
+	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, rt_ctx.pipeline.handle)
 
 	handle_size_aligned := align_up(
-		stage.rt_properties.shaderGroupHandleSize,
-		stage.rt_properties.shaderGroupHandleAlignment,
+		rt_ctx.rt_properties.shaderGroupHandleSize,
+		rt_ctx.rt_properties.shaderGroupHandleAlignment,
 	)
 
 	raygen_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.raygen_buffer, graph.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt_ctx.sbt.raygen_buffer, rt_ctx.vk_ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.miss_buffer, graph.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt_ctx.sbt.miss_buffer, rt_ctx.vk_ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(stage.sbt.hit_buffer, graph.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt_ctx.sbt.hit_buffer, rt_ctx.vk_ctx.device^),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
@@ -158,7 +223,7 @@ raytracing_render :: proc(
 	storage_image := render_data.renderer.ctx.raytracing_image.handle
 	swapchain_image := render_data.renderer.ctx.swapchain_manager.images[image_index]
 	ctx_transition_swapchain_image(
-		graph.ctx^,
+		rt_ctx.vk_ctx^,
 		cmd,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
@@ -198,7 +263,7 @@ raytracing_render :: proc(
 		.LINEAR, // Use LINEAR for better quality conversion
 	)
 	ctx_transition_swapchain_image(
-		graph.ctx^,
+		rt_ctx.vk_ctx^,
 		cmd,
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
@@ -222,84 +287,9 @@ raytracing_render :: proc(
 
 }
 
-create_rt_pipeline :: proc(stage: ^Raytracing_Stage, device: ^Device) {
-	layout_create_info := vk.PipelineLayoutCreateInfo {
-		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount         = u32(len(stage.descriptor_layouts)),
-		pSetLayouts            = raw_data(stage.descriptor_layouts),
-		pushConstantRangeCount = u32(len(stage.push_constants)),
-		pPushConstantRanges    = raw_data(stage.push_constants),
-	}
-
-	_ = vk_check(
-		vk.CreatePipelineLayout(
-			device.logical_device.ptr,
-			&layout_create_info,
-			nil,
-			&stage.pipeline.layout,
-		),
-		"Failed to create pipeline layout",
-	)
-
-	// TODO: probably this should be appart of the setup on the raytracing_stage_init
-	groups := [?]vk.RayTracingShaderGroupCreateInfoKHR {
-		{
-			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-			type = .GENERAL,
-			generalShader = u32(Stage_Indices.Raygen),
-			closestHitShader = ~u32(0),
-			anyHitShader = ~u32(0),
-			intersectionShader = ~u32(0),
-		},
-		{
-			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-			type = .GENERAL,
-			generalShader = u32(Stage_Indices.Miss),
-			closestHitShader = ~u32(0),
-			anyHitShader = ~u32(0),
-			intersectionShader = ~u32(0),
-		},
-		{
-			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-			type = .TRIANGLES_HIT_GROUP,
-			generalShader = ~u32(0),
-			closestHitShader = u32(Stage_Indices.Closest_Hit),
-			anyHitShader = ~u32(0),
-			intersectionShader = ~u32(0),
-		},
-	}
-
-	create_info := vk.RayTracingPipelineCreateInfoKHR {
-		sType                        = .RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-		stageCount                   = u32(len(stage.shaders)),
-		pStages                      = raw_data(stage.shaders),
-		groupCount                   = u32(len(groups)),
-		pGroups                      = raw_data(groups[:]),
-		maxPipelineRayRecursionDepth = 1,
-		layout                       = stage.pipeline.layout,
-	}
-
-	_ = vk_check(
-		vk.CreateRayTracingPipelinesKHR(
-			device.logical_device.ptr,
-			0,
-			0,
-			1,
-			&create_info,
-			nil,
-			&stage.pipeline.handle,
-		),
-		"Failed to create raytracing pipeline",
-	)
-
-	create_shader_binding_table(stage, device)
-
-	fmt.println(stage.sbt)
-}
-
-create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
-	handle_size := stage.rt_properties.shaderGroupHandleSize
-	handle_alignment := stage.rt_properties.shaderGroupHandleAlignment
+rt_create_shader_binding_table :: proc(rt_ctx: ^Raytracing_Context, device: ^Device) {
+	handle_size := rt_ctx.rt_properties.shaderGroupHandleSize
+	handle_alignment := rt_ctx.rt_properties.shaderGroupHandleAlignment
 	handle_size_aligned := align_up(handle_size, handle_alignment)
 
 	group_count: u32 = 3
@@ -314,7 +304,7 @@ create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 	sbt_memory_usage: vma.Memory_Usage = .Cpu_To_Gpu
 
 	buffer_init(
-		&stage.sbt.raygen_buffer,
+		&rt_ctx.sbt.raygen_buffer,
 		device,
 		vk.DeviceSize(handle_size),
 		1,
@@ -322,7 +312,7 @@ create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 		sbt_memory_usage,
 	)
 	buffer_init(
-		&stage.sbt.miss_buffer,
+		&rt_ctx.sbt.miss_buffer,
 		device,
 		vk.DeviceSize(handle_size),
 		1,
@@ -330,7 +320,7 @@ create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 		sbt_memory_usage,
 	)
 	buffer_init(
-		&stage.sbt.hit_buffer,
+		&rt_ctx.sbt.hit_buffer,
 		device,
 		vk.DeviceSize(handle_size),
 		1,
@@ -343,7 +333,7 @@ create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 	_ = vk_check(
 		vk.GetRayTracingShaderGroupHandlesKHR(
 			device.logical_device.ptr,
-			stage.pipeline.handle,
+			rt_ctx.pipeline.handle,
 			0,
 			group_count,
 			int(sbt_size),
@@ -353,24 +343,24 @@ create_shader_binding_table :: proc(stage: ^Raytracing_Stage, device: ^Device) {
 	)
 
 	data: rawptr
-	data, _ = buffer_map(&stage.sbt.raygen_buffer, device)
+	data, _ = buffer_map(&rt_ctx.sbt.raygen_buffer, device)
 	runtime.mem_copy(data, raw_data(shader_handle_storage), int(handle_size))
 
-	data, _ = buffer_map(&stage.sbt.miss_buffer, device)
+	data, _ = buffer_map(&rt_ctx.sbt.miss_buffer, device)
 	runtime.mem_copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned)),
 		int(handle_size),
 	)
 
-	data, _ = buffer_map(&stage.sbt.hit_buffer, device)
+	data, _ = buffer_map(&rt_ctx.sbt.hit_buffer, device)
 	runtime.mem_copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
 		int(handle_size),
 	)
 
-	buffer_unmap(&stage.sbt.raygen_buffer, device)
-	buffer_unmap(&stage.sbt.miss_buffer, device)
-	buffer_unmap(&stage.sbt.hit_buffer, device)
+	buffer_unmap(&rt_ctx.sbt.raygen_buffer, device)
+	buffer_unmap(&rt_ctx.sbt.miss_buffer, device)
+	buffer_unmap(&rt_ctx.sbt.hit_buffer, device)
 }

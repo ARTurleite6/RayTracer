@@ -73,9 +73,9 @@ vulkan_context_init :: proc(
 		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
 		1000,
 	)
-	descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
+	// descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
 
-	ctx_descriptor_sets_init(ctx)
+	// ctx_descriptor_sets_init(ctx)
 
 	{
 		image_init(&ctx.raytracing_image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
@@ -99,8 +99,6 @@ vulkan_context_init :: proc(
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context) {
-	descriptor_manager_destroy(&ctx.descriptor_manager)
-
 	frames_data_destroy(ctx)
 
 	for &f in ctx.frames {
@@ -178,67 +176,6 @@ ctx_transition_swapchain_image :: proc(
 	)
 }
 
-ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.AccelerationStructureKHR) {
-	layout: Descriptor_Set_Layout
-
-	descriptor_set_layout_init(
-		&layout,
-		ctx.device,
-		{
-			{ 	// TLAS
-				binding         = 0,
-				descriptorType  = .ACCELERATION_STRUCTURE_KHR,
-				descriptorCount = 1,
-				stageFlags      = {.RAYGEN_KHR},
-			},
-			{ 	// Output Image
-				binding         = 1,
-				descriptorType  = .STORAGE_IMAGE,
-				descriptorCount = 1,
-				stageFlags      = {.RAYGEN_KHR},
-			},
-		},
-	)
-
-	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "raytracing_main", layout)
-	descriptor_manager_write_acceleration_structure(
-		&ctx.descriptor_manager,
-		"raytracing_main",
-		0,
-		0,
-		tlas,
-	)
-
-	descriptor_manager_write_image(
-		&ctx.descriptor_manager,
-		"raytracing_main",
-		0,
-		1,
-		ctx.raytracing_image_view,
-	)
-
-	descriptor_set_layout_init(
-		&layout,
-		ctx.device,
-		{
-			{
-				binding = 0,
-				descriptorType = .STORAGE_BUFFER,
-				descriptorCount = 1,
-				stageFlags = {.CLOSEST_HIT_KHR},
-			},
-			{
-				binding = 1,
-				descriptorType = .STORAGE_BUFFER,
-				descriptorCount = 1,
-				stageFlags = {.CLOSEST_HIT_KHR},
-			},
-		},
-	)
-
-	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "scene_data", layout)
-}
-
 ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_Error) {
 	frame := &ctx.frames[ctx.current_frame]
 	device := ctx.device.logical_device.ptr
@@ -259,12 +196,6 @@ ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_
 	command_pool_begin(&frame.command_pool)
 
 	return result.image_index, nil
-}
-
-ctx_update_uniform_buffer :: proc(ctx: ^Vulkan_Context, data: rawptr) {
-	buffer := &ctx.frames[ctx.current_frame].uniform_buffer
-	buffer_write(buffer, data)
-	buffer_flush(buffer, ctx.device^)
 }
 
 ctx_swapchain_present :: proc(
@@ -337,59 +268,6 @@ ctx_handle_resize :: proc(
 	frames_data_init(ctx)
 
 	return nil
-}
-
-ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
-	{ 	// init uniform buffers
-		for &f in ctx.frames {
-			buffer_init(
-				&f.uniform_buffer,
-				ctx.device,
-				size_of(Global_Ubo),
-				1,
-				{.UNIFORM_BUFFER},
-				.Cpu_To_Gpu,
-			)
-
-			buffer_map(&f.uniform_buffer, ctx.device)
-		}
-	}
-
-	{
-		layout: Descriptor_Set_Layout
-		descriptor_set_layout_init(
-			&layout,
-			ctx.device,
-			{
-				{
-					binding = 0,
-					descriptorType = .UNIFORM_BUFFER,
-					descriptorCount = 1,
-					stageFlags = {.VERTEX, .RAYGEN_KHR},
-				},
-			},
-		)
-		descriptor_manager_register_descriptor_sets(
-			&ctx.descriptor_manager,
-			"camera",
-			layout,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-	}
-
-	{ 	// descriptor sets
-		for &f, i in ctx.frames {
-			buffer := f.uniform_buffer
-			descriptor_manager_write_buffer(
-				&ctx.descriptor_manager,
-				"camera",
-				u32(i),
-				0,
-				buffer.handle,
-				vk.DeviceSize(size_of(Global_Ubo)),
-			)
-		}
-	}
 }
 
 frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
