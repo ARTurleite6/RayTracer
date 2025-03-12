@@ -32,8 +32,6 @@ Render_Data :: struct {
 }
 
 Render_Stage_Variant :: union {
-	^Graphics_Stage,
-	^UI_Stage,
 	^Raytracing_Stage,
 }
 
@@ -84,9 +82,6 @@ render_graph_add_stage :: proc(graph: ^Render_Graph, stage: ^Render_Stage) {
 render_graph_compile :: proc(graph: ^Render_Graph) {
 	for stage in graph.stages {
 		switch v in stage.variant {
-		case ^Graphics_Stage:
-			build_graphics_pipeline(v, graph.ctx.device^)
-		case ^UI_Stage:
 		case ^Raytracing_Stage:
 			create_rt_pipeline(v, graph.ctx.device)
 		// for now we dont have nothing in here
@@ -120,11 +115,6 @@ render_stage_init :: proc(
 
 render_stage_destroy :: proc(stage: ^Render_Stage, device: ^Device) {
 	switch v in stage.variant {
-	case ^Graphics_Stage:
-		// graphics_stage_destroy(v, device^)
-		free(v)
-	case ^UI_Stage:
-		free(v)
 	case ^Raytracing_Stage:
 		// 	raytracing_destroy(v, device)
 		free(v)
@@ -171,10 +161,6 @@ record_command_buffer :: proc(
 	render_data: Render_Data,
 ) {
 	switch v in stage.variant {
-	case ^Graphics_Stage:
-		graphics_stage_render(graph, v, cmd, image_index, render_data)
-	case ^UI_Stage:
-		ui_stage_render(graph, v, cmd, image_index, render_data)
 	case ^Raytracing_Stage:
 		raytracing_render(graph, v, cmd, image_index, render_data)
 	}

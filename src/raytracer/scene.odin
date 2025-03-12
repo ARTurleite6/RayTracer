@@ -14,28 +14,6 @@ Vertex :: struct {
 	color:  Vec3,
 }
 
-VERTEX_INPUT_BINDING_DESCRIPTION := vk.VertexInputBindingDescription {
-	binding   = 0,
-	stride    = size_of(Vertex),
-	inputRate = .VERTEX,
-}
-
-VERTEX_INPUT_ATTRIBUTE_DESCRIPTION := [?]vk.VertexInputAttributeDescription {
-	{binding = 0, location = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, pos))},
-	{
-		binding = 0,
-		location = 1,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, color)),
-	},
-	{
-		binding = 0,
-		location = 2,
-		format = .R32G32B32_SFLOAT,
-		offset = u32(offset_of(Vertex, color)),
-	},
-}
-
 Scene :: struct {
 	meshes:             [dynamic]Mesh,
 	objects:            [dynamic]Object,

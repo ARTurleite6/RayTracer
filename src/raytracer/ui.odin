@@ -10,10 +10,6 @@ UI_Context :: struct {
 	pool: vk.DescriptorPool,
 }
 
-UI_Stage :: struct {
-	using base: Render_Stage,
-}
-
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
 	descriptor_pool_init(
 		&ctx.pool,
@@ -70,23 +66,10 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_stage_init :: proc(stage: ^UI_Stage, name: string, allocator := context.allocator) {
-	render_stage_init(stage, name, stage, allocator)
-}
-
-ui_stage_render :: proc(
-	graph: Render_Graph,
-	ui_stage: ^UI_Stage,
-	cmd: vk.CommandBuffer,
-	image_index: u32,
-	render_data: Render_Data,
-) {
-	cmd := Command_Buffer {
-		buffer = cmd,
-	}
+ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer) {
 	ctx_transition_swapchain_image(
-		graph.ctx^,
-		cmd,
+		ctx,
+		cmd^,
 		old_layout = .UNDEFINED,
 		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		src_stage = {.TOP_OF_PIPE},
@@ -95,8 +78,8 @@ ui_stage_render :: proc(
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
 
-	info := ctx_get_swapchain_render_pass(graph.ctx^, load_op = .LOAD)
-	command_buffer_begin_render_pass(&cmd, &info)
+	info := ctx_get_swapchain_render_pass(ctx, load_op = .LOAD)
+	command_buffer_begin_render_pass(cmd, &info)
 
 	imgui_vulkan.NewFrame()
 	imgui_glfw.NewFrame()
@@ -105,7 +88,7 @@ ui_stage_render :: proc(
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
 			if imgui.MenuItem("Exit", "Q") {
-				window_set_should_close(render_data.renderer.window^)
+				window_set_should_close(renderer.window^)
 			}
 			imgui.EndMenu()
 		}
@@ -113,23 +96,19 @@ ui_stage_render :: proc(
 		imgui.EndMainMenuBar()
 	}
 
-	render_statistics(render_data.renderer.scene)
+	render_statistics(renderer.scene)
 
-	render_scene_properties(
-		&render_data.renderer.scene,
-		render_data.descriptor_manager,
-		render_data.renderer.ctx.device,
-	)
+	render_scene_properties(&renderer.scene, renderer.ctx.device)
 
 
 	imgui.Render()
 	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd.buffer)
 
-	command_buffer_end_render_pass(&cmd)
+	command_buffer_end_render_pass(cmd)
 
 	ctx_transition_swapchain_image(
-		graph.ctx^,
-		cmd,
+		ctx,
+		cmd^,
 		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		new_layout = .PRESENT_SRC_KHR,
 		src_stage = {.COLOR_ATTACHMENT_OUTPUT},
@@ -140,45 +119,8 @@ ui_stage_render :: proc(
 }
 
 @(private = "file")
-render_scene_properties :: proc(
-	scene: ^Scene,
-	descriptor_manager: ^Descriptor_Set_Manager,
-	device: ^Device,
-) {
+render_scene_properties :: proc(scene: ^Scene, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
-		if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
-			@(static) selected_material := -1
-			if imgui.BeginListBox("##MaterialList", {0, 100}) {
-				for material, i in scene.materials {
-					is_selected := selected_material == i
-					if imgui.Selectable(
-						strings.clone_to_cstring(material.name, context.temp_allocator),
-						is_selected,
-					) {
-						selected_material = i
-					}
-
-					if is_selected {
-						imgui.SetItemDefaultFocus()
-					}
-				}
-				imgui.EndListBox()
-			}
-			if selected_material >= 0 && selected_material < len(scene.materials) {
-				material := &scene.materials[selected_material]
-
-				imgui.Separator()
-				// imgui.Text("Albedo")
-				albedo := material.albedo
-				if imgui.ColorPicker3("Albedo", &albedo) {
-					material.albedo = albedo
-
-					scene_update_material(scene, selected_material, device, descriptor_manager)
-				}
-			}
-		}
-
-
 		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1
 

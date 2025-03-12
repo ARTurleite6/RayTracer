@@ -68,10 +68,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	)
 
 	{ 	// create shaders
-		data := #load("../../shaders/vert.spv", []u8)
-		shader2: Shader2
-		shader_init2(&shader2, renderer.ctx.device, transmute([]u32)data, len(data))
-
 		shader: Shader
 		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/vert.spv", {.VERTEX})
 		append(&renderer.shaders, shader)
@@ -92,46 +88,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		&renderer.ctx.swapchain_manager,
 		allocator,
 	)
-	{ 	// create graphics stage
-
-		stage := new(Graphics_Stage)
-		graphics_stage_init(
-			stage,
-			"main",
-			renderer.shaders[:],
-			renderer.ctx.swapchain_manager.format,
-			vertex_bindings = {
-				{
-					attribute_description = VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:],
-					binding_description = VERTEX_INPUT_BINDING_DESCRIPTION,
-				},
-			},
-		)
-
-		render_stage_use_push_constant_range(
-			stage,
-			vk.PushConstantRange {
-				stageFlags = {.VERTEX},
-				offset = 0,
-				size = size_of(Graphics_Push_Constant),
-			},
-		)
-		render_stage_use_descriptor_layout(
-			stage,
-			descriptor_manager_get_descriptor_layout(renderer.ctx.descriptor_manager, "camera").handle,
-		)
-
-		render_stage_add_color_attachment(
-			stage,
-			load_op = .CLEAR,
-			store_op = .STORE,
-			clear_value = vk.ClearValue {
-				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
-			},
-		)
-		// render_graph_add_stage(&renderer.render_graph, stage)
-	}
-
 	{
 		stage := new(Raytracing_Stage)
 
@@ -190,19 +146,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				offset = 0,
 				size = size_of(Raytracing_Push_Constant),
 			},
-		)
-
-		render_graph_add_stage(&renderer.render_graph, stage)
-	}
-
-	{
-		stage := new(UI_Stage)
-		ui_stage_init(stage, "ui", allocator)
-		render_stage_add_color_attachment(
-			stage,
-			.LOAD,
-			.STORE,
-			vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
 		)
 
 		render_graph_add_stage(&renderer.render_graph, stage)
@@ -321,6 +264,8 @@ renderer_render :: proc(renderer: ^Renderer) {
 			frame_index = u32(renderer.ctx.current_frame),
 		},
 	)
+
+	ui_render(renderer.ctx, &Command_Buffer{buffer = cmd}, renderer)
 
 	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, cmd, image_index)
