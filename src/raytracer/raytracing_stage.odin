@@ -2,11 +2,16 @@ package raytracer
 
 import "base:runtime"
 import "core:log"
-import glm "core:math/linalg"
 import "core:mem/tlsf"
 import "core:strings"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
+_ :: log
+
+Raytracing_Push_Constant :: struct {
+	clear_color:        Vec3,
+	accumulation_frame: u32,
+}
 
 align_up :: proc(x, align: u32) -> u32 {
 	return u32(tlsf.align_up(uint(x), uint(align)))
@@ -32,18 +37,41 @@ Pipeline :: struct {
 	layout: vk.PipelineLayout,
 }
 
+Descriptor_Set_Resource_Type :: enum {
+	Scene,
+	Storage_Image,
+}
+
+Raytracing_Resources :: struct {
+	//Scene Buffers
+	objects_buffer, materials_buffer: Buffer,
+	// TLAS
+	rt_builder:                       Raytracing_Builder,
+
+	// Storage image for ray tracing output
+	storage_image:                    Image,
+	storage_image_view:               vk.ImageView,
+
+	// Descriptor sets layouts
+	descriptor_sets_layouts:          [Descriptor_Set_Resource_Type]vk.DescriptorSetLayout,
+
+	// Descriptor sets
+	descriptor_sets:                  [Descriptor_Set_Resource_Type]vk.DescriptorSet,
+
+	// for resource management
+	device:                           ^Device,
+}
+
 Raytracing_Context :: struct {
-	pipeline:        Pipeline,
-	sbt:             Shader_Binding_Table,
-	rt_properties:   vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
-	descriptor_sets: []vk.DescriptorSet,
-	vk_ctx:          ^Vulkan_Context,
+	pipeline:      Pipeline,
+	sbt:           Shader_Binding_Table,
+	rt_properties: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	vk_ctx:        ^Vulkan_Context,
 }
 
 Shader_Binding_Table :: struct {
 	raygen_buffer, miss_buffer, hit_buffer: Buffer,
 }
-
 
 Stage_Indices :: enum {
 	Raygen = 0,
@@ -54,22 +82,24 @@ Stage_Indices :: enum {
 rt_init :: proc(
 	rt_ctx: ^Raytracing_Context,
 	vk_ctx: ^Vulkan_Context,
-	descriptor_manager: Descriptor_Set_Manager,
+	layouts: []vk.DescriptorSetLayout,
 	push_constants: []vk.PushConstantRange,
 	shaders: []Shader,
 ) {
 	rt_ctx.vk_ctx = vk_ctx
 	device := rt_ctx.vk_ctx.device.logical_device.ptr
-	descriptor_layouts := descriptor_set_manager_get_descriptor_layouts(
-		descriptor_manager,
-		context.temp_allocator,
-	)
-	log.debug(descriptor_layouts)
+
+	rt_ctx.rt_properties.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+	props := vk.PhysicalDeviceProperties2 {
+		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
+		pNext = &rt_ctx.rt_properties,
+	}
+	vk.GetPhysicalDeviceProperties2(rt_ctx.vk_ctx.device.physical_device.ptr, &props)
 
 	layout_create_info := vk.PipelineLayoutCreateInfo {
 		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount         = u32(len(descriptor_layouts)),
-		pSetLayouts            = raw_data(descriptor_layouts[:]),
+		setLayoutCount         = u32(len(layouts)),
+		pSetLayouts            = raw_data(layouts),
 		pushConstantRangeCount = u32(len(push_constants)),
 		pPushConstantRanges    = raw_data(push_constants),
 	}
@@ -139,8 +169,6 @@ rt_init :: proc(
 		"Failed to create raytracing pipeline",
 	)
 
-	rt_ctx.descriptor_sets = descriptor_set_manager_allocate_descriptor_sets(descriptor_manager)
-
 	rt_create_shader_binding_table(rt_ctx, rt_ctx.vk_ctx.device)
 }
 
@@ -148,21 +176,314 @@ rt_destroy :: proc(rt_ctx: ^Raytracing_Context) {
 	buffer_destroy(&rt_ctx.sbt.raygen_buffer, rt_ctx.vk_ctx.device)
 	buffer_destroy(&rt_ctx.sbt.miss_buffer, rt_ctx.vk_ctx.device)
 	buffer_destroy(&rt_ctx.sbt.hit_buffer, rt_ctx.vk_ctx.device)
+
+	vk.DestroyPipelineLayout(rt_ctx.vk_ctx.device.logical_device.ptr, rt_ctx.pipeline.layout, nil)
+	vk.DestroyPipeline(rt_ctx.vk_ctx.device.logical_device.ptr, rt_ctx.pipeline.handle, nil)
+}
+
+rt_resources_init :: proc(
+	resources: ^Raytracing_Resources,
+	ctx: ^Vulkan_Context,
+	scene: Scene,
+	descriptor_pool: vk.DescriptorPool,
+	extent: vk.Extent2D,
+) {
+	device := ctx.device.logical_device.ptr
+	resources.device = ctx.device
+	resources.descriptor_sets_layouts[.Scene], _ = create_descriptor_set_layout(
+		{
+			{
+				binding = 0,
+				descriptorType = .ACCELERATION_STRUCTURE_KHR,
+				descriptorCount = 1,
+				stageFlags = {.RAYGEN_KHR},
+			},
+			{
+				binding = 1,
+				descriptorType = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.CLOSEST_HIT_KHR},
+			},
+			{
+				binding = 2,
+				descriptorType = .STORAGE_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.CLOSEST_HIT_KHR},
+			},
+		},
+		device,
+	)
+
+
+	resources.descriptor_sets_layouts[.Storage_Image], _ = create_descriptor_set_layout(
+		{
+			{
+				binding = 0,
+				descriptorType = .STORAGE_IMAGE,
+				descriptorCount = 1,
+				stageFlags = {.RAYGEN_KHR},
+			},
+		},
+		device,
+	)
+
+	image_init(&resources.storage_image, ctx, .R32G32B32A32_SFLOAT, extent)
+	image_view_init(&resources.storage_image_view, resources.storage_image, ctx)
+
+	{
+		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
+		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
+		image_transition_layout_stage_access(
+			cmd,
+			resources.storage_image.handle,
+			.UNDEFINED,
+			.GENERAL,
+			{.ALL_COMMANDS},
+			{.ALL_COMMANDS},
+			{},
+			{},
+		)
+	}
+
+	create_bottom_level_as(&resources.rt_builder, scene, resources.device)
+	create_top_level_as(&resources.rt_builder, scene, resources.device)
+	raytracing_create_scene_buffers(resources, scene)
+
+	for &d, i in resources.descriptor_sets {
+		d, _ = allocate_single_descriptor_set(
+			descriptor_pool,
+			&resources.descriptor_sets_layouts[i],
+			device,
+		)
+	}
+
+
+	update_descriptor_sets(resources)
+}
+
+rt_resources_destroy :: proc(rt_resources: ^Raytracing_Resources, vk_ctx: Vulkan_Context) {
+	buffer_destroy(&rt_resources.rt_builder.tlas.buffer, rt_resources.device)
+	vk.DestroyAccelerationStructureKHR(
+		rt_resources.device.logical_device.ptr,
+		rt_resources.rt_builder.tlas.handle,
+		nil,
+	)
+
+	for &as in rt_resources.rt_builder.as {
+		buffer_destroy(&as.buffer, rt_resources.device)
+		vk.DestroyAccelerationStructureKHR(rt_resources.device.logical_device.ptr, as.handle, nil)
+	}
+	delete(rt_resources.rt_builder.as)
+
+	buffer_destroy(&rt_resources.objects_buffer, rt_resources.device)
+	buffer_destroy(&rt_resources.materials_buffer, rt_resources.device)
+	image_destroy(&rt_resources.storage_image, vk_ctx)
+	image_view_destroy(rt_resources.storage_image_view, vk_ctx)
+
+	for d in rt_resources.descriptor_sets_layouts {
+		descriptor_set_layout_destroy(d, rt_resources.device.logical_device.ptr)
+	}
+
+	rt_resources^ = {}
+}
+
+update_descriptor_sets :: proc(rt_resources: ^Raytracing_Resources) {
+	update_scene_descriptor(rt_resources)
+	update_storage_image_descriptor(rt_resources)
+}
+
+update_scene_descriptor :: proc(rt_resources: ^Raytracing_Resources) {
+	update_tlas_descriptor(rt_resources)
+	update_objects_buffer(rt_resources)
+	update_materials_buffer(rt_resources)
+}
+
+update_objects_buffer :: proc(rt_resources: ^Raytracing_Resources) {
+	device := rt_resources.device.logical_device.ptr
+
+	write_info := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt_resources.descriptor_sets[.Scene],
+		dstBinding      = 1,
+		descriptorType  = .STORAGE_BUFFER,
+		descriptorCount = 1,
+		pBufferInfo     = &vk.DescriptorBufferInfo {
+			buffer = rt_resources.objects_buffer.handle,
+			offset = 0,
+			range = vk.DeviceSize(vk.WHOLE_SIZE),
+		},
+	}
+	vk.UpdateDescriptorSets(device, 1, &write_info, 0, nil)
+}
+
+update_materials_buffer :: proc(rt_resources: ^Raytracing_Resources) {
+	device := rt_resources.device.logical_device.ptr
+
+	write_info := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt_resources.descriptor_sets[.Scene],
+		dstBinding      = 2,
+		descriptorType  = .STORAGE_BUFFER,
+		descriptorCount = 1,
+		pBufferInfo     = &vk.DescriptorBufferInfo {
+			buffer = rt_resources.materials_buffer.handle,
+			offset = 0,
+			range = vk.DeviceSize(vk.WHOLE_SIZE),
+		},
+	}
+	vk.UpdateDescriptorSets(device, 1, &write_info, 0, nil)
+}
+
+update_tlas_descriptor :: proc(rt_resources: ^Raytracing_Resources) {
+	device := rt_resources.device.logical_device.ptr
+
+	// Create write descriptor for TLAS
+	write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt_resources.descriptor_sets[.Scene],
+		dstBinding      = 0, // Assuming binding 0 is for TLAS
+		descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+		descriptorCount = 1,
+	}
+
+	// Special handling for acceleration structure
+	as_info := vk.WriteDescriptorSetAccelerationStructureKHR {
+		sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+		accelerationStructureCount = 1,
+		pAccelerationStructures    = &rt_resources.rt_builder.tlas.handle,
+	}
+
+	// Connect the acceleration structure info to the write descriptor
+	write.pNext = &as_info
+
+	// Update the descriptor set
+	vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
+}
+
+update_storage_image_descriptor :: proc(rt_resources: ^Raytracing_Resources) {
+	device := rt_resources.device.logical_device.ptr
+
+	// Create image info for the storage image
+	image_info := vk.DescriptorImageInfo {
+		imageView   = rt_resources.storage_image_view,
+		imageLayout = .GENERAL,
+		// No sampler needed for storage image
+	}
+
+	// Create write descriptor for storage image
+	write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt_resources.descriptor_sets[.Storage_Image],
+		dstBinding      = 0, // Assuming binding 0 is for storage image
+		descriptorType  = .STORAGE_IMAGE,
+		descriptorCount = 1,
+		pImageInfo      = &image_info,
+	}
+
+	// Update the descriptor set
+	vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
+}
+
+raytracing_create_scene_buffers :: proc(
+	resources: ^Raytracing_Resources,
+	scene: Scene,
+) -> (
+	err: Buffer_Error,
+) {
+	raytracing_create_material_buffer(resources, scene)
+	return raytracing_create_object_buffer(resources, scene)
+}
+
+raytracing_create_object_buffer :: proc(
+	resources: ^Raytracing_Resources,
+	scene: Scene,
+) -> (
+	err: Buffer_Error,
+) {
+	Object_Data :: struct {
+		vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
+		material_index:                              u32,
+	}
+
+	objects := make([]Object_Data, len(scene.objects), context.temp_allocator)
+	for obj, i in scene.objects {
+		mesh := &scene.meshes[obj.mesh_index]
+		objects[i] = {
+			material_index        = u32(obj.material_index),
+			vertex_buffer_address = buffer_get_device_address(
+				mesh.vertex_buffer,
+				resources.device^,
+			),
+			index_buffer_address  = buffer_get_device_address(
+				mesh.index_buffer,
+				resources.device^,
+			),
+		}
+	}
+
+	buffer_init_with_staging_buffer(
+		&resources.objects_buffer,
+		resources.device,
+		raw_data(objects),
+		size_of(Object_Data),
+		len(objects),
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+	) or_return
+
+	return .None
+}
+
+raytracing_create_material_buffer :: proc(
+	resources: ^Raytracing_Resources,
+	scene: Scene,
+) -> (
+	err: Buffer_Error,
+) {
+	Material_Data :: struct {
+		albedo:         Vec3,
+		emission_color: Vec3,
+		emission_power: f32,
+	}
+	materials := make([]Material_Data, len(scene.materials), context.temp_allocator)
+
+	for mat, i in scene.materials {
+		materials[i].albedo = mat.albedo
+		materials[i].emission_color = mat.emission_color
+		materials[i].emission_power = mat.emission_power
+	}
+
+	buffer_init_with_staging_buffer(
+		&resources.materials_buffer,
+		resources.device,
+		raw_data(materials),
+		size_of(Material_Data),
+		len(materials),
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+	) or_return
+	return .None
 }
 
 raytracing_render :: proc(
 	rt_ctx: Raytracing_Context,
-	cmd: Command_Buffer,
+	cmd: ^Command_Buffer,
 	image_index: u32,
-	render_data: Render_Data,
+	camera: ^Camera,
+	rt_resources: ^Raytracing_Resources,
+	accumulation_frame: u32,
 ) {
+	descriptor_sets := [?]vk.DescriptorSet {
+		camera.descriptor_sets,
+		rt_resources.descriptor_sets[.Scene],
+		rt_resources.descriptor_sets[.Storage_Image],
+	}
+
 	vk.CmdBindDescriptorSets(
 		cmd.buffer,
 		.RAY_TRACING_KHR,
 		rt_ctx.pipeline.layout,
 		0,
-		u32(len(rt_ctx.descriptor_sets)),
-		raw_data(rt_ctx.descriptor_sets),
+		u32(len(descriptor_sets)),
+		raw_data(descriptor_sets[:]),
 		0,
 		nil,
 	)
@@ -175,10 +496,7 @@ raytracing_render :: proc(
 		size_of(Raytracing_Push_Constant),
 		&Raytracing_Push_Constant {
 			clear_color = {0.2, 0.2, 0.2},
-			light_pos = glm.vector_normalize(Vec3{-1.0, -4.0, -1.0}),
-			light_intensity = 1,
-			ambient_strength = 0.1,
-			accumulation_frame = render_data.renderer.accumulation_frame,
+			accumulation_frame = accumulation_frame,
 		},
 	)
 
@@ -208,7 +526,7 @@ raytracing_render :: proc(
 	}
 	callable_entry := vk.StridedDeviceAddressRegionKHR{}
 
-	extent := render_data.renderer.ctx.swapchain_manager.extent
+	extent := rt_ctx.vk_ctx.swapchain_manager.extent
 	vk.CmdTraceRaysKHR(
 		cmd.buffer,
 		&raygen_sbt_entry,
@@ -220,11 +538,11 @@ raytracing_render :: proc(
 		1,
 	)
 
-	storage_image := render_data.renderer.ctx.raytracing_image.handle
-	swapchain_image := render_data.renderer.ctx.swapchain_manager.images[image_index]
+	storage_image := rt_resources.storage_image.handle
+	swapchain_image := rt_ctx.vk_ctx.swapchain_manager.images[image_index]
 	ctx_transition_swapchain_image(
 		rt_ctx.vk_ctx^,
-		cmd,
+		cmd^,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
 		{.TOP_OF_PIPE},
@@ -264,7 +582,7 @@ raytracing_render :: proc(
 	)
 	ctx_transition_swapchain_image(
 		rt_ctx.vk_ctx^,
-		cmd,
+		cmd^,
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
 		{.TRANSFER},
@@ -328,7 +646,7 @@ rt_create_shader_binding_table :: proc(rt_ctx: ^Raytracing_Context, device: ^Dev
 		sbt_memory_usage,
 	)
 
-	shader_handle_storage := make([]u8, sbt_size)
+	shader_handle_storage := make([]u8, sbt_size, context.temp_allocator)
 
 	_ = vk_check(
 		vk.GetRayTracingShaderGroupHandlesKHR(

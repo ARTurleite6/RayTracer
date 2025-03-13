@@ -9,10 +9,18 @@ _ :: log
 CAMERA_SPEED :: f32(5.0)
 CAMERA_SENSIVITY :: f32(0.001)
 
+
 Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
 Vec4 :: glm.Vector4f32
 Mat4 :: glm.Matrix4f32
+
+Camera_UBO :: struct {
+	projection:         Mat4,
+	view:               Mat4,
+	inverse_view:       Mat4,
+	inverse_projection: Mat4,
+}
 
 Direction :: enum {
 	Front,
@@ -34,9 +42,9 @@ Camera :: struct {
 	sensivity:                              f32,
 
 	// vulkan resources
-	ubo_buffers:                            [MAX_FRAMES_IN_FLIGHT]Buffer,
+	ubo_buffer:                             Buffer,
 	descriptor_set_layout:                  vk.DescriptorSetLayout,
-	descriptor_sets:                        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+	descriptor_sets:                        vk.DescriptorSet,
 	device:                                 ^Device,
 }
 
@@ -66,67 +74,58 @@ camera_init :: proc(
 	camera_look_at(camera, target, up)
 	camera_update_matrices(camera)
 
-	for &b in camera.ubo_buffers {
-		buffer_init(&b, camera.device, size_of(Scene_UBO), 1, {.UNIFORM_BUFFER}, .Gpu_To_Cpu)
-		buffer_map(&b, camera.device)
+	buffer_init(
+		&camera.ubo_buffer,
+		camera.device,
+		size_of(Camera_UBO),
+		1,
+		{.UNIFORM_BUFFER},
+		.Gpu_To_Cpu,
+	)
+	buffer_map(&camera.ubo_buffer, camera.device)
+	camera.descriptor_set_layout, _ = create_descriptor_set_layout(
+		{
+			{
+				binding = 0,
+				descriptorType = .UNIFORM_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+			},
+		},
+		device.logical_device.ptr,
+	)
+
+
+	camera.descriptor_sets, _ = allocate_single_descriptor_set(
+		descriptor_pool,
+		&camera.descriptor_set_layout,
+		device.logical_device.ptr,
+	)
+
+	buffer_info := vk.DescriptorBufferInfo {
+		buffer = camera.ubo_buffer.handle,
+		offset = 0,
+		range  = size_of(Camera_UBO),
 	}
-	binding := vk.DescriptorSetLayoutBinding {
-		binding         = 0,
+
+	write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = camera.descriptor_sets,
+		dstBinding      = 0,
+		dstArrayElement = 0,
 		descriptorType  = .UNIFORM_BUFFER,
 		descriptorCount = 1,
-		stageFlags      = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+		pBufferInfo     = &buffer_info,
 	}
 
-	create_info := vk.DescriptorSetLayoutCreateInfo {
-		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = 1,
-		pBindings    = &binding,
-	}
+	vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
+}
 
-	vk.CreateDescriptorSetLayout(
-		device.logical_device.ptr,
-		&create_info,
-		nil,
-		&camera.descriptor_set_layout,
-	)
+camera_destroy :: proc(camera: ^Camera) {
+	buffer_destroy(&camera.ubo_buffer, camera.device)
+	descriptor_set_layout_destroy(camera.descriptor_set_layout, camera.device.logical_device.ptr)
 
-	layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
-	for &layout in layouts {
-		layout = camera.descriptor_set_layout
-	}
-
-	alloc_info := vk.DescriptorSetAllocateInfo {
-		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-		descriptorPool     = descriptor_pool,
-		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-		pSetLayouts        = raw_data(layouts[:]),
-	}
-
-	vk.AllocateDescriptorSets(
-		camera.device.logical_device.ptr,
-		&alloc_info,
-		raw_data(camera.descriptor_sets[:]),
-	)
-
-	for _, i in camera.ubo_buffers {
-		buffer_info := vk.DescriptorBufferInfo {
-			buffer = camera.ubo_buffers[i].handle,
-			offset = 0,
-			range  = size_of(Scene_UBO),
-		}
-
-		write := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			dstSet          = camera.descriptor_sets[i],
-			dstBinding      = 0,
-			dstArrayElement = 0,
-			descriptorType  = .UNIFORM_BUFFER,
-			descriptorCount = 1,
-			pBufferInfo     = &buffer_info,
-		}
-
-		vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
-	}
+	camera^ = {}
 }
 
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
@@ -134,14 +133,16 @@ camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.right = glm.cross(camera.forward, camera.up)
 }
 
-camera_update_buffers :: proc(camera: ^Camera, current_frame: int) {
-	ubo_data := Scene_UBO {
-		view       = camera.view,
-		projection = camera.proj,
+camera_update_buffers :: proc(camera: ^Camera) {
+	ubo_data := Camera_UBO {
+		projection         = camera.proj,
+		view               = camera.view,
+		inverse_view       = camera.inverse_view,
+		inverse_projection = camera.inverse_proj,
 	}
 
 	data := &ubo_data
-	buffer := &camera.ubo_buffers[current_frame]
+	buffer := &camera.ubo_buffer
 	buffer_write(buffer, data)
 	buffer_flush(buffer, camera.device^)
 }

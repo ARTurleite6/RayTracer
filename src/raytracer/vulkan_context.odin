@@ -23,18 +23,13 @@ Frame_Error :: enum {
 }
 
 Vulkan_Context :: struct {
-	device:                ^Device,
-	swapchain_manager:     Swapchain_Manager,
-	descriptor_pool:       vk.DescriptorPool,
-	descriptor_manager:    Descriptor_Set_Manager,
+	device:            ^Device,
+	swapchain_manager: Swapchain_Manager,
+	descriptor_pool:   vk.DescriptorPool,
 	//frames
-	frames:                [MAX_FRAMES_IN_FLIGHT]Frame_Data,
-	current_frame:         int,
-	current_image:         u32,
-
-	// raytracing images
-	raytracing_image:      Image,
-	raytracing_image_view: vk.ImageView,
+	frames:            [MAX_FRAMES_IN_FLIGHT]Frame_Data,
+	current_frame:     int,
+	current_image:     u32,
 }
 
 Frame_Data :: struct {
@@ -42,9 +37,6 @@ Frame_Data :: struct {
 	render_finished: vk.Semaphore,
 	image_available: vk.Semaphore,
 	in_flight_fence: vk.Fence,
-
-	// Uniform Buffer
-	uniform_buffer:  Buffer,
 }
 
 vulkan_context_init :: proc(
@@ -73,42 +65,14 @@ vulkan_context_init :: proc(
 		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
 		1000,
 	)
-	// descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
-
-	// ctx_descriptor_sets_init(ctx)
-
-	{
-		image_init(&ctx.raytracing_image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
-		image_view_init(&ctx.raytracing_image_view, ctx.raytracing_image, ctx)
-
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-		image_transition_layout_stage_access(
-			cmd,
-			ctx.raytracing_image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
 	return nil
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context) {
+	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 	frames_data_destroy(ctx)
 
-	for &f in ctx.frames {
-		buffer_destroy(&f.uniform_buffer, ctx.device)
-	}
-
 	swapchain_manager_destroy(&ctx.swapchain_manager)
-
-	image_destroy(&ctx.raytracing_image, ctx^)
-	vk.DestroyImageView(ctx.device.logical_device.ptr, ctx.raytracing_image_view, nil)
 
 	device_destroy(ctx.device)
 	free(ctx.device)

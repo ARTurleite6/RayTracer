@@ -18,12 +18,12 @@ layout(buffer_reference, scalar) buffer Indices {
     ivec3 indices[];
 };
 
-layout(set = 2, binding = 0, scalar) buffer MaterialsBuffer {
-    Material materials[];
+layout(set = 1, binding = 1, scalar) buffer ObjectsData {
+    ObjectData objects[];
 };
 
-layout(set = 2, binding = 1, scalar) buffer ObjectsData {
-    ObjectData objects[];
+layout(set = 1, binding = 2, scalar) buffer MaterialsBuffer {
+    Material materials[];
 };
 
 void main()

@@ -8,13 +8,6 @@ import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
 
-Global_Ubo :: struct {
-	projection:         Mat4,
-	view:               Mat4,
-	inverse_view:       Mat4,
-	inverse_projection: Mat4,
-}
-
 Render_Error :: union {
 	Pipeline_Error,
 	Shader_Error,
@@ -22,37 +15,28 @@ Render_Error :: union {
 }
 
 Renderer :: struct {
-	ctx:                    Vulkan_Context,
-	window:                 ^Window,
-	scene:                  Scene,
-	camera:                 Camera,
-	input_system:           Input_System,
+	ctx:                Vulkan_Context,
+	window:             ^Window,
+	scene:              Scene,
+	camera:             Camera,
+	input_system:       Input_System,
 	// TODO: probably move this in the future
-	shaders:                [dynamic]Shader,
+	shaders:            [dynamic]Shader,
 
 	// ray tracing properties
-	rt_properties:          vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
-	descriptor_set_manager: Descriptor_Set_Manager,
-	ui_ctx:                 UI_Context,
-	rt_ctx:                 Raytracing_Context,
+	ui_ctx:             UI_Context,
+	rt_resources:       Raytracing_Resources,
+	rt_ctx:             Raytracing_Context,
 
 	// time
-	last_frame_time:        f64,
-	delta_time:             f32,
-	accumulation_frame:     u32,
+	last_frame_time:    f64,
+	delta_time:         f32,
+	accumulation_frame: u32,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
-
-	descriptor_set_manager2_init(&renderer.descriptor_set_manager, renderer.ctx.device)
-	renderer.rt_properties.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-	props := vk.PhysicalDeviceProperties2 {
-		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
-		pNext = &renderer.rt_properties,
-	}
-	vk.GetPhysicalDeviceProperties2(renderer.ctx.device.physical_device.ptr, &props)
 
 	window_set_window_user_pointer(window, renderer.window)
 	input_system_init(&renderer.input_system, allocator)
@@ -70,8 +54,21 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	)
 
 	renderer.scene = create_scene(renderer.ctx.device)
-	scene_create_as(&renderer.scene, renderer.ctx.device)
-	scene_create_buffers(&renderer.scene, renderer.ctx.device)
+	rt_resources_init(
+		&renderer.rt_resources,
+		&renderer.ctx,
+		renderer.scene,
+		renderer.ctx.descriptor_pool,
+		renderer.ctx.swapchain_manager.extent,
+	)
+	camera_init(
+		&renderer.camera,
+		{0, 0, -3},
+		window_aspect_ratio(window^),
+		renderer.ctx.device,
+		renderer.ctx.descriptor_pool,
+	)
+
 	{
 		shader: [3]Shader
 		shader_init(
@@ -99,24 +96,29 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			{.CLOSEST_HIT_KHR},
 		)
 
-		// rt_init(
-		// 	&renderer.rt_ctx,
-		// 	&renderer.ctx,
-		// 	renderer.descriptor_set_manager,
-		// 	push_constants = {
-		// 		{stageFlags = {.RAYGEN_KHR}, offset = 0, size = size_of(Raytracing_Push_Constant)},
-		// 	},
-		// 	shaders = shader[:],
-		// )
+		defer for &s in shader {
+			shader_destroy(&s)
+		}
+
+		rt_init(
+			&renderer.rt_ctx,
+			&renderer.ctx,
+			{
+				renderer.camera.descriptor_set_layout,
+				renderer.rt_resources.descriptor_sets_layouts[.Scene],
+				renderer.rt_resources.descriptor_sets_layouts[.Storage_Image],
+			},
+			{
+				vk.PushConstantRange {
+					stageFlags = {.RAYGEN_KHR},
+					offset = 0,
+					size = size_of(Raytracing_Push_Constant),
+				},
+			},
+			shader[:],
+		)
 	}
 
-	camera_init(
-		&renderer.camera,
-		{0, 0, -3},
-		window_aspect_ratio(window^),
-		renderer.ctx.device,
-		renderer.descriptor_set_manager.pool,
-	)
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
@@ -124,12 +126,18 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 	scene_destroy(&renderer.scene, renderer.ctx.device)
 	input_system_destroy(&renderer.input_system)
+
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
+
 	delete(renderer.shaders)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
+	rt_destroy(&renderer.rt_ctx)
+	rt_resources_destroy(&renderer.rt_resources, renderer.ctx)
 	window_destroy(renderer.window^)
+
+	camera_destroy(&renderer.camera)
 	ctx_destroy(&renderer.ctx)
 }
 
@@ -202,18 +210,25 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer_handle_resizing(renderer)
 	}
 
-	camera_update_buffers(&renderer.camera, renderer.ctx.current_frame)
+	camera_update_buffers(&renderer.camera)
 
 	image_index, err := ctx_begin_frame(&renderer.ctx)
-
-	cmd := ctx_request_command_buffer(&renderer.ctx)
+	cmd := &Command_Buffer{buffer = ctx_request_command_buffer(&renderer.ctx)}
 
 	if err != nil do return
 
-	ui_render(renderer.ctx, &Command_Buffer{buffer = cmd}, renderer)
+	raytracing_render(
+		renderer.rt_ctx,
+		cmd,
+		image_index,
+		&renderer.camera,
+		&renderer.rt_resources,
+		renderer.accumulation_frame,
+	)
+	ui_render(renderer.ctx, cmd, renderer)
 
-	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
-	ctx_swapchain_present(&renderer.ctx, cmd, image_index)
+	_ = vk_check(vk.EndCommandBuffer(cmd.buffer), "Failed to end command buffer")
+	ctx_swapchain_present(&renderer.ctx, cmd.buffer, image_index)
 
 	renderer.accumulation_frame += 1
 }

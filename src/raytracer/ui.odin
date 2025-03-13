@@ -98,7 +98,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 
 	render_statistics(renderer.scene)
 
-	render_scene_properties(&renderer.scene, renderer.ctx.device)
+	// render_scene_properties(&renderer.scene, renderer.ctx.device)
 
 
 	imgui.Render()
