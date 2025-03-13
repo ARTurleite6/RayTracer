@@ -5,6 +5,7 @@ import "core:log"
 import glm "core:math/linalg"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+import "core:container/queue"
 _ :: fmt
 _ :: glm
 
@@ -22,6 +23,7 @@ Renderer :: struct {
 	input_system:       Input_System,
 	// TODO: probably move this in the future
 	shaders:            [dynamic]Shader,
+	events: queue.Queue(Event),
 
 	// ray tracing properties
 	ui_ctx:             UI_Context,
@@ -36,6 +38,7 @@ Renderer :: struct {
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
+	queue.init(&renderer.events, allocator = allocator)
 	vulkan_context_init(&renderer.ctx, window, allocator)
 
 	window_set_window_user_pointer(window, renderer.window)
@@ -139,6 +142,8 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 	camera_destroy(&renderer.camera)
 	ctx_destroy(&renderer.ctx)
+
+	queue.destroy(&renderer.events)
 }
 
 // FIXME: in the future change this
@@ -169,29 +174,41 @@ renderer_update :: proc(renderer: ^Renderer) {
 	glfw.PollEvents()
 	window_update(renderer.window^)
 
-	moved: bool
+	needs_reset_frame: bool
+	for event in queue.pop_back_safe(&renderer.events) {
+		#partial switch v in event {
+			case Scene_Object_Material_Change:
+				renderer.scene.objects[v.object_index].material_index = v.new_material_index
+				raytracing_update_object_buffer(&renderer.rt_resources, renderer.scene)
+			case Scene_Object_Update_Position:
+				object_update_position(&renderer.scene.objects[v.object_index], v.new_position)
+				raytracing_update_acceleration_structure(&renderer.rt_resources, renderer.scene)
+		}
+		needs_reset_frame = true
+	}
+
 	if input_system_is_key_pressed(renderer.input_system, .W) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Front, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .S) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .D) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Right, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .A) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Space) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Up, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Left_Shift) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Down, renderer.delta_time)
 	}
 
@@ -199,7 +216,7 @@ renderer_update :: proc(renderer: ^Renderer) {
 		window_set_should_close(renderer.window^)
 	}
 
-	if moved {
+	if needs_reset_frame {
 		renderer.accumulation_frame = 0
 	}
 }
@@ -240,14 +257,19 @@ renderer_handle_resizing :: proc(
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
-	return ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator)
+	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
+
+	rt_handle_resize(&renderer.rt_resources, &renderer.ctx, extent)
+
+	renderer.accumulation_frame = 0
+	return nil
 }
 
 @(private = "file")
 renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	renderer := cast(^Renderer)handler.data
 
-	switch v in event {
+	#partial switch v in event {
 	case Mouse_Button_Event:
 		input_system_register_mouse_button(&renderer.input_system, v.key, v.action)
 	case Key_Event:

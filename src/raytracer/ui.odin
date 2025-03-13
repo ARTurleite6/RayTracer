@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:strings"
+import "core:container/queue"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
@@ -98,7 +99,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 
 	render_statistics(renderer.scene)
 
-	// render_scene_properties(&renderer.scene, renderer.ctx.device)
+	render_scene_properties(renderer, renderer.ctx.device)
 
 
 	imgui.Render()
@@ -119,7 +120,8 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 }
 
 @(private = "file")
-render_scene_properties :: proc(scene: ^Scene, device: ^Device) {
+render_scene_properties :: proc(renderer: ^Renderer,  device: ^Device) {
+	scene := &renderer.scene
 	if imgui.Begin("Scene Properties") {
 		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1
@@ -148,9 +150,21 @@ render_scene_properties :: proc(scene: ^Scene, device: ^Device) {
 				imgui.Separator()
 				imgui.Text("Transform")
 
-				position := object.transform.position
-				if imgui.DragFloat3("Position", &position, 0.01) {
-					object_update_position(object, position)
+				new_position := object.transform.position
+				if imgui.DragFloat3("Position", &new_position, 0.01) {
+					queue.push(&renderer.events, Scene_Object_Update_Position {
+						object_index = selected_object,
+						new_position = new_position,
+					})
+				}
+
+				imgui.Separator()
+				new_material := i32(object.material_index + 1)
+				if imgui.InputInt("Material", &new_material, 1) {
+					queue.push(&renderer.events, Scene_Object_Material_Change {
+						object_index = selected_object,
+						new_material_index = int(new_material) - 1,
+					})
 				}
 			}
 		}

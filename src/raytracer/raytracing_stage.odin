@@ -8,6 +8,11 @@ import vma "external:odin-vma"
 import vk "vendor:vulkan"
 _ :: log
 
+	Object_Data :: struct {
+		vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
+		material_index:                              u32,
+	}
+
 Raytracing_Push_Constant :: struct {
 	clear_color:        Vec3,
 	accumulation_frame: u32,
@@ -287,6 +292,32 @@ rt_resources_destroy :: proc(rt_resources: ^Raytracing_Resources, vk_ctx: Vulkan
 	rt_resources^ = {}
 }
 
+rt_handle_resize :: proc(rt_resources: ^Raytracing_Resources, vk_ctx: ^Vulkan_Context, new_extent: vk.Extent2D) {
+	image_destroy(&rt_resources.storage_image, vk_ctx^)
+	image_view_destroy(rt_resources.storage_image_view, vk_ctx^)
+
+	image_init(&rt_resources.storage_image, vk_ctx, .R32G32B32A32_SFLOAT, new_extent)
+	image_view_init(&rt_resources.storage_image_view, rt_resources.storage_image, vk_ctx)
+
+	{
+		cmd := device_begin_single_time_commands(vk_ctx.device, vk_ctx.device.command_pool)
+		defer device_end_single_time_commands(vk_ctx.device, vk_ctx.device.command_pool, cmd)
+		image_transition_layout_stage_access(
+			cmd,
+			rt_resources.storage_image.handle,
+			.UNDEFINED,
+			.GENERAL,
+			{.ALL_COMMANDS},
+			{.ALL_COMMANDS},
+			{},
+			{},
+		)
+	}
+
+
+	update_storage_image_descriptor(rt_resources)
+}
+
 update_descriptor_sets :: proc(rt_resources: ^Raytracing_Resources) {
 	update_scene_descriptor(rt_resources)
 	update_storage_image_descriptor(rt_resources)
@@ -394,40 +425,38 @@ raytracing_create_scene_buffers :: proc(
 	return raytracing_create_object_buffer(resources, scene)
 }
 
+raytracing_update_acceleration_structure :: proc(resources: ^Raytracing_Resources, scene: Scene) {
+	create_top_level_as(&resources.rt_builder, scene, resources.device, update = true)
+}
+
+raytracing_update_object_buffer :: proc(resources: ^Raytracing_Resources, scene: Scene) {
+	device := resources.device
+	staging_buffer: Buffer
+	buffer_init(&staging_buffer, device, size_of(Object_Data), len(scene.objects), {.TRANSFER_SRC}, .Cpu_To_Gpu)
+	defer buffer_destroy(&staging_buffer, device)
+	buffer_map(&staging_buffer, device)
+	objects := get_object_data(scene, resources.device^)
+	buffer_write(&staging_buffer, raw_data(objects))
+
+	// TODO: later change the code of this function to be able to receive a offset so I can copy only the object we changed
+	device_copy_buffer(device, staging_buffer.handle, resources.objects_buffer.handle, staging_buffer.size)
+}
+
 raytracing_create_object_buffer :: proc(
 	resources: ^Raytracing_Resources,
 	scene: Scene,
 ) -> (
 	err: Buffer_Error,
 ) {
-	Object_Data :: struct {
-		vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
-		material_index:                              u32,
-	}
 
-	objects := make([]Object_Data, len(scene.objects), context.temp_allocator)
-	for obj, i in scene.objects {
-		mesh := &scene.meshes[obj.mesh_index]
-		objects[i] = {
-			material_index        = u32(obj.material_index),
-			vertex_buffer_address = buffer_get_device_address(
-				mesh.vertex_buffer,
-				resources.device^,
-			),
-			index_buffer_address  = buffer_get_device_address(
-				mesh.index_buffer,
-				resources.device^,
-			),
-		}
-	}
-
+	objects := get_object_data(scene, resources.device^)
 	buffer_init_with_staging_buffer(
 		&resources.objects_buffer,
 		resources.device,
 		raw_data(objects),
 		size_of(Object_Data),
 		len(objects),
-		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
+		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS, .TRANSFER_DST},
 	) or_return
 
 	return .None
@@ -681,4 +710,25 @@ rt_create_shader_binding_table :: proc(rt_ctx: ^Raytracing_Context, device: ^Dev
 	buffer_unmap(&rt_ctx.sbt.raygen_buffer, device)
 	buffer_unmap(&rt_ctx.sbt.miss_buffer, device)
 	buffer_unmap(&rt_ctx.sbt.hit_buffer, device)
+}
+
+@(private="file")
+get_object_data :: proc(scene: Scene, device: Device) -> []Object_Data {
+	objects := make([]Object_Data, len(scene.objects), context.temp_allocator)
+	for obj, i in scene.objects {
+		mesh := &scene.meshes[obj.mesh_index]
+		objects[i] = {
+			material_index        = u32(obj.material_index),
+			vertex_buffer_address = buffer_get_device_address(
+				mesh.vertex_buffer,
+				device,
+			),
+			index_buffer_address  = buffer_get_device_address(
+				mesh.index_buffer,
+				device,
+			),
+		}
+	}
+
+	return objects
 }

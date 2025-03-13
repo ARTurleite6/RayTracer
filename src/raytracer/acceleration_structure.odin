@@ -28,7 +28,8 @@ Build_Acceleration_Structure :: struct {
 	as:         Acceleration_Structure,
 }
 
-create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
+// TODO: probably in the future change this to be able to update the instance buffer without creating a new one
+create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device, update := false) {
 	tlas := make(
 		[dynamic]vk.AccelerationStructureInstanceKHR,
 		0,
@@ -53,7 +54,7 @@ create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, devic
 		append(&tlas, ray_inst)
 	}
 
-	build_tlas(rt_builder, tlas[:], device)
+	build_tlas(rt_builder, tlas[:], device, update = update)
 }
 
 build_tlas :: proc(
@@ -63,7 +64,7 @@ build_tlas :: proc(
 	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
 	update := false,
 ) {
-	assert(rt_builder.tlas.handle == 0, "Cannot build tlas twice, only update")
+	assert(rt_builder.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
 
 	count_instance := u32(len(instances))
 
@@ -303,7 +304,9 @@ cmd_create_tlas :: proc(
 		size  = size_info.accelerationStructureSize,
 	}
 
-	rt_builder.tlas = create_acceleration(&create_info, device)
+	if !update {
+		rt_builder.tlas = create_acceleration(&create_info, device)
+	}
 
 	buffer_init(
 		scratch_buffer,

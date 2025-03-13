@@ -4,8 +4,8 @@ from optparse import OptionParser
 import subprocess
 
 build_odin_commands = {
-    'release': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -o:speed",
-    'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -debug"
+    'release': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -o:speed",
+    'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -debug"
   }
 
 shaders = [
