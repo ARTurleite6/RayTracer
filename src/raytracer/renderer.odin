@@ -64,6 +64,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.ctx.descriptor_pool,
 		renderer.ctx.swapchain_manager.extent,
 	)
+
 	camera_init(
 		&renderer.camera,
 		{0, 0, -3},
@@ -73,6 +74,12 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	)
 
 	{
+		shaders: [3]Shader_Module
+		shader_module_init(&shaders[0], &renderer.ctx, #load("../../shaders/rgen.spv", string))
+		shader_module_init(&shaders[1], &renderer.ctx, #load("../../shaders/rmiss.spv", string))
+		shader_module_init(&shaders[2], &renderer.ctx, #load("../../shaders/rchit.spv", string))
+		create_pipeline_layout(&renderer.ctx, shaders[:])
+
 		shader: [3]Shader
 		shader_init(
 			&shader[0],
@@ -119,6 +126,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				},
 			},
 			shader[:],
+			shaders[:],
 		)
 	}
 
@@ -230,8 +238,9 @@ renderer_render :: proc(renderer: ^Renderer) {
 	camera_update_buffers(&renderer.camera)
 
 	image_index, err := ctx_begin_frame(&renderer.ctx)
-	cmd := &Command_Buffer{buffer = ctx_request_command_buffer(&renderer.ctx)}
 
+	cmd := &Command_Buffer{}
+	command_buffer_init(cmd, ctx_request_command_buffer(&renderer.ctx))
 	if err != nil do return
 
 	raytracing_render(

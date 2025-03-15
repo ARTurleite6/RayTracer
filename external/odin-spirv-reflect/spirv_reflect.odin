@@ -1,8 +1,14 @@
 package spirv_reflect
 
 import "core:c"
+import vk "vendor:vulkan"
 
-foreign import spirv "SPIRV-Reflect/build/libspirv-reflect-static.a"
+when ODIN_OS == .Linux {
+	foreign import spirv "SPIRV-Reflect/build/libspirv-reflect-static.lib"
+} else when ODIN_OS == .Windows {
+	foreign import spirv "SPIRV-Reflect/build/Release/spirv-reflect-static.lib"
+}
+
 
 Flag :: distinct u32
 
@@ -47,7 +53,7 @@ Generator :: enum {
 	CLAY_CLAY_SHADER_COMPILER             = 19,
 }
 
-SourceLanguage :: enum {
+SourceLanguage :: enum u32 {
 	Unknown        = 0,
 	ESSL           = 1,
 	GLSL           = 2,
@@ -61,7 +67,7 @@ SourceLanguage :: enum {
 	Max            = 0x7fffffff,
 }
 
-ExecutionModel :: enum {
+ExecutionModel :: enum u32 {
 	Vertex                 = 0,
 	TessellationControl    = 1,
 	TessellationEvaluation = 2,
@@ -95,26 +101,158 @@ EntryPoint :: struct {
 Capability :: struct {
 }
 
-ShaderStageFlag :: enum {
-	VERTEX                  = 0x00000001, // = VK_SHADER_STAGE_VERTEX
-	TESSELLATION_CONTROL    = 0x00000002, // = VK_SHADER_STAGE_TESSELLATION_CONTROL
-	TESSELLATION_EVALUATION = 0x00000004, // = VK_SHADER_STAGE_TESSELLATION_EVALUATION
-	GEOMETRY                = 0x00000008, // = VK_SHADER_STAGE_GEOMETRY
-	FRAGMENT                = 0x00000010, // = VK_SHADER_STAGE_FRAGMENT
-	COMPUTE                 = 0x00000020, // = VK_SHADER_STAGE_COMPUTE
-	TASK_NV                 = 0x00000040, // = VK_SHADER_STAGE_TASK_NV
-	TASK_EXT                = TASK_NV, // = VK_SHADER_STAGE_CALLABLE_EXT
-	MESH_NV                 = 0x00000080, // = VK_SHADER_STAGE_MESH_NV
-	MESH_EXT                = MESH_NV, // = VK_SHADER_STAGE_CALLABLE_EXT
-	RAYGEN_KHR              = 0x00000100, // = VK_SHADER_STAGE_RAYGEN_KHR
-	ANY_HIT_KHR             = 0x00000200, // = VK_SHADER_STAGE_ANY_HIT_KHR
-	CLOSEST_HIT_KHR         = 0x00000400, // = VK_SHADER_STAGE_CLOSEST_HIT_KHR
-	MISS_KHR                = 0x00000800, // = VK_SHADER_STAGE_MISS_KHR
-	INTERSECTION_KHR        = 0x00001000, // = VK_SHADER_STAGE_INTERSECTION_KHR
-	CALLABLE_KHR            = 0x00002000, // = VK_SHADER_STAGE_CALLABLE_KHR
+ShaderStageFlags :: vk.ShaderStageFlags
+
+DescriptorType :: enum u32 {
+  SAMPLER                    =  0,        // = VK_DESCRIPTOR_TYPE_SAMPLER
+  COMBINED_IMAGE_SAMPLER     =  1,        // = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+  SAMPLED_IMAGE              =  2,        // = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+  STORAGE_IMAGE              =  3,        // = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+  UNIFORM_TEXEL_BUFFER       =  4,        // = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER
+  STORAGE_TEXEL_BUFFER       =  5,        // = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
+  UNIFORM_BUFFER             =  6,        // = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+  STORAGE_BUFFER             =  7,        // = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+  UNIFORM_BUFFER_DYNAMIC     =  8,        // = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+  STORAGE_BUFFER_DYNAMIC     =  9,        // = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
+  INPUT_ATTACHMENT           = 10,        // = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT
+  ACCELERATION_STRUCTURE_KHR = 1000150000, // = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+}
+
+ResourceType :: enum u32 {
+  UNDEFINED           = 0x00000000,
+  SAMPLER             = 0x00000001,
+  CBV                 = 0x00000002,
+  SRV                 = 0x00000004,
+  UAV                 = 0x00000008,
+} 
+
+Dim :: enum u32 {
+  _1D = 0,
+  _2D = 1,
+  _3D = 2,
+  Cube = 3,
+  Rect = 4,
+  Buffer = 5,
+  SubpassData = 6,
+  TileImageDataEXT = 4173,
+  Max = 0x7fffffff,
+}
+
+ImageFormat :: enum u32 {
+  Unknown = 0,
+  Rgba32f = 1,
+  Rgba16f = 2,
+  R32f = 3,
+  Rgba8 = 4,
+  Rgba8Snorm = 5,
+  Rg32f = 6,
+  Rg16f = 7,
+  R11fG11fB10f = 8,
+  R16f = 9,
+  Rgba16 = 10,
+  Rgb10A2 = 11,
+  Rg16 = 12,
+  Rg8 = 13,
+  R16 = 14,
+  R8 = 15,
+  Rgba16Snorm = 16,
+  Rg16Snorm = 17,
+  Rg8Snorm = 18,
+  R16Snorm = 19,
+  R8Snorm = 20,
+  Rgba32i = 21,
+  Rgba16i = 22,
+  Rgba8i = 23,
+  R32i = 24,
+  Rg32i = 25,
+  Rg16i = 26,
+  Rg8i = 27,
+  R16i = 28,
+  R8i = 29,
+  Rgba32ui = 30,
+  Rgba16ui = 31,
+  Rgba8ui = 32,
+  R32ui = 33,
+  Rgb10a2ui = 34,
+  Rg32ui = 35,
+  Rg16ui = 36,
+  Rg8ui = 37,
+  R16ui = 38,
+  R8ui = 39,
+  R64ui = 40,
+  R64i = 41,
+  Max = 0x7fffffff,
+}
+
+ImageTraits :: struct {
+	dim: Dim,
+	depth, arrayed, ms, sampled: u32,
+	image_format: ImageFormat,
+} 
+
+// Based of SPV_GOOGLE_user_type
+UserType :: enum {
+  INVALID = 0,
+  CBUFFER,
+  TBUFFER,
+  APPEND_STRUCTURED_BUFFER,
+  BUFFER,
+  BYTE_ADDRESS_BUFFER,
+  CONSTANT_BUFFER,
+  CONSUME_STRUCTURED_BUFFER,
+  INPUT_PATCH,
+  OUTPUT_PATCH,
+  RASTERIZER_ORDERED_BUFFER,
+  RASTERIZER_ORDERED_BYTE_ADDRESS_BUFFER,
+  RASTERIZER_ORDERED_STRUCTURED_BUFFER,
+  RASTERIZER_ORDERED_TEXTURE_1D,
+  RASTERIZER_ORDERED_TEXTURE_1D_ARRAY,
+  RASTERIZER_ORDERED_TEXTURE_2D,
+  RASTERIZER_ORDERED_TEXTURE_2D_ARRAY,
+  RASTERIZER_ORDERED_TEXTURE_3D,
+  RAYTRACING_ACCELERATION_STRUCTURE,
+  RW_BUFFER,
+  RW_BYTE_ADDRESS_BUFFER,
+  RW_STRUCTURED_BUFFER,
+  RW_TEXTURE_1D,
+  RW_TEXTURE_1D_ARRAY,
+  RW_TEXTURE_2D,
+  RW_TEXTURE_2D_ARRAY,
+  RW_TEXTURE_3D,
+  STRUCTURED_BUFFER,
+  SUBPASS_INPUT,
+  SUBPASS_INPUT_MS,
+  TEXTURE_1D,
+  TEXTURE_1D_ARRAY,
+  TEXTURE_2D,
+  TEXTURE_2D_ARRAY,
+  TEXTURE_2DMS,
+  TEXTURE_2DMS_ARRAY,
+  TEXTURE_3D,
+  TEXTURE_BUFFER,
+  TEXTURE_CUBE,
+  TEXTURE_CUBE_ARRAY,
 }
 
 DescriptorBinding :: struct {
+	 spirv_id: u32,
+	 name: cstring,
+	 binding, input_attachment_index, set: u32,
+	 descriptor_type: DescriptorType,
+	 resource_type: ResourceType,
+	 image: ImageTraits,
+	 block: BlockVariable,
+	 array: BindingArrayTraits,
+	 count, accessed, uav_counter_id: u32,
+	 uav_counter_binding: ^DescriptorBinding,
+	 byte_address_buffer_offset_count: u32,
+	 byte_address_buffer_offsets: [^]u32,
+	 type_description: ^TypeDescription,
+	 word_offset: struct {
+		binding, set: u32,
+	 },
+	 decoration_flags: DecorationFlags,
+	 user_type: UserType,
 }
 
 DescriptorSet :: struct {
@@ -157,6 +295,11 @@ NumericTraits :: struct {
 	matrix_value: struct {
 		column_count, row_count, stride: u32, // Measured in bytes
 	},
+}
+
+BindingArrayTraits :: struct {
+	dims_count: u32,
+	dims: [MAX_ARRAY_DIMS]u32,
 }
 
 ArrayTraits :: struct {
@@ -226,7 +369,7 @@ ShaderModule :: struct {
 	capability_count:          u32,
 	capabilities:              [^]Capability,
 	spirv_execution_model:     ExecutionModel, // Uses value(s) from first entry point
-	shader_stage:              ShaderStageFlag, // Uses value(s) from first entry point
+	shader_stage:              ShaderStageFlags, // Uses value(s) from first entry point
 	descriptor_binding_count:  u32, // Uses value(s) from first entry point
 	descriptor_bindings:       [^]DescriptorBinding, // Uses value(s) from first entry point
 	descriptor_set_count:      u32, // Uses value(s) from first entry point
@@ -258,4 +401,5 @@ foreign spirv {
 
 
 	EnumeratePushConstantBlocks :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_blocks: [^]^BlockVariable) -> Result ---
+	EnumerateDescriptorSets :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_sets: [^]^DescriptorSet) -> Result ---
 }

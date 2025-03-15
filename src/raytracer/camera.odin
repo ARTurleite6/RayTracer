@@ -84,7 +84,7 @@ camera_init :: proc(
 	)
 	buffer_map(&camera.ubo_buffer, camera.device)
 	camera.descriptor_set_layout, _ = create_descriptor_set_layout(
-		{
+		[]vk.DescriptorSetLayoutBinding{
 			{
 				binding = 0,
 				descriptorType = .UNIFORM_BUFFER,

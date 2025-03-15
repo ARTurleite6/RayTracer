@@ -27,6 +27,7 @@ Vulkan_Context :: struct {
 	swapchain_manager: Swapchain_Manager,
 	descriptor_pool:   vk.DescriptorPool,
 	//frames
+	resources_cache: Resources_Cache,
 	frames:            [MAX_FRAMES_IN_FLIGHT]Frame_Data,
 	current_frame:     int,
 	current_image:     u32,
@@ -59,6 +60,8 @@ vulkan_context_init :: proc(
 
 	frames_data_init(ctx) or_return
 
+	resources_cache_init(&ctx.resources_cache, ctx)
+
 	descriptor_pool_init(
 		&ctx.descriptor_pool,
 		ctx.device,
@@ -69,6 +72,7 @@ vulkan_context_init :: proc(
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context) {
+	resources_cache_destroy(&ctx.resources_cache)
 	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 	frames_data_destroy(ctx)
 

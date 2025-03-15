@@ -38,7 +38,7 @@ Pipeline_Error :: enum {
 }
 
 Pipeline :: struct {
-	handle: vk.Pipeline,
+	pipeline: vk.Pipeline,
 	layout: vk.PipelineLayout,
 }
 
@@ -90,6 +90,7 @@ rt_init :: proc(
 	layouts: []vk.DescriptorSetLayout,
 	push_constants: []vk.PushConstantRange,
 	shaders: []Shader,
+	shader_modules: []Shader_Module,
 ) {
 	rt_ctx.vk_ctx = vk_ctx
 	device := rt_ctx.vk_ctx.device.logical_device.ptr
@@ -100,19 +101,16 @@ rt_init :: proc(
 		pNext = &rt_ctx.rt_properties,
 	}
 	vk.GetPhysicalDeviceProperties2(rt_ctx.vk_ctx.device.physical_device.ptr, &props)
-
-	layout_create_info := vk.PipelineLayoutCreateInfo {
-		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount         = u32(len(layouts)),
-		pSetLayouts            = raw_data(layouts),
-		pushConstantRangeCount = u32(len(push_constants)),
-		pPushConstantRanges    = raw_data(push_constants),
+	{
+		create_info := vk.PipelineLayoutCreateInfo {
+			sType = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount = u32(len(layouts)),
+			pSetLayouts = raw_data(layouts),
+			pushConstantRangeCount = u32(len(push_constants)),
+			pPushConstantRanges = raw_data(push_constants),
+		}
+		vk.CreatePipelineLayout(rt_ctx.vk_ctx.device.logical_device.ptr, &create_info, nil, &rt_ctx.pipeline.layout)
 	}
-
-	_ = vk_check(
-		vk.CreatePipelineLayout(device, &layout_create_info, nil, &rt_ctx.pipeline.layout),
-		"Failed to create pipeline layout",
-	)
 
 	// TODO: probably this should be appart of the setup on the raytracing_stage_init
 	groups := [?]vk.RayTracingShaderGroupCreateInfoKHR {
@@ -169,7 +167,7 @@ rt_init :: proc(
 			1,
 			&create_info,
 			nil,
-			&rt_ctx.pipeline.handle,
+			&rt_ctx.pipeline.pipeline,
 		),
 		"Failed to create raytracing pipeline",
 	)
@@ -183,7 +181,7 @@ rt_destroy :: proc(rt_ctx: ^Raytracing_Context) {
 	buffer_destroy(&rt_ctx.sbt.hit_buffer, rt_ctx.vk_ctx.device)
 
 	vk.DestroyPipelineLayout(rt_ctx.vk_ctx.device.logical_device.ptr, rt_ctx.pipeline.layout, nil)
-	vk.DestroyPipeline(rt_ctx.vk_ctx.device.logical_device.ptr, rt_ctx.pipeline.handle, nil)
+	vk.DestroyPipeline(rt_ctx.vk_ctx.device.logical_device.ptr, rt_ctx.pipeline.pipeline, nil)
 }
 
 rt_resources_init :: proc(
@@ -196,7 +194,7 @@ rt_resources_init :: proc(
 	device := ctx.device.logical_device.ptr
 	resources.device = ctx.device
 	resources.descriptor_sets_layouts[.Scene], _ = create_descriptor_set_layout(
-		{
+		[]vk.DescriptorSetLayoutBinding{
 			{
 				binding = 0,
 				descriptorType = .ACCELERATION_STRUCTURE_KHR,
@@ -221,7 +219,7 @@ rt_resources_init :: proc(
 
 
 	resources.descriptor_sets_layouts[.Storage_Image], _ = create_descriptor_set_layout(
-		{
+		[]vk.DescriptorSetLayoutBinding{
 			{
 				binding = 0,
 				descriptorType = .STORAGE_IMAGE,
@@ -529,7 +527,7 @@ raytracing_render :: proc(
 		},
 	)
 
-	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, rt_ctx.pipeline.handle)
+	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, rt_ctx.pipeline.pipeline)
 
 	handle_size_aligned := align_up(
 		rt_ctx.rt_properties.shaderGroupHandleSize,
@@ -680,7 +678,7 @@ rt_create_shader_binding_table :: proc(rt_ctx: ^Raytracing_Context, device: ^Dev
 	_ = vk_check(
 		vk.GetRayTracingShaderGroupHandlesKHR(
 			device.logical_device.ptr,
-			rt_ctx.pipeline.handle,
+			rt_ctx.pipeline.pipeline,
 			0,
 			group_count,
 			int(sbt_size),
