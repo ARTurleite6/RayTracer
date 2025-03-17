@@ -29,15 +29,16 @@ Build_Acceleration_Structure :: struct {
 }
 
 // TODO: probably in the future change this to be able to update the instance buffer without creating a new one
-create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device, update := false) {
+create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: GPU_Scene, device: ^Device, update := false) {
 	tlas := make(
 		[dynamic]vk.AccelerationStructureInstanceKHR,
 		0,
-		len(scene.objects),
+		len(scene.objects_data),
 		context.temp_allocator,
 	)
 
-	for obj, i in scene.objects {
+	when false {
+	for obj, i in scene.objects_data {
 		ray_inst := vk.AccelerationStructureInstanceKHR {
 			transform                              = matrix_to_transform_matrix_khr(
 				obj.transform.model_matrix,
@@ -53,6 +54,7 @@ create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, devic
 
 		append(&tlas, ray_inst)
 	}
+}
 
 	build_tlas(rt_builder, tlas[:], device, update = update)
 }
@@ -100,10 +102,10 @@ build_tlas :: proc(
 
 }
 
-create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
-	inputs := make([dynamic]Bottom_Level_Input, 0, len(scene.meshes), context.temp_allocator)
+create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: GPU_Scene, device: ^Device) {
+	inputs := make([dynamic]Bottom_Level_Input, 0, len(scene.meshes_data), context.temp_allocator)
 
-	for &mesh in scene.meshes {
+	for &mesh in scene.meshes_data {
 		append(&inputs, mesh_to_geometry(&mesh, device^))
 	}
 
@@ -221,11 +223,11 @@ build_blas :: proc(
 	}
 }
 
-mesh_to_geometry :: proc(mesh: ^Mesh, device: Device) -> Bottom_Level_Input {
+mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_Input {
 	vertex_address := buffer_get_device_address(mesh.vertex_buffer, device)
 	index_address := buffer_get_device_address(mesh.index_buffer, device)
 
-	max_primitives := mesh.index_count / 3
+	max_primitives := u32(mesh.vertex_buffer.instance_count) / 3
 
 	triangles := vk.AccelerationStructureGeometryTrianglesDataKHR {
 		sType = .ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
@@ -234,7 +236,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh, device: Device) -> Bottom_Level_Input {
 		vertexStride = size_of(Vertex),
 		indexType = .UINT32,
 		indexData = {deviceAddress = index_address},
-		maxVertex = mesh.vertex_count - 1,
+		maxVertex = u32(mesh.vertex_buffer.instance_count) - 1,
 	}
 
 	geom := vk.AccelerationStructureGeometryKHR {
@@ -341,6 +343,7 @@ cmd_create_blas :: proc(
 	query_pool: vk.QueryPool,
 	device: ^Device,
 ) {
+	fmt.println(cmd, indices, infos, scratch_address, query_pool, device)
 	if query_pool != 0 {
 		vk.ResetQueryPool(device.logical_device.ptr, query_pool, 0, u32(len(indices)))
 	}

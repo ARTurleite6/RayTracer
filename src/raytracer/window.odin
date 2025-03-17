@@ -83,11 +83,7 @@ window_resize :: proc(window: ^Window, width, height: i32) {
 	window.height = height
 }
 
-window_update :: proc(window: Window) {
-	glfw.SwapBuffers(window.handle)
-}
-
-window_set_should_close :: proc(window: Window) {
+window_set_should_close :: proc(window: ^Window) {
 	glfw.SetWindowShouldClose(window.handle, true)
 }
 
@@ -112,7 +108,7 @@ window_get_surface :: proc(
 	return window.surface, .SUCCESS
 }
 
-window_set_input_mode :: proc(window: Window, mode: Cursor_Mode) {
+window_set_input_mode :: proc(window: ^Window, mode: Cursor_Mode) {
 	glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_NORMAL + cast(i32)mode)
 }
 

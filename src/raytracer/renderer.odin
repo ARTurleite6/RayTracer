@@ -1,11 +1,11 @@
 package raytracer
 
+import "core:container/queue"
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
 import "vendor:glfw"
 import vk "vendor:vulkan"
-import "core:container/queue"
 _ :: fmt
 _ :: glm
 
@@ -18,12 +18,20 @@ Render_Error :: union {
 Renderer :: struct {
 	ctx:                Vulkan_Context,
 	window:             ^Window,
-	scene:              Scene,
+	// TODO: remove the scene
+	scene:              ^Scene,
+
+	// GPU representation of the scene for now
+	scene_raytracing:   Raytracing_Builder,
+	gpu_scene:          ^GPU_Scene,
 	camera:             Camera,
-	input_system:       Input_System,
 	// TODO: probably move this in the future
 	shaders:            [dynamic]Shader,
-	events: queue.Queue(Event),
+	events:             queue.Queue(Event),
+
+	// vulkan stuff
+	current_cmd:        Command_Buffer,
+	current_image:      u32,
 
 	// ray tracing properties
 	ui_ctx:             UI_Context,
@@ -38,16 +46,7 @@ Renderer :: struct {
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
-	queue.init(&renderer.events, allocator = allocator)
 	vulkan_context_init(&renderer.ctx, window, allocator)
-
-	window_set_window_user_pointer(window, renderer.window)
-	input_system_init(&renderer.input_system, allocator)
-	event_handler := Event_Handler {
-		data     = renderer,
-		on_event = renderer_on_event,
-	}
-	window_set_event_handler(window, event_handler)
 
 	ui_context_init(
 		&renderer.ui_ctx,
@@ -56,107 +55,110 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.ctx.swapchain_manager.format,
 	)
 
-	renderer.scene = create_scene(renderer.ctx.device)
-	rt_resources_init(
-		&renderer.rt_resources,
-		&renderer.ctx,
-		renderer.scene,
-		renderer.ctx.descriptor_pool,
-		renderer.ctx.swapchain_manager.extent,
-	)
-
-	camera_init(
-		&renderer.camera,
-		{0, 0, -3},
-		window_aspect_ratio(window^),
-		renderer.ctx.device,
-		renderer.ctx.descriptor_pool,
-	)
-
-	{
-		shader: [3]Shader
-		shader_init(
-			&shader[0],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rgen.spv",
-			{.RAYGEN_KHR},
-		)
-		shader_init(
-			&shader[1],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rmiss.spv",
-			{.MISS_KHR},
-		)
-		shader_init(
-			&shader[2],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rchit.spv",
-			{.CLOSEST_HIT_KHR},
-		)
-
-		defer for &s in shader {
-			shader_destroy(&s)
-		}
-
-		rt_init(
-			&renderer.rt_ctx,
+	when false {
+		// renderer.scene = create_scene(renderer.ctx.device)
+		rt_resources_init(
+			&renderer.rt_resources,
 			&renderer.ctx,
-			{
-				renderer.camera.descriptor_set_layout,
-				renderer.rt_resources.descriptor_sets_layouts[.Scene],
-				renderer.rt_resources.descriptor_sets_layouts[.Storage_Image],
-			},
-			{
-				vk.PushConstantRange {
-					stageFlags = {.RAYGEN_KHR},
-					offset = 0,
-					size = size_of(Raytracing_Push_Constant),
-				},
-			},
-			shader[:],
+			renderer.scene,
+			renderer.ctx.descriptor_pool,
+			renderer.ctx.swapchain_manager.extent,
 		)
-	}
 
+		camera_init(
+			&renderer.camera,
+			{0, 0, -3},
+			window_aspect_ratio(window^),
+			renderer.ctx.device,
+			renderer.ctx.descriptor_pool,
+		)
+
+		{
+			shader: [3]Shader
+			shader_init(
+				&shader[0],
+				renderer.ctx.device,
+				"main",
+				"main",
+				"shaders/rgen.spv",
+				{.RAYGEN_KHR},
+			)
+			shader_init(
+				&shader[1],
+				renderer.ctx.device,
+				"main",
+				"main",
+				"shaders/rmiss.spv",
+				{.MISS_KHR},
+			)
+			shader_init(
+				&shader[2],
+				renderer.ctx.device,
+				"main",
+				"main",
+				"shaders/rchit.spv",
+				{.CLOSEST_HIT_KHR},
+			)
+
+			defer for &s in shader {
+				shader_destroy(&s)
+			}
+
+			rt_init(
+				&renderer.rt_ctx,
+				&renderer.ctx,
+				{
+					renderer.camera.descriptor_set_layout,
+					renderer.rt_resources.descriptor_sets_layouts[.Scene],
+					renderer.rt_resources.descriptor_sets_layouts[.Storage_Image],
+				},
+				{
+					vk.PushConstantRange {
+						stageFlags = {.RAYGEN_KHR},
+						offset = 0,
+						size = size_of(Raytracing_Push_Constant),
+					},
+				},
+				shader[:],
+			)
+		}
+	}
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
-	scene_destroy(&renderer.scene, renderer.ctx.device)
-	input_system_destroy(&renderer.input_system)
+	// scene_destroy(&renderer.scene, renderer.ctx.device)
 
-	for &shader in renderer.shaders {
-		shader_destroy(&shader)
+	// for &shader in renderer.shaders {
+	// 	shader_destroy(&shader)
+	// }
+
+	// delete(renderer.shaders)
+	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
+	// rt_destroy(&renderer.rt_ctx)
+	// rt_resources_destroy(&renderer.rt_resources, renderer.ctx)
+	// window_destroy(renderer.window^)
+
+	if renderer.gpu_scene != nil {
+		gpu_scene_destroy(renderer.gpu_scene)
+		free(renderer.gpu_scene)
 	}
 
-	delete(renderer.shaders)
-	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
-	rt_destroy(&renderer.rt_ctx)
-	rt_resources_destroy(&renderer.rt_resources, renderer.ctx)
-	window_destroy(renderer.window^)
-
-	camera_destroy(&renderer.camera)
+	// camera_destroy(&renderer.camera)
 	ctx_destroy(&renderer.ctx)
 
-	queue.destroy(&renderer.events)
+	// queue.destroy(&renderer.events)
 }
 
-// FIXME: in the future change this
-renderer_handle_mouse :: proc(renderer: ^Renderer, x, y: f32) {
-	move_camera := input_system_is_mouse_key_pressed(renderer.input_system, .MOUSE_BUTTON_2)
-	if move_camera {
-		renderer.accumulation_frame = 0
-		window_set_input_mode(renderer.window^, .Locked)
-	} else {
-		window_set_input_mode(renderer.window^, .Normal)
-	}
-	camera_process_mouse(&renderer.camera, x, y, move = move_camera)
+renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
+	// TODO: change this part
+	renderer.scene = scene
+	renderer.gpu_scene = new(GPU_Scene)
+	renderer.gpu_scene^ = scene_compile(scene^, &renderer.ctx)
+
+	renderer_create_bottom_level_as(renderer)
+	renderer_create_top_level_as(renderer)
 }
 
 renderer_run :: proc(renderer: ^Renderer) {
@@ -171,55 +173,25 @@ renderer_update :: proc(renderer: ^Renderer) {
 	current_time := glfw.GetTime()
 	renderer.delta_time = f32(current_time - renderer.last_frame_time)
 	renderer.last_frame_time = current_time
+}
 
-	glfw.PollEvents()
-	window_update(renderer.window^)
-
-	needs_reset_frame: bool
-	for event in queue.pop_back_safe(&renderer.events) {
-		#partial switch v in event {
-			case Scene_Object_Material_Change:
-				renderer.scene.objects[v.object_index].material_index = v.new_material_index
-				raytracing_update_object_buffer(&renderer.rt_resources, renderer.scene)
-			case Scene_Object_Update_Position:
-				object_update_position(&renderer.scene.objects[v.object_index], v.new_position)
-				raytracing_update_acceleration_structure(&renderer.rt_resources, renderer.scene)
-		}
-		needs_reset_frame = true
+renderer_begin_frame :: proc(renderer: ^Renderer) {
+	if renderer.window.framebuffer_resized {
+		renderer.window.framebuffer_resized = false
+		renderer_handle_resizing(renderer)
 	}
 
-	if input_system_is_key_pressed(renderer.input_system, .W) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Front, renderer.delta_time)
-	}
-	if input_system_is_key_pressed(renderer.input_system, .S) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
-	}
-	if input_system_is_key_pressed(renderer.input_system, .D) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Right, renderer.delta_time)
-	}
-	if input_system_is_key_pressed(renderer.input_system, .A) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Left, renderer.delta_time)
-	}
-	if input_system_is_key_pressed(renderer.input_system, .Space) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Up, renderer.delta_time)
-	}
-	if input_system_is_key_pressed(renderer.input_system, .Left_Shift) {
-		needs_reset_frame = true
-		camera_move(&renderer.camera, .Down, renderer.delta_time)
-	}
+	renderer.current_image, _ = ctx_begin_frame(&renderer.ctx)
+	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
+}
 
-	if input_system_is_key_pressed(renderer.input_system, .Q) {
-		window_set_should_close(renderer.window^)
-	}
+renderer_render_ui :: proc(renderer: ^Renderer, scene: ^Scene) {
+	ui_render(renderer, scene)
+}
 
-	if needs_reset_frame {
-		renderer.accumulation_frame = 0
-	}
+renderer_end_frame :: proc(renderer: ^Renderer) {
+	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
+	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image)
 }
 
 renderer_render :: proc(renderer: ^Renderer) {
@@ -232,19 +204,18 @@ renderer_render :: proc(renderer: ^Renderer) {
 
 	image_index, err := ctx_begin_frame(&renderer.ctx)
 
-	cmd := &Command_Buffer{}
-	command_buffer_init(cmd, ctx_request_command_buffer(&renderer.ctx))
+	cmd := ctx_request_command_buffer(&renderer.ctx)
 	if err != nil do return
 
 	raytracing_render(
 		renderer.rt_ctx,
-		cmd,
+		&cmd,
 		image_index,
 		&renderer.camera,
 		&renderer.rt_resources,
 		renderer.accumulation_frame,
 	)
-	ui_render(renderer.ctx, cmd, renderer)
+	// ui_render(renderer.ctx, &cmd, renderer)
 
 	_ = vk_check(vk.EndCommandBuffer(cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, cmd.buffer, image_index)
@@ -261,26 +232,10 @@ renderer_handle_resizing :: proc(
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
 
-	rt_handle_resize(&renderer.rt_resources, &renderer.ctx, extent)
+	// rt_handle_resize(&renderer.rt_resources, &renderer.ctx, extent)
 
 	renderer.accumulation_frame = 0
 	return nil
-}
-
-@(private = "file")
-renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
-	renderer := cast(^Renderer)handler.data
-
-	#partial switch v in event {
-	case Mouse_Button_Event:
-		input_system_register_mouse_button(&renderer.input_system, v.key, v.action)
-	case Key_Event:
-		input_system_register_key(&renderer.input_system, v.key, v.action)
-	case Resize_Event:
-		window_resize(renderer.window, v.width, v.height)
-	case Mouse_Event:
-		renderer_handle_mouse(renderer, v.x, v.y)
-	}
 }
 
 @(private)
@@ -291,4 +246,206 @@ vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 		return result
 	}
 	return nil
+}
+
+renderer_create_top_level_as :: proc(renderer: ^Renderer) {
+	tlas := make(
+		[dynamic]vk.AccelerationStructureInstanceKHR,
+		0,
+		len(renderer.gpu_scene.objects_data),
+		context.temp_allocator,
+	)
+
+	for obj, i in renderer.gpu_scene.objects_data {
+		model_matrix := renderer.scene.objects[i].transform.model_matrix
+		ray_inst := vk.AccelerationStructureInstanceKHR {
+			transform                              = matrix_to_transform_matrix_khr(model_matrix),
+			instanceCustomIndex                    = u32(i),
+			mask                                   = 0xFF,
+			instanceShaderBindingTableRecordOffset = 0,
+			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
+			accelerationStructureReference         = u64(
+				get_blas_device_address(
+					renderer.scene_raytracing.as[obj.mesh_index],
+					renderer.ctx.device.logical_device.ptr,
+				),
+			),
+		}
+
+		append(&tlas, ray_inst)
+	}
+
+	renderer_build_tlas(renderer, tlas[:])
+}
+
+renderer_build_tlas :: proc(
+	renderer: ^Renderer,
+	instances: []vk.AccelerationStructureInstanceKHR,
+	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
+	update := false,
+) {
+	assert(renderer.scene_raytracing.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
+	device := renderer.ctx.device
+
+	count_instance := u32(len(instances))
+
+	instances_buffer: Buffer
+	buffer_init_with_staging_buffer(
+		&instances_buffer,
+		device,
+		raw_data(instances),
+		size_of(vk.AccelerationStructureInstanceKHR),
+		int(count_instance),
+		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+	)
+	defer buffer_destroy(&instances_buffer, device)
+	scratch_buffer: Buffer
+	defer buffer_destroy(&scratch_buffer, device)
+	{
+		cmd := device_begin_single_time_commands(device, device.command_pool)
+		defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+
+		cmd_create_tlas(
+			&renderer.scene_raytracing,
+			cmd,
+			count_instance,
+			buffer_get_device_address(instances_buffer, device^),
+			&scratch_buffer,
+			flags,
+			update,
+			false,
+			device,
+		)
+	}
+
+
+}
+
+renderer_create_bottom_level_as :: proc(renderer: ^Renderer) {
+	inputs := make(
+		[dynamic]Bottom_Level_Input,
+		0,
+		len(renderer.gpu_scene.meshes_data),
+		context.temp_allocator,
+	)
+	device := renderer.ctx.device
+
+	for &mesh in renderer.gpu_scene.meshes_data {
+		append(&inputs, mesh_to_geometry(&mesh, device^))
+	}
+
+	renderer_build_blas(renderer, inputs[:], {.PREFER_FAST_TRACE})
+}
+
+renderer_build_blas :: proc(
+	renderer: ^Renderer,
+	inputs: []Bottom_Level_Input,
+	flags: vk.BuildAccelerationStructureFlagsKHR,
+) {
+	device := renderer.ctx.device
+	build_infos := make([]Build_Acceleration_Structure, len(inputs), context.temp_allocator)
+
+	n_blas := u32(len(inputs))
+	total_size: vk.DeviceSize
+	max_scratch_size: vk.DeviceSize
+	number_compactions: u32
+	for &input, i in inputs {
+		info := &build_infos[i]
+
+		info.build_info = {
+			sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+			type          = .BOTTOM_LEVEL,
+			mode          = .BUILD,
+			flags         = flags,
+			geometryCount = 1,
+			pGeometries   = &input.geometry,
+		}
+
+		info.range_info = input.offset
+
+		max_prim_counts := [?]u32{info.range_info.primitiveCount}
+		info.size_info.sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+		vk.GetAccelerationStructureBuildSizesKHR(
+			device.logical_device.ptr,
+			.DEVICE,
+			&info.build_info,
+			raw_data(max_prim_counts[:]),
+			&info.size_info,
+		)
+
+		total_size += info.size_info.accelerationStructureSize
+		max_scratch_size = max(info.size_info.buildScratchSize, max_scratch_size)
+		number_compactions += 1 if .ALLOW_COMPACTION in info.build_info.flags else 0
+	}
+
+	scratch_buffer: Buffer
+	buffer_init(
+		&scratch_buffer,
+		device,
+		max_scratch_size,
+		1,
+		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
+		.Gpu_Only,
+		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED IN THE FUTURE
+	)
+	defer buffer_destroy(&scratch_buffer, device)
+
+	query_pool: vk.QueryPool
+	if number_compactions > 0 {
+		assert(number_compactions == n_blas)
+		create_info := vk.QueryPoolCreateInfo {
+			sType      = .QUERY_POOL_CREATE_INFO,
+			queryCount = n_blas,
+			queryType  = .ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+		}
+
+		_ = vk_check(
+			vk.CreateQueryPool(device.logical_device.ptr, &create_info, nil, &query_pool),
+			"Failed to create query_pool",
+		)
+	}
+
+	indices := make([dynamic]u32, context.temp_allocator)
+
+	batch_size: vk.DeviceSize
+	batch_limit: vk.DeviceSize = 256_000_000
+	for i in 0 ..< n_blas {
+		append(&indices, i)
+
+		batch_size += build_infos[i].size_info.accelerationStructureSize
+
+		if batch_size >= batch_limit || i == n_blas - 1 {
+			{
+				cmd := device_begin_single_time_commands(device, device.command_pool)
+				defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+				cmd_create_blas(
+					cmd,
+					indices[:],
+					build_infos,
+					buffer_get_device_address(scratch_buffer, device^),
+					query_pool,
+					device,
+				)
+			}
+
+			if query_pool != 0 {
+				// cmd := device_begin_single_time_commands(device, device.command_pool)
+				// defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+				// compact
+			}
+
+			batch_size = 0
+			clear(&indices)
+		}
+	}
+
+	renderer.scene_raytracing.as = make([dynamic]Acceleration_Structure, 0, len(build_infos))
+
+	for b in build_infos {
+		append(&renderer.scene_raytracing.as, b.as)
+	}
+
 }

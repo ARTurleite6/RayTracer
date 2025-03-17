@@ -67,9 +67,12 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer) {
+ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
+	scene := scene
+	cmd := &renderer.current_cmd
+	ctx := &renderer.ctx
 	ctx_transition_swapchain_image(
-		ctx,
+		ctx^,
 		cmd^,
 		old_layout = .UNDEFINED,
 		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -79,7 +82,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
 
-	info := ctx_get_swapchain_render_pass(ctx, load_op = .LOAD)
+	info := ctx_get_swapchain_render_pass(ctx^, load_op = .CLEAR)
 	command_buffer_begin_render_pass(cmd, &info)
 
 	imgui_vulkan.NewFrame()
@@ -89,7 +92,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
 			if imgui.MenuItem("Exit", "Q") {
-				window_set_should_close(renderer.window^)
+				window_set_should_close(renderer.window)
 			}
 			imgui.EndMenu()
 		}
@@ -97,9 +100,9 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 		imgui.EndMainMenuBar()
 	}
 
-	render_statistics(renderer.scene)
+	render_statistics(scene^)
 
-	render_scene_properties(renderer, renderer.ctx.device)
+	render_scene_properties(renderer, scene, renderer.ctx.device)
 
 
 	imgui.Render()
@@ -108,7 +111,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 	command_buffer_end_render_pass(cmd)
 
 	ctx_transition_swapchain_image(
-		ctx,
+		ctx^,
 		cmd^,
 		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		new_layout = .PRESENT_SRC_KHR,
@@ -120,8 +123,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 }
 
 @(private = "file")
-render_scene_properties :: proc(renderer: ^Renderer,  device: ^Device) {
-	scene := &renderer.scene
+render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
 		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1

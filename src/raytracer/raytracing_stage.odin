@@ -8,10 +8,10 @@ import vma "external:odin-vma"
 import vk "vendor:vulkan"
 _ :: log
 
-	Object_Data :: struct {
-		vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
-		material_index:                              u32,
-	}
+Object_Data :: struct {
+	vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
+	material_index:                              u32,
+}
 
 Raytracing_Push_Constant :: struct {
 	clear_color:        Vec3,
@@ -39,7 +39,7 @@ Pipeline_Error :: enum {
 
 Pipeline :: struct {
 	pipeline: vk.Pipeline,
-	layout: vk.PipelineLayout,
+	layout:   vk.PipelineLayout,
 }
 
 Descriptor_Set_Resource_Type :: enum {
@@ -102,13 +102,18 @@ rt_init :: proc(
 	vk.GetPhysicalDeviceProperties2(rt_ctx.vk_ctx.device.physical_device.ptr, &props)
 	{
 		create_info := vk.PipelineLayoutCreateInfo {
-			sType = .PIPELINE_LAYOUT_CREATE_INFO,
-			setLayoutCount = u32(len(layouts)),
-			pSetLayouts = raw_data(layouts),
+			sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+			setLayoutCount         = u32(len(layouts)),
+			pSetLayouts            = raw_data(layouts),
 			pushConstantRangeCount = u32(len(push_constants)),
-			pPushConstantRanges = raw_data(push_constants),
+			pPushConstantRanges    = raw_data(push_constants),
 		}
-		vk.CreatePipelineLayout(rt_ctx.vk_ctx.device.logical_device.ptr, &create_info, nil, &rt_ctx.pipeline.layout)
+		vk.CreatePipelineLayout(
+			rt_ctx.vk_ctx.device.logical_device.ptr,
+			&create_info,
+			nil,
+			&rt_ctx.pipeline.layout,
+		)
 	}
 
 	// TODO: probably this should be appart of the setup on the raytracing_stage_init
@@ -193,7 +198,7 @@ rt_resources_init :: proc(
 	device := ctx.device.logical_device.ptr
 	resources.device = ctx.device
 	resources.descriptor_sets_layouts[.Scene], _ = create_descriptor_set_layout(
-		[]vk.DescriptorSetLayoutBinding{
+		[]vk.DescriptorSetLayoutBinding {
 			{
 				binding = 0,
 				descriptorType = .ACCELERATION_STRUCTURE_KHR,
@@ -218,7 +223,7 @@ rt_resources_init :: proc(
 
 
 	resources.descriptor_sets_layouts[.Storage_Image], _ = create_descriptor_set_layout(
-		[]vk.DescriptorSetLayoutBinding{
+		[]vk.DescriptorSetLayoutBinding {
 			{
 				binding = 0,
 				descriptorType = .STORAGE_IMAGE,
@@ -247,9 +252,11 @@ rt_resources_init :: proc(
 		)
 	}
 
-	create_bottom_level_as(&resources.rt_builder, scene, resources.device)
-	create_top_level_as(&resources.rt_builder, scene, resources.device)
-	raytracing_create_scene_buffers(resources, scene)
+	when false {
+		create_bottom_level_as(&resources.rt_builder, scene, resources.device)
+		create_top_level_as(&resources.rt_builder, scene, resources.device)
+		raytracing_create_scene_buffers(resources, scene)
+	}
 
 	for &d, i in resources.descriptor_sets {
 		d, _ = allocate_single_descriptor_set(
@@ -289,7 +296,11 @@ rt_resources_destroy :: proc(rt_resources: ^Raytracing_Resources, vk_ctx: Vulkan
 	rt_resources^ = {}
 }
 
-rt_handle_resize :: proc(rt_resources: ^Raytracing_Resources, vk_ctx: ^Vulkan_Context, new_extent: vk.Extent2D) {
+rt_handle_resize :: proc(
+	rt_resources: ^Raytracing_Resources,
+	vk_ctx: ^Vulkan_Context,
+	new_extent: vk.Extent2D,
+) {
 	image_destroy(&rt_resources.storage_image, vk_ctx^)
 	image_view_destroy(rt_resources.storage_image_view, vk_ctx^)
 
@@ -410,83 +421,6 @@ update_storage_image_descriptor :: proc(rt_resources: ^Raytracing_Resources) {
 
 	// Update the descriptor set
 	vk.UpdateDescriptorSets(device, 1, &write, 0, nil)
-}
-
-raytracing_create_scene_buffers :: proc(
-	resources: ^Raytracing_Resources,
-	scene: Scene,
-) -> (
-	err: Buffer_Error,
-) {
-	raytracing_create_material_buffer(resources, scene)
-	return raytracing_create_object_buffer(resources, scene)
-}
-
-raytracing_update_acceleration_structure :: proc(resources: ^Raytracing_Resources, scene: Scene) {
-	create_top_level_as(&resources.rt_builder, scene, resources.device, update = true)
-}
-
-raytracing_update_object_buffer :: proc(resources: ^Raytracing_Resources, scene: Scene) {
-	device := resources.device
-	staging_buffer: Buffer
-	buffer_init(&staging_buffer, device, size_of(Object_Data), len(scene.objects), {.TRANSFER_SRC}, .Cpu_To_Gpu)
-	defer buffer_destroy(&staging_buffer, device)
-	buffer_map(&staging_buffer, device)
-	objects := get_object_data(scene, resources.device^)
-	buffer_write(&staging_buffer, raw_data(objects))
-
-	// TODO: later change the code of this function to be able to receive a offset so I can copy only the object we changed
-	device_copy_buffer(device, staging_buffer.handle, resources.objects_buffer.handle, staging_buffer.size)
-}
-
-raytracing_create_object_buffer :: proc(
-	resources: ^Raytracing_Resources,
-	scene: Scene,
-) -> (
-	err: Buffer_Error,
-) {
-
-	objects := get_object_data(scene, resources.device^)
-	buffer_init_with_staging_buffer(
-		&resources.objects_buffer,
-		resources.device,
-		raw_data(objects),
-		size_of(Object_Data),
-		len(objects),
-		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS, .TRANSFER_DST},
-	) or_return
-
-	return .None
-}
-
-raytracing_create_material_buffer :: proc(
-	resources: ^Raytracing_Resources,
-	scene: Scene,
-) -> (
-	err: Buffer_Error,
-) {
-	Material_Data :: struct {
-		albedo:         Vec3,
-		emission_color: Vec3,
-		emission_power: f32,
-	}
-	materials := make([]Material_Data, len(scene.materials), context.temp_allocator)
-
-	for mat, i in scene.materials {
-		materials[i].albedo = mat.albedo
-		materials[i].emission_color = mat.emission_color
-		materials[i].emission_power = mat.emission_power
-	}
-
-	buffer_init_with_staging_buffer(
-		&resources.materials_buffer,
-		resources.device,
-		raw_data(materials),
-		size_of(Material_Data),
-		len(materials),
-		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
-	) or_return
-	return .None
 }
 
 raytracing_render :: proc(
@@ -707,25 +641,4 @@ rt_create_shader_binding_table :: proc(rt_ctx: ^Raytracing_Context, device: ^Dev
 	buffer_unmap(&rt_ctx.sbt.raygen_buffer, device)
 	buffer_unmap(&rt_ctx.sbt.miss_buffer, device)
 	buffer_unmap(&rt_ctx.sbt.hit_buffer, device)
-}
-
-@(private="file")
-get_object_data :: proc(scene: Scene, device: Device) -> []Object_Data {
-	objects := make([]Object_Data, len(scene.objects), context.temp_allocator)
-	for obj, i in scene.objects {
-		mesh := &scene.meshes[obj.mesh_index]
-		objects[i] = {
-			material_index        = u32(obj.material_index),
-			vertex_buffer_address = buffer_get_device_address(
-				mesh.vertex_buffer,
-				device,
-			),
-			index_buffer_address  = buffer_get_device_address(
-				mesh.index_buffer,
-				device,
-			),
-		}
-	}
-
-	return objects
 }
