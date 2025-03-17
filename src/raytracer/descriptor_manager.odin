@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:fmt"
-import "core:mem"
 import vk "vendor:vulkan"
 _ :: fmt
 
@@ -12,53 +11,7 @@ Descriptor_Set_Layout :: struct {
 	ctx: ^Vulkan_Context,
 }
 
-create_descriptor_set_layout :: proc{create_descriptor_set_layout1 ,create_descriptor_set_layout2 }
-
-@(require_results)
-descriptor_set_layout_hash :: proc(resources: []Shader_Resource) -> u32 { 
-	h := hash_func({0})
-	for r in resources {
-		if r.type == .Push_Constant || r.type == .Output || r.type == .Specialization_Constant || r.type == .Input {
-			continue
-		}
-
-		h ~= hash_func(mem.any_to_bytes(r.binding))
-		h ~= hash_func(mem.any_to_bytes(r.type))
-		h ~= hash_func(mem.any_to_bytes(r.stages))
-	}
-
-	return h
-}
-
-create_descriptor_set_layout2 :: proc(resources: []Shader_Resource, ctx: ^Vulkan_Context) -> (layout: Descriptor_Set_Layout) {
-	layout.ctx = ctx
-	bindings := make([dynamic]vk.DescriptorSetLayoutBinding, context.temp_allocator)
-	for r in resources {
-		if r.type == .Push_Constant || r.type == .Output || r.type == .Specialization_Constant || r.type == .Input {
-			continue
-		}
-
-		append(&bindings, vk.DescriptorSetLayoutBinding {
-			binding = r.binding,
-			descriptorType = find_descriptor_type(r.type),
-			descriptorCount = 1, // TODO: change when receiving arrays
-			stageFlags = r.stages,
-		})
-	}
-
-	create_info := vk.DescriptorSetLayoutCreateInfo {
-		sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = u32(len(bindings)),
-		pBindings = raw_data(bindings),
-	}
-
-	_ = vk_check(vk.CreateDescriptorSetLayout(ctx.device.logical_device.ptr, &create_info, nil, &layout.handle), "Failed to create descriptor set layout")
-	layout.bindings = bindings[:]
-
-	return layout
-}
-
-create_descriptor_set_layout1 :: proc(
+create_descriptor_set_layout :: proc(
 	bindings: []vk.DescriptorSetLayoutBinding,
 	device: vk.Device,
 ) -> (
@@ -155,28 +108,4 @@ descriptor_pool_init :: proc(
 	}
 
 	return .None
-}
-
-@(private="file")
-find_descriptor_type :: proc(resource_type: Shader_Resource_Type) -> vk.DescriptorType {
-	#partial switch resource_type {
-		case .Input_Attachment:
-			return .INPUT_ATTACHMENT
-		case .Image:
-			return .SAMPLED_IMAGE
-		case .Image_Sampler:
-			return .COMBINED_IMAGE_SAMPLER
-		case .Image_Storage:
-			return .STORAGE_IMAGE
-		case .Sampler:
-			return .SAMPLER
-		case .Buffer_Uniform:
-			return .UNIFORM_BUFFER
-		case .Buffer_Storage:
-			return .STORAGE_BUFFER
-		case .Acceleration_Structure:
-			return .ACCELERATION_STRUCTURE_KHR
-	}
-	assert(false, "Failed to find descriptor type")
-	return {}
 }

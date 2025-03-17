@@ -90,7 +90,6 @@ rt_init :: proc(
 	layouts: []vk.DescriptorSetLayout,
 	push_constants: []vk.PushConstantRange,
 	shaders: []Shader,
-	shader_modules: []Shader_Module,
 ) {
 	rt_ctx.vk_ctx = vk_ctx
 	device := rt_ctx.vk_ctx.device.logical_device.ptr

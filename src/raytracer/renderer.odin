@@ -74,12 +74,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	)
 
 	{
-		shaders: [3]Shader_Module
-		shader_module_init(&shaders[0], &renderer.ctx, #load("../../shaders/rgen.spv", string))
-		shader_module_init(&shaders[1], &renderer.ctx, #load("../../shaders/rmiss.spv", string))
-		shader_module_init(&shaders[2], &renderer.ctx, #load("../../shaders/rchit.spv", string))
-		create_pipeline_layout(&renderer.ctx, shaders[:])
-
 		shader: [3]Shader
 		shader_init(
 			&shader[0],
@@ -126,7 +120,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 				},
 			},
 			shader[:],
-			shaders[:],
 		)
 	}
 
