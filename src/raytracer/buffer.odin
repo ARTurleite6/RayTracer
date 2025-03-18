@@ -174,6 +174,35 @@ buffer_write :: proc(
 	}
 }
 
+buffer_update_region :: proc(
+	buffer: ^Buffer,
+	data: rawptr,
+	size: vk.DeviceSize,
+	offset: vk.DeviceSize = 0,
+) {
+
+	staging_buffer: Buffer
+	buffer_init(&staging_buffer, buffer.ctx, size, {.TRANSFER_SRC}, .Cpu_To_Gpu)
+	defer buffer_destroy(&staging_buffer)
+
+	// Map, copy data, and unmap
+	buffer_map(&staging_buffer)
+	buffer_write(&staging_buffer, data)
+
+	// Copy from staging buffer to destination buffer
+	device := buffer.ctx.device
+	cmd := device_begin_single_time_commands(device, device.command_pool)
+	defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+	copy_region := vk.BufferCopy {
+		srcOffset = 0,
+		dstOffset = offset,
+		size      = size,
+	}
+
+	vk.CmdCopyBuffer(cmd, staging_buffer.handle, buffer.handle, 1, &copy_region)
+}
+
 buffer_flush :: proc(buffer: ^Buffer, size := vk.WHOLE_SIZE) {
 	_ = vk_check(
 		vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, 0, buffer.size),

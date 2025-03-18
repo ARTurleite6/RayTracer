@@ -13,14 +13,24 @@ Vertex :: struct {
 	color:  Vec3,
 }
 
+Scene_Dirty_Flag :: enum {
+	Acceleration_Structure,
+	Updated_Material,
+	Updated_Object,
+}
+
+Scene_Dirty_Flags :: distinct bit_set[Scene_Dirty_Flag]
+
 Scene :: struct {
-	meshes:    [dynamic]Mesh,
-	objects:   [dynamic]Object,
-	materials: [dynamic]Material,
+	meshes:          [dynamic]Mesh,
+	objects:         [dynamic]Object,
+	materials:       [dynamic]Material,
 
 	// state tracking
 	// TODO: I need to see this better in the future
-	dirty:     bool,
+	dirty:           Scene_Dirty_Flags,
+	dirty_materials: map[int]bool,
+	dirty_objects:   map[int]bool,
 }
 
 Object :: struct {
@@ -81,6 +91,18 @@ scene_destroy :: proc(scene: ^Scene) {
 	delete(scene.objects)
 	delete(scene.materials)
 	scene^ = {}
+}
+
+scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Material) {
+	scene.materials[material_idx] = material
+	scene.dirty_materials[material_idx] = true
+	scene.dirty += {.Updated_Material}
+}
+
+scene_update_object_material :: proc(scene: ^Scene, object_idx: int, new_material_idx: int) {
+	scene.objects[object_idx].material_index = new_material_idx
+	scene.dirty_objects[object_idx] = true
+	scene.dirty += {.Updated_Object}
 }
 
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
@@ -316,7 +338,7 @@ create_scene :: proc() -> (scene: Scene) {
 	scene_add_object(&scene, "Sphere 2", cube_index, 2, position = {-2, 0, 0})
 	scene_add_object(&scene, "Ground", cube_index, 0, position = {-0.5, 0, 0})
 
-	scene.dirty = true
+	scene.dirty = {.Acceleration_Structure}
 
 	return scene
 }

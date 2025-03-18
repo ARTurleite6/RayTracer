@@ -20,19 +20,36 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
-vec3 randomHemisphereDirection(vec3 normal, vec2 random) {
-    float phi = 2.0 * 3.14159265359 * random.x;
-    float cosTheta = sqrt(1.0 - random.y);
-    float sinTheta = sqrt(random.y);
+#define M_PI 3.14159265359
 
-    vec3 tangent = normalize(cross(abs(normal.y) < 0.999 ? vec3(0, 1, 0) : vec3(1, 0, 0), normal));
+vec3 generateCosineWeightedDirection(vec2 random) {
+    float phi = 2.0 * M_PI * random.x;
+    float cosTheta = sqrt(random.y);
+    float sinTheta = sqrt(1 - random.y);
+
+    float x = cos(phi) * sinTheta;
+    float y = sin(phi) * sinTheta;
+    float z = cosTheta;
+
+    return vec3(x, y, z);
+}
+
+vec3 generateLambertianRay(vec3 normal, vec2 random) {
+    vec3 nt = normalize(abs(normal.x) > 0.1f ? vec3(0, 1, 0) : vec3(1, 0, 0));
+    vec3 tangent = normalize(cross(nt, normal));
     vec3 bitangent = cross(normal, tangent);
 
+    vec3 localDir = generateCosineWeightedDirection(random);
+
     return normalize(
-        tangent * (cos(phi) * sinTheta) +
-            bitangent * (sin(phi) * sinTheta) +
-            normal * cosTheta
+        localDir.x * tangent + localDir.y * bitangent + localDir.z * normal
     );
+}
+
+float lambertianPDF(vec3 normal, vec3 direction) {
+    float cosTheta = max(0.0, dot(normal, direction));
+
+    return cosTheta / M_PI;
 }
 
 const int MAX_DEPTH = 5;
@@ -77,18 +94,22 @@ void main() {
                 break;
             }
 
-            throughput *= payload.color;
             Material mat = payload.material;
             finalColor += mat.emission_color * mat.emission_power;
-
-            rayOrigin = payload.hitPosition;
 
             vec2 random = vec2(
                     rnd(seed),
                     rnd(seed)
                 );
 
-            rayDirection = randomHemisphereDirection(payload.hitNormal, random);
+            rayOrigin = payload.hitPosition;
+
+            rayDirection = generateLambertianRay(payload.hitNormal, random);
+            float cosTheta = max(0.0, dot(payload.hitNormal, rayDirection));
+
+            vec3 brdf = (payload.color / M_PI);
+            float pdf = lambertianPDF(payload.hitNormal, rayDirection);
+            throughput *= brdf * cosTheta / pdf;
         }
 
         if (push.frame_number == 0) {

@@ -124,46 +124,107 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 @(private = "file")
 render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
-		if imgui.CollapsingHeader("Objects", {}) {
-			@(static) selected_object := -1
-
-			if imgui.BeginListBox("##ObjectList", {0, 100}) {
-				for object, i in scene.objects {
-					is_selected := selected_object == i
-
-					if imgui.Selectable(
-						strings.clone_to_cstring(object.name, context.temp_allocator),
-						is_selected,
-					) {
-						selected_object = i
-					}
-
-					if is_selected {
-						imgui.SetItemDefaultFocus()
-					}
-				}
-
-				imgui.EndListBox()
-			}
-			if selected_object >= 0 && selected_object < len(scene.objects) {
-				object := &scene.objects[selected_object]
-
-				imgui.Separator()
-				imgui.Text("Transform")
-
-				new_position := object.transform.position
-				if imgui.DragFloat3("Position", &new_position, 0.01) {
-				}
-
-				imgui.Separator()
-				new_material := i32(object.material_index + 1)
-				if imgui.InputInt("Material", &new_material, 1) {
-				}
-			}
-		}
-
+		render_object_properties(scene)
+		render_material_properties(scene)
 	}
 	imgui.End()
+}
+
+@(private = "file")
+render_material_properties :: proc(scene: ^Scene) {
+	if imgui.CollapsingHeader("Materials", {}) {
+		@(static) selected_material := -1
+
+		if imgui.BeginListBox("##MaterialList", {0, 100}) {
+			for material, i in scene.materials {
+				is_selected := selected_material == i
+
+				if imgui.Selectable(
+					strings.clone_to_cstring(material.name, context.temp_allocator),
+					is_selected,
+				) {
+					selected_material = i
+				}
+
+				if is_selected {
+					imgui.SetItemDefaultFocus()
+				}
+			}
+
+			imgui.EndListBox()
+		}
+		if selected_material >= 0 && selected_material < len(scene.materials) {
+			material := &scene.materials[selected_material]
+
+			imgui.Separator()
+
+			update_material := false
+			new_albedo := material.albedo
+			if imgui.ColorPicker3("Albedo", &new_albedo, {}) {
+				material.albedo = new_albedo
+				update_material = true
+			}
+
+			new_emission_color := material.emission_color
+			if imgui.ColorPicker3("Emission Color", &new_emission_color) {
+				material.emission_color = new_emission_color
+				update_material = true
+			}
+
+			new_emission_power := material.emission_power
+			if imgui.DragFloat("Emission Power", &new_emission_power) {
+				material.emission_power = new_emission_power
+				update_material = true
+			}
+
+			if update_material {
+				scene_update_material(scene, selected_material, material^)
+			}
+		}
+	}
+}
+
+@(private = "file")
+render_object_properties :: proc(scene: ^Scene) {
+	if imgui.CollapsingHeader("Objects", {}) {
+		@(static) selected_object := -1
+
+		if imgui.BeginListBox("##ObjectList", {0, 100}) {
+			for object, i in scene.objects {
+				is_selected := selected_object == i
+
+				if imgui.Selectable(
+					strings.clone_to_cstring(object.name, context.temp_allocator),
+					is_selected,
+				) {
+					selected_object = i
+				}
+
+				if is_selected {
+					imgui.SetItemDefaultFocus()
+				}
+			}
+
+			imgui.EndListBox()
+		}
+		if selected_object >= 0 && selected_object < len(scene.objects) {
+			object := &scene.objects[selected_object]
+
+			imgui.Separator()
+			imgui.Text("Transform")
+
+			new_position := object.transform.position
+			if imgui.DragFloat3("Position", &new_position, 0.01) {
+			}
+
+			imgui.Separator()
+			// Addding one to the material so it appears nicer to the user
+			new_material := i32(object.material_index + 1)
+			if imgui.InputInt("Material", &new_material, 1) {
+				scene_update_object_material(scene, selected_object, int(new_material - 1))
+			}
+		}
+	}
 }
 
 @(private = "file")

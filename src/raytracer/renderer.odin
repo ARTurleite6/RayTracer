@@ -198,29 +198,8 @@ renderer_render :: proc(renderer: ^Renderer, scene: ^Scene, camera: ^Camera) {
 		renderer_handle_resizing(renderer)
 	}
 
-	if scene.dirty {
-		log.debug("Recreating scene acceleration structure")
-		// TODO: handle the destruction of the old scene by now
-		scene_compile(renderer.gpu_scene, scene^)
-
-		renderer_create_bottom_level_as(renderer)
-		renderer_create_top_level_as(renderer, scene^)
-
-		as_write_info := vk.WriteDescriptorSetAccelerationStructureKHR {
-			sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-			accelerationStructureCount = 1,
-			pAccelerationStructures    = &renderer.scene_raytracing.tlas.handle,
-		}
-		write_info := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			pNext           = &as_write_info,
-			descriptorType  = .ACCELERATION_STRUCTURE_KHR,
-			dstSet          = renderer.gpu_scene.descriptor_set,
-			descriptorCount = 1,
-		}
-		vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
-
-		scene.dirty = false
+	if scene.dirty != {} {
+		update_scene(renderer, scene)
 		renderer.accumulation_frame = 0
 	}
 
@@ -349,8 +328,47 @@ renderer_build_tlas :: proc(
 			&renderer.ctx,
 		)
 	}
+}
 
+@(private = "file")
+update_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
+	if .Updated_Material in scene.dirty {
+		log.debug("Updating material")
 
+		gpu_scene_update_materials_buffer(renderer.gpu_scene, scene)
+		scene.dirty -= {.Updated_Material}
+	}
+
+	if .Updated_Object in scene.dirty {
+		log.debug("Updating object")
+		gpu_scene_update_objects_buffer(renderer.gpu_scene, scene)
+		scene.dirty -= {.Updated_Object}
+	}
+
+	if .Acceleration_Structure in scene.dirty {
+		log.debug("Recreating scene acceleration structure")
+		// TODO: handle the destruction of the old scene by now
+		scene_compile(renderer.gpu_scene, scene^)
+
+		renderer_create_bottom_level_as(renderer)
+		renderer_create_top_level_as(renderer, scene^)
+
+		as_write_info := vk.WriteDescriptorSetAccelerationStructureKHR {
+			sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			accelerationStructureCount = 1,
+			pAccelerationStructures    = &renderer.scene_raytracing.tlas.handle,
+		}
+		write_info := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			pNext           = &as_write_info,
+			descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+			dstSet          = renderer.gpu_scene.descriptor_set,
+			descriptorCount = 1,
+		}
+		vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
+
+		scene.dirty -= {.Acceleration_Structure}
+	}
 }
 
 renderer_create_bottom_level_as :: proc(renderer: ^Renderer) {

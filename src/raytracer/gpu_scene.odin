@@ -209,3 +209,51 @@ gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 
 	delete(scene.meshes_data)
 }
+
+gpu_scene_update_objects_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) {
+	for dirty_object in scene.dirty_objects {
+		object := &scene.objects[dirty_object]
+		mesh := &gpu_scene.meshes_data[object.mesh_index]
+
+		object_data := Object_GPU_Data {
+			vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
+			index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
+			material_index        = u32(object.material_index),
+			mesh_index            = u32(object.mesh_index),
+		}
+
+		offset := vk.DeviceSize(dirty_object * size_of(Object_GPU_Data))
+
+		buffer_update_region(
+			&gpu_scene.objects_buffer,
+			&object_data,
+			size_of(Object_GPU_Data),
+			offset,
+		)
+	}
+
+	clear(&scene.dirty_objects)
+}
+
+gpu_scene_update_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) {
+	for dirty_material in scene.dirty_materials {
+		material := &scene.materials[dirty_material]
+
+		material_data := Material_Data {
+			albedo         = material.albedo,
+			emission_color = material.emission_color,
+			emission_power = material.emission_power,
+		}
+
+		offset := vk.DeviceSize(dirty_material * size_of(Material_Data))
+
+		buffer_update_region(
+			&gpu_scene.materials_buffer,
+			&material_data,
+			size_of(Material_Data),
+			offset,
+		)
+	}
+
+	clear(&scene.dirty_materials)
+}
