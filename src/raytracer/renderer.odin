@@ -149,10 +149,31 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
+
+	buffer_destroy(&renderer.camera_ubo, renderer.ctx.device)
+	vk.DestroyDescriptorSetLayout(
+		vulkan_get_device_handle(&renderer.ctx),
+		renderer.camera_descriptor_set_layout,
+		nil,
+	)
+
 	if renderer.gpu_scene != nil {
 		gpu_scene_destroy(renderer.gpu_scene)
+
+		device := vulkan_get_device_handle(&renderer.ctx)
+		for &as in renderer.scene_raytracing.as {
+			buffer_destroy(&as.buffer, renderer.ctx.device)
+			vk.DestroyAccelerationStructureKHR(device, as.handle, nil)
+		}
+
+		buffer_destroy(&renderer.scene_raytracing.tlas.buffer, renderer.ctx.device)
+		vk.DestroyAccelerationStructureKHR(device, renderer.scene_raytracing.tlas.handle, nil)
+
+		delete(renderer.scene_raytracing.as)
 		free(renderer.gpu_scene)
 	}
+
+	raytracing_pass_destroy(&renderer.raytracing_pass)
 
 	ctx_destroy(&renderer.ctx)
 }

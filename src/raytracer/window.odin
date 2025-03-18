@@ -60,9 +60,10 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 	return
 }
 
-window_destroy :: proc(window: Window) {
+window_destroy :: proc(window: ^Window) {
 	glfw.DestroyWindow(window.handle)
 	glfw.Terminate()
+	window^ = {}
 }
 
 window_set_window_user_pointer :: proc(window: ^Window, pointer: rawptr) {

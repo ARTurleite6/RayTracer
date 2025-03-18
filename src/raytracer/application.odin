@@ -56,12 +56,10 @@ application_destroy :: proc(app: ^Application) {
 
 	{ 	// destroy scene
 		renderer_destroy(&app.renderer)
+		window_destroy(app.window)
+		free(app.window)
 		scene_destroy(&app.scene)
 	}
-
-	free(app.window)
-	// app.renderer = nil
-	// app.window = nil
 }
 
 application_update :: proc(app: ^Application) {

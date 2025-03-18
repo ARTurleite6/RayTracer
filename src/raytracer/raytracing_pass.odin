@@ -210,6 +210,19 @@ raytracing_pass_init :: proc(
 	raytracing_pass_create_shader_binding_table(rt)
 }
 
+raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
+	device := vulkan_get_device_handle(rt.ctx)
+	vk.DestroyPipeline(device, rt.pipeline.pipeline, nil)
+	vk.DestroyPipelineLayout(device, rt.pipeline.layout, nil)
+	image_destroy(&rt.image, rt.ctx^)
+	image_view_destroy(rt.image_view, rt.ctx^)
+
+	vk.DestroyDescriptorSetLayout(device, rt.image_descriptor_set_layout, nil)
+	buffer_destroy(&rt.sbt.raygen_buffer, rt.ctx.device)
+	buffer_destroy(&rt.sbt.hit_buffer, rt.ctx.device)
+	buffer_destroy(&rt.sbt.miss_buffer, rt.ctx.device)
+}
+
 raytracing_pass_render :: proc(
 	rt: ^Raytracing_Pass,
 	cmd: ^Command_Buffer,

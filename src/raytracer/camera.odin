@@ -69,10 +69,6 @@ camera_init :: proc(
 
 }
 
-camera_destroy :: proc(camera: ^Camera) {
-	camera^ = {}
-}
-
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.forward = glm.normalize(target - camera.position)
 	camera.right = glm.cross(camera.forward, camera.up)

@@ -205,6 +205,13 @@ gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 		buffer_destroy(&mesh.index_buffer, scene.vulkan_ctx.device)
 	}
 	buffer_destroy(&scene.objects_buffer, scene.vulkan_ctx.device)
+	buffer_destroy(&scene.materials_buffer, scene.vulkan_ctx.device)
+
+	vk.DestroyDescriptorSetLayout(
+		vulkan_get_device_handle(scene.vulkan_ctx),
+		scene.descriptor_set_layout,
+		nil,
+	)
 
 	delete(scene.meshes_data)
 }

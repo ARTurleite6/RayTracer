@@ -124,6 +124,7 @@ cmd_create_tlas :: proc(
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
 	)
+	defer buffer_destroy(scratch_buffer, device)
 
 	build_info.srcAccelerationStructure = 0
 	build_info.dstAccelerationStructure = rt_builder.tlas.handle
