@@ -11,7 +11,6 @@ Error :: union #shared_nil {
 
 Application :: struct {
 	window:       ^Window,
-	camera:       Camera,
 	scene:        Scene,
 	renderer:     Renderer,
 	input_system: Input_System,
@@ -40,8 +39,9 @@ application_init :: proc(
 
 	{ 	// create rendering stuff
 		renderer_init(&app.renderer, app.window, allocator)
+		// TODO: change this
 		app.scene = create_scene()
-		renderer_set_scene(&app.renderer, &app.scene)
+
 	}
 	return
 }
@@ -76,6 +76,7 @@ application_render :: proc(app: ^Application) {
 	renderer_begin_frame(&app.renderer)
 
 	renderer_render_ui(&app.renderer, &app.scene)
+	renderer_render(&app.renderer, &app.scene)
 
 	renderer_end_frame(&app.renderer)
 }

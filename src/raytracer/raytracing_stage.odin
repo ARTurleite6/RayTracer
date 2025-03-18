@@ -8,10 +8,10 @@ import vma "external:odin-vma"
 import vk "vendor:vulkan"
 _ :: log
 
-Object_Data :: struct {
-	vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
-	material_index:                              u32,
-}
+// Object_Data :: struct {
+// 	vertex_buffer_address, index_buffer_address: vk.DeviceAddress,
+// 	material_index:                              u32,
+// }
 
 Raytracing_Push_Constant :: struct {
 	clear_color:        Vec3,

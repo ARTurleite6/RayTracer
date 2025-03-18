@@ -19,12 +19,13 @@ Renderer :: struct {
 	ctx:                Vulkan_Context,
 	window:             ^Window,
 	// TODO: remove the scene
-	scene:              ^Scene,
 
 	// GPU representation of the scene for now
+	raytracing_pass:    Raytracing_Pass,
 	scene_raytracing:   Raytracing_Builder,
 	gpu_scene:          ^GPU_Scene,
-	camera:             Camera,
+	camera: Camera,
+
 	// TODO: probably move this in the future
 	shaders:            [dynamic]Shader,
 	events:             queue.Queue(Event),
@@ -35,8 +36,6 @@ Renderer :: struct {
 
 	// ray tracing properties
 	ui_ctx:             UI_Context,
-	rt_resources:       Raytracing_Resources,
-	rt_ctx:             Raytracing_Context,
 
 	// time
 	last_frame_time:    f64,
@@ -44,9 +43,64 @@ Renderer :: struct {
 	accumulation_frame: u32,
 }
 
-renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
+renderer_init :: proc(
+	renderer: ^Renderer,
+	window: ^Window,
+	allocator := context.allocator,
+) {
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
+
+	renderer.gpu_scene = new(GPU_Scene)
+	gpu_scene_init(renderer.gpu_scene, &renderer.ctx)
+	camera_init(
+		&renderer.camera,
+		{0, 0, -3},
+		window_aspect_ratio(window^),
+		renderer.ctx.device,
+		renderer.ctx.descriptor_pool,
+	)
+
+
+	{
+		shaders: [3]Shader
+		shader_init(
+			&shaders[0],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rgen.spv",
+			{.RAYGEN_KHR},
+		)
+		shader_init(
+			&shaders[1],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rmiss.spv",
+			{.MISS_KHR},
+		)
+		shader_init(
+			&shaders[2],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/rchit.spv",
+			{.CLOSEST_HIT_KHR},
+		)
+
+		defer for &s in shaders {
+			shader_destroy(&s)
+		}
+		raytracing_pass_init(
+			&renderer.raytracing_pass,
+			&renderer.ctx,
+			shaders[:],
+			renderer.gpu_scene.descriptor_set_layout,
+			renderer.camera.descriptor_set_layout,
+		)
+	}
+
 
 	ui_context_init(
 		&renderer.ui_ctx,
@@ -54,6 +108,8 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.window^,
 		renderer.ctx.swapchain_manager.format,
 	)
+
+	// renderer.raytracing_pass_init(&renderer.raytracing_pass, &renderer.ctx)
 
 	when false {
 		// renderer.scene = create_scene(renderer.ctx.device)
@@ -63,14 +119,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			renderer.scene,
 			renderer.ctx.descriptor_pool,
 			renderer.ctx.swapchain_manager.extent,
-		)
-
-		camera_init(
-			&renderer.camera,
-			{0, 0, -3},
-			window_aspect_ratio(window^),
-			renderer.ctx.device,
-			renderer.ctx.descriptor_pool,
 		)
 
 		{
@@ -151,24 +199,6 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	// queue.destroy(&renderer.events)
 }
 
-renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
-	// TODO: change this part
-	renderer.scene = scene
-	renderer.gpu_scene = new(GPU_Scene)
-	renderer.gpu_scene^ = scene_compile(scene^, &renderer.ctx)
-
-	renderer_create_bottom_level_as(renderer)
-	renderer_create_top_level_as(renderer)
-}
-
-renderer_run :: proc(renderer: ^Renderer) {
-	for !window_should_close(renderer.window^) {
-		free_all(context.temp_allocator)
-		renderer_update(renderer)
-		renderer_render(renderer)
-	}
-}
-
 renderer_update :: proc(renderer: ^Renderer) {
 	current_time := glfw.GetTime()
 	renderer.delta_time = f32(current_time - renderer.last_frame_time)
@@ -192,33 +222,50 @@ renderer_render_ui :: proc(renderer: ^Renderer, scene: ^Scene) {
 renderer_end_frame :: proc(renderer: ^Renderer) {
 	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image)
+	renderer.current_cmd = {}
 }
 
-renderer_render :: proc(renderer: ^Renderer) {
+renderer_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 	if renderer.window.framebuffer_resized {
 		renderer.window.framebuffer_resized = false
 		renderer_handle_resizing(renderer)
 	}
 
+	if scene.dirty {
+		log.debug("Recreating scene acceleration structure")
+		// TODO: handle the destruction of the old scene by now
+		scene_compile(renderer.gpu_scene, scene^)
+
+		renderer_create_bottom_level_as(renderer)
+		renderer_create_top_level_as(renderer, scene^)
+
+		as_write_info := vk.WriteDescriptorSetAccelerationStructureKHR {
+			sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			accelerationStructureCount = 1,
+			pAccelerationStructures    = &renderer.scene_raytracing.tlas.handle,
+		}
+		write_info := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			pNext           = &as_write_info,
+			descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+			dstSet          = renderer.gpu_scene.descriptor_set,
+			descriptorCount = 1,
+		}
+		vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
+
+		scene.dirty = false
+	}
+
 	camera_update_buffers(&renderer.camera)
 
-	image_index, err := ctx_begin_frame(&renderer.ctx)
-
-	cmd := ctx_request_command_buffer(&renderer.ctx)
-	if err != nil do return
-
-	raytracing_render(
-		renderer.rt_ctx,
-		&cmd,
-		image_index,
-		&renderer.camera,
-		&renderer.rt_resources,
+	raytracing_pass_render(
+		&renderer.raytracing_pass,
+		&renderer.current_cmd,
+		renderer.gpu_scene.descriptor_set,
+		renderer.camera.descriptor_sets,
 		renderer.accumulation_frame,
+		renderer.current_image,
 	)
-	// ui_render(renderer.ctx, &cmd, renderer)
-
-	_ = vk_check(vk.EndCommandBuffer(cmd.buffer), "Failed to end command buffer")
-	ctx_swapchain_present(&renderer.ctx, cmd.buffer, image_index)
 
 	renderer.accumulation_frame += 1
 }
@@ -231,8 +278,6 @@ renderer_handle_resizing :: proc(
 	extent := window_get_extent(renderer.window^)
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
-
-	// rt_handle_resize(&renderer.rt_resources, &renderer.ctx, extent)
 
 	renderer.accumulation_frame = 0
 	return nil
@@ -248,16 +293,16 @@ vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 	return nil
 }
 
-renderer_create_top_level_as :: proc(renderer: ^Renderer) {
+renderer_create_top_level_as :: proc(renderer: ^Renderer, scene: Scene) {
 	tlas := make(
 		[dynamic]vk.AccelerationStructureInstanceKHR,
 		0,
-		len(renderer.gpu_scene.objects_data),
+		len(scene.objects),
 		context.temp_allocator,
 	)
 
-	for obj, i in renderer.gpu_scene.objects_data {
-		model_matrix := renderer.scene.objects[i].transform.model_matrix
+	for obj, i in scene.objects {
+		model_matrix := obj.transform.model_matrix
 		ray_inst := vk.AccelerationStructureInstanceKHR {
 			transform                              = matrix_to_transform_matrix_khr(model_matrix),
 			instanceCustomIndex                    = u32(i),
@@ -284,7 +329,10 @@ renderer_build_tlas :: proc(
 	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
 	update := false,
 ) {
-	assert(renderer.scene_raytracing.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
+	assert(
+		renderer.scene_raytracing.tlas.handle == 0 || update,
+		"Cannot build tlas twice, only update",
+	)
 	device := renderer.ctx.device
 
 	count_instance := u32(len(instances))

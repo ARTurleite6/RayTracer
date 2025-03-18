@@ -1,9 +1,9 @@
 package raytracer
 
-import "core:slice"
 import "core:log"
 import "core:math"
 import glm "core:math/linalg"
+import "core:slice"
 import "core:strings"
 _ :: log
 
@@ -17,6 +17,10 @@ Scene :: struct {
 	meshes:    [dynamic]Mesh,
 	objects:   [dynamic]Object,
 	materials: [dynamic]Material,
+
+	// state tracking
+	// TODO: I need to see this better in the future
+	dirty:     bool,
 }
 
 Object :: struct {
@@ -34,9 +38,9 @@ Transform :: struct {
 }
 
 Mesh :: struct {
-	name:                        string,
-	vertices:                    []Vertex,
-	indices:                     []u32,
+	name:     string,
+	vertices: []Vertex,
+	indices:  []u32,
 }
 
 Mesh_Error :: union {
@@ -131,35 +135,6 @@ mesh_init :: proc(mesh: ^Mesh, vertices: []Vertex, indices: []u32, name: string)
 	mesh.name = strings.clone(name)
 	mesh.vertices = slice.clone(vertices)
 	mesh.indices = slice.clone(indices)
-
-	// buffer_init_with_staging_buffer(
-	// 	&mesh.vertex_buffer,
-	// 	device,
-	// 	raw_data(vertices),
-	// 	size_of(Vertex),
-	// 	len(vertices),
-	// 	{
-	// 		.VERTEX_BUFFER,
-	// 		.SHADER_DEVICE_ADDRESS,
-	// 		.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-	// 	},
-	// ) or_return
-
-	// if len(indices) > 0 {
-	// 	buffer_init_with_staging_buffer(
-	// 		&mesh.index_buffer,
-	// 		device,
-	// 		raw_data(indices),
-	// 		size_of(u32),
-	// 		len(indices),
-	// 		{
-	// 			.INDEX_BUFFER,
-	// 			.SHADER_DEVICE_ADDRESS,
-	// 			.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-	// 		},
-	// 	) or_return
-	// }
-
 	return nil
 }
 
@@ -169,9 +144,10 @@ mesh_destroy :: proc(mesh: ^Mesh) {
 	delete(mesh.indices)
 }
 
-create_sphere :: proc(radius: f32 = 1.0, stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
+create_sphere :: proc(stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
 	vertex_count := (stacks + 1) * (slices + 1)
 	index_count := stacks * slices * 6
+	radius: f32 = 1
 
 	vertices := make([dynamic]Vertex, 0, vertex_count, context.temp_allocator)
 	indices := make([dynamic]u32, 0, index_count, context.temp_allocator)
@@ -332,18 +308,16 @@ create_cube :: proc() -> (mesh: Mesh) {
 create_scene :: proc() -> (scene: Scene) {
 	scene_init(&scene)
 
-	quad_mesh := create_cube()
-	quad_index := scene_add_mesh(&scene, quad_mesh)
+	//cube_mesh := create_cube()
+	//cube_index := scene_add_mesh(&scene, cube_mesh)
+	sphere_mesh := create_sphere()
+	sphere_index := scene_add_mesh(&scene, sphere_mesh)
 
-	scene_add_object(&scene, "Sphere 1", quad_index, 1, position = {1, 0, 0})
-	scene_add_object(&scene, "Sphere 2", quad_index, 2, position = {-3, 0, 0})
-	scene_add_object(
-		&scene,
-		"Ground",
-		quad_index,
-		0,
-		position = {0, 100.9, 0}, scale = {100, 100, 100},
-	)
+	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1, 0, 0})
+	scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {-2, 0, 0})
+	scene_add_object(&scene, "Ground", sphere_index, 0, position = {-0.5, 0, 0})
+
+	scene.dirty = true
 
 	return scene
 }
