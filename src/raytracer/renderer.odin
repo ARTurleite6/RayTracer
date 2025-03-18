@@ -5,15 +5,9 @@ import "core:log"
 import glm "core:math/linalg"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+import "core:container/queue"
 _ :: fmt
 _ :: glm
-
-Global_Ubo :: struct {
-	projection:         Mat4,
-	view:               Mat4,
-	inverse_view:       Mat4,
-	inverse_projection: Mat4,
-}
 
 Render_Error :: union {
 	Pipeline_Error,
@@ -26,14 +20,15 @@ Renderer :: struct {
 	window:             ^Window,
 	scene:              Scene,
 	camera:             Camera,
-	render_graph:       Render_Graph,
 	input_system:       Input_System,
 	// TODO: probably move this in the future
 	shaders:            [dynamic]Shader,
-	ui_ctx:             UI_Context,
+	events: queue.Queue(Event),
 
-	// ray tracing propertis
-	rt_properties:      vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+	// ray tracing properties
+	ui_ctx:             UI_Context,
+	rt_resources:       Raytracing_Resources,
+	rt_ctx:             Raytracing_Context,
 
 	// time
 	last_frame_time:    f64,
@@ -43,14 +38,8 @@ Renderer :: struct {
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
+	queue.init(&renderer.events, allocator = allocator)
 	vulkan_context_init(&renderer.ctx, window, allocator)
-
-	renderer.rt_properties.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
-	props := vk.PhysicalDeviceProperties2 {
-		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
-		pNext = &renderer.rt_properties,
-	}
-	vk.GetPhysicalDeviceProperties2(renderer.ctx.device.physical_device.ptr, &props)
 
 	window_set_window_user_pointer(window, renderer.window)
 	input_system_init(&renderer.input_system, allocator)
@@ -67,70 +56,24 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		renderer.ctx.swapchain_manager.format,
 	)
 
-	{ 	// create shaders
-		shader: Shader
-		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/vert.spv", {.VERTEX})
-		append(&renderer.shaders, shader)
-
-		shader_init(&shader, renderer.ctx.device, "main", "main", "shaders/frag.spv", {.FRAGMENT})
-		append(&renderer.shaders, shader)
-	}
-
 	renderer.scene = create_scene(renderer.ctx.device)
-	scene_create_as(&renderer.scene, renderer.ctx.device)
-	scene_create_buffers(&renderer.scene, renderer.ctx.device)
-
-	ctx_create_rt_descriptor_set(&renderer.ctx, &renderer.scene.rt_builder.tlas.handle)
-
-	render_graph_init(
-		&renderer.render_graph,
-		renderer.ctx.device,
-		&renderer.ctx.swapchain_manager,
-		allocator,
+	rt_resources_init(
+		&renderer.rt_resources,
+		&renderer.ctx,
+		renderer.scene,
+		renderer.ctx.descriptor_pool,
+		renderer.ctx.swapchain_manager.extent,
 	)
-	{ 	// create graphics stage
 
-		stage := new(Graphics_Stage)
-		graphics_stage_init(
-			stage,
-			"main",
-			renderer.shaders[:],
-			renderer.ctx.swapchain_manager.format,
-			vertex_bindings = {
-				{
-					attribute_description = VERTEX_INPUT_ATTRIBUTE_DESCRIPTION[:],
-					binding_description = VERTEX_INPUT_BINDING_DESCRIPTION,
-				},
-			},
-		)
-
-		render_stage_use_push_constant_range(
-			stage,
-			vk.PushConstantRange {
-				stageFlags = {.VERTEX},
-				offset = 0,
-				size = size_of(Graphics_Push_Constant),
-			},
-		)
-		render_stage_use_descriptor_layout(
-			stage,
-			descriptor_manager_get_descriptor_layout(renderer.ctx.descriptor_manager, "camera").handle,
-		)
-
-		render_stage_add_color_attachment(
-			stage,
-			load_op = .CLEAR,
-			store_op = .STORE,
-			clear_value = vk.ClearValue {
-				color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}},
-			},
-		)
-		// render_graph_add_stage(&renderer.render_graph, stage)
-	}
+	camera_init(
+		&renderer.camera,
+		{0, 0, -3},
+		window_aspect_ratio(window^),
+		renderer.ctx.device,
+		renderer.ctx.descriptor_pool,
+	)
 
 	{
-		stage := new(Raytracing_Stage)
-
 		shader: [3]Shader
 		shader_init(
 			&shader[0],
@@ -157,71 +100,51 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			{.CLOSEST_HIT_KHR},
 		)
 
-		raytracing_init(stage, "raytracing", shader[:], renderer.rt_properties)
+		defer for &s in shader {
+			shader_destroy(&s)
+		}
 
-		descriptor_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"raytracing_main",
-		)
-
-		camera_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"camera",
-		)
-
-		scene_layout := descriptor_manager_get_descriptor_layout(
-			renderer.ctx.descriptor_manager,
-			"scene_data",
-		)
-
-		scene_update_descriptor_writes(renderer.scene, &renderer.ctx.descriptor_manager)
-
-		render_stage_use_descriptor_layout(stage, descriptor_layout.handle)
-		render_stage_use_descriptor_layout(stage, camera_layout.handle)
-		render_stage_use_descriptor_layout(stage, scene_layout.handle)
-		render_stage_use_push_constant_range(
-			stage,
-			vk.PushConstantRange {
-				stageFlags = {.RAYGEN_KHR},
-				offset = 0,
-				size = size_of(Raytracing_Push_Constant),
+		rt_init(
+			&renderer.rt_ctx,
+			&renderer.ctx,
+			{
+				renderer.camera.descriptor_set_layout,
+				renderer.rt_resources.descriptor_sets_layouts[.Scene],
+				renderer.rt_resources.descriptor_sets_layouts[.Storage_Image],
 			},
+			{
+				vk.PushConstantRange {
+					stageFlags = {.RAYGEN_KHR},
+					offset = 0,
+					size = size_of(Raytracing_Push_Constant),
+				},
+			},
+			shader[:],
 		)
-
-		render_graph_add_stage(&renderer.render_graph, stage)
 	}
 
-	{
-		stage := new(UI_Stage)
-		ui_stage_init(stage, "ui", allocator)
-		render_stage_add_color_attachment(
-			stage,
-			.LOAD,
-			.STORE,
-			vk.ClearValue{color = vk.ClearColorValue{float32 = {0.01, 0.01, 0.01, 1.0}}},
-		)
-
-		render_graph_add_stage(&renderer.render_graph, stage)
-	}
-
-	render_graph_compile(&renderer.render_graph)
-
-	camera_init(&renderer.camera, position = {0, 0, -3}, aspect = window_aspect_ratio(window^))
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
-	render_graph_destroy(&renderer.render_graph)
 	scene_destroy(&renderer.scene, renderer.ctx.device)
 	input_system_destroy(&renderer.input_system)
+
 	for &shader in renderer.shaders {
 		shader_destroy(&shader)
 	}
+
 	delete(renderer.shaders)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
+	rt_destroy(&renderer.rt_ctx)
+	rt_resources_destroy(&renderer.rt_resources, renderer.ctx)
 	window_destroy(renderer.window^)
+
+	camera_destroy(&renderer.camera)
 	ctx_destroy(&renderer.ctx)
+
+	queue.destroy(&renderer.events)
 }
 
 // FIXME: in the future change this
@@ -252,29 +175,41 @@ renderer_update :: proc(renderer: ^Renderer) {
 	glfw.PollEvents()
 	window_update(renderer.window^)
 
-	moved: bool
+	needs_reset_frame: bool
+	for event in queue.pop_back_safe(&renderer.events) {
+		#partial switch v in event {
+			case Scene_Object_Material_Change:
+				renderer.scene.objects[v.object_index].material_index = v.new_material_index
+				raytracing_update_object_buffer(&renderer.rt_resources, renderer.scene)
+			case Scene_Object_Update_Position:
+				object_update_position(&renderer.scene.objects[v.object_index], v.new_position)
+				raytracing_update_acceleration_structure(&renderer.rt_resources, renderer.scene)
+		}
+		needs_reset_frame = true
+	}
+
 	if input_system_is_key_pressed(renderer.input_system, .W) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Front, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .S) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Backwards, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .D) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Right, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .A) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Left, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Space) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Up, renderer.delta_time)
 	}
 	if input_system_is_key_pressed(renderer.input_system, .Left_Shift) {
-		moved = true
+		needs_reset_frame = true
 		camera_move(&renderer.camera, .Down, renderer.delta_time)
 	}
 
@@ -282,7 +217,7 @@ renderer_update :: proc(renderer: ^Renderer) {
 		window_set_should_close(renderer.window^)
 	}
 
-	if moved {
+	if needs_reset_frame {
 		renderer.accumulation_frame = 0
 	}
 }
@@ -293,37 +228,26 @@ renderer_render :: proc(renderer: ^Renderer) {
 		renderer_handle_resizing(renderer)
 	}
 
-	cmd, image_index, err := ctx_begin_frame(&renderer.ctx)
+	camera_update_buffers(&renderer.camera)
 
+	image_index, err := ctx_begin_frame(&renderer.ctx)
+
+	cmd := &Command_Buffer{}
+	command_buffer_init(cmd, ctx_request_command_buffer(&renderer.ctx))
 	if err != nil do return
 
-	ubo := &Global_Ubo {
-		view = renderer.camera.view,
-		projection = renderer.camera.proj,
-		inverse_view = renderer.camera.inverse_view,
-		inverse_projection = renderer.camera.inverse_proj,
-	}
-	ctx_update_uniform_buffer(&renderer.ctx, ubo)
-
-
-	_ = vk_check(
-		vk.BeginCommandBuffer(cmd, &vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}),
-		"Failed to begin command buffer",
-	)
-
-	render_graph_render(
-		&renderer.render_graph,
+	raytracing_render(
+		renderer.rt_ctx,
 		cmd,
 		image_index,
-		{
-			renderer = renderer,
-			descriptor_manager = &renderer.ctx.descriptor_manager,
-			frame_index = u32(renderer.ctx.current_frame),
-		},
+		&renderer.camera,
+		&renderer.rt_resources,
+		renderer.accumulation_frame,
 	)
+	ui_render(renderer.ctx, cmd, renderer)
 
-	_ = vk_check(vk.EndCommandBuffer(cmd), "Failed to end command buffer")
-	ctx_swapchain_present(&renderer.ctx, cmd, image_index)
+	_ = vk_check(vk.EndCommandBuffer(cmd.buffer), "Failed to end command buffer")
+	ctx_swapchain_present(&renderer.ctx, cmd.buffer, image_index)
 
 	renderer.accumulation_frame += 1
 }
@@ -335,14 +259,19 @@ renderer_handle_resizing :: proc(
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
 	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
-	return ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator)
+	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
+
+	rt_handle_resize(&renderer.rt_resources, &renderer.ctx, extent)
+
+	renderer.accumulation_frame = 0
+	return nil
 }
 
 @(private = "file")
 renderer_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	renderer := cast(^Renderer)handler.data
 
-	switch v in event {
+	#partial switch v in event {
 	case Mouse_Button_Event:
 		input_system_register_mouse_button(&renderer.input_system, v.key, v.action)
 	case Key_Event:

@@ -4,8 +4,8 @@ from optparse import OptionParser
 import subprocess
 
 build_odin_commands = {
-    'release': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -o:speed",
-    'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -debug"
+    'release': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -o:speed",
+    'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -debug"
   }
 
 shaders = [
@@ -40,7 +40,7 @@ def build_shaders():
 
 def main():
     parser = OptionParser()
-    parser.add_option("-b", "--build-mode", dest="build_mode", default="release", help="Build in release or debug mode")
+    parser.add_option("-b", "--build-mode", dest="build_mode", default="debug", help="Build in release or debug mode")
     parser.add_option("-r", "--run", action="store_true",
                   dest="run", default=False,
                   help="Run program when finished building")

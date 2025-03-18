@@ -45,7 +45,7 @@ device_init :: proc(
 		defer vkb.destroy_instance_builder(&builder)
 
 
-		vkb.instance_set_minimum_version(&builder, vk.API_VERSION_1_4)
+		vkb.instance_set_minimum_version(&builder, vk.API_VERSION_1_3)
 
 		when ODIN_DEBUG {
 			vkb.instance_request_validation_layers(&builder)

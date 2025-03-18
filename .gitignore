@@ -1,4 +1,3 @@
-tests.bin
-.vscode
-*.ppm
-*.dSYM
+raytracer
+raytracer.exe
+raytracer.pdb

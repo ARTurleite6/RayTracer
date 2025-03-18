@@ -1,9 +1,9 @@
 package raytracer
 
-import "core:fmt"
+import "core:log"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
-_ :: fmt
+_ :: log
 
 MAX_FRAMES_IN_FLIGHT :: 1
 
@@ -23,28 +23,20 @@ Frame_Error :: enum {
 }
 
 Vulkan_Context :: struct {
-	device:                ^Device,
-	swapchain_manager:     Swapchain_Manager,
-	descriptor_pool:       vk.DescriptorPool,
-	descriptor_manager:    Descriptor_Set_Manager,
+	device:            ^Device,
+	swapchain_manager: Swapchain_Manager,
+	descriptor_pool:   vk.DescriptorPool,
 	//frames
-	frames:                [MAX_FRAMES_IN_FLIGHT]Frame_Data,
-	current_frame:         int,
-
-	// raytracing images
-	raytracing_image:      Image,
-	raytracing_image_view: vk.ImageView,
+	frames:            [MAX_FRAMES_IN_FLIGHT]Frame_Data,
+	current_frame:     int,
+	current_image:     u32,
 }
 
 Frame_Data :: struct {
-	command_pool:    vk.CommandPool,
-	primary_buffer:  vk.CommandBuffer,
+	command_pool:    Command_Pool,
 	render_finished: vk.Semaphore,
 	image_available: vk.Semaphore,
 	in_flight_fence: vk.Fence,
-
-	// Uniform Buffer
-	uniform_buffer:  Buffer,
 }
 
 vulkan_context_init :: proc(
@@ -62,7 +54,7 @@ vulkan_context_init :: proc(
 		&ctx.swapchain_manager,
 		ctx.device,
 		surface,
-		{extent = window_get_extent(window^), vsync = true},
+		{extent = window_get_extent(window^), preferred_mode = .MAILBOX},
 	) or_return
 
 	frames_data_init(ctx) or_return
@@ -73,117 +65,82 @@ vulkan_context_init :: proc(
 		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
 		1000,
 	)
-	descriptor_manager_init(&ctx.descriptor_manager, ctx.device, ctx.descriptor_pool, allocator)
-
-	ctx_descriptor_sets_init(ctx)
-
-	{
-		image_init(&ctx.raytracing_image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
-		image_view_init(&ctx.raytracing_image_view, ctx.raytracing_image, ctx)
-
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-		image_transition_layout_stage_access(
-			cmd,
-			ctx.raytracing_image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
 	return nil
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context) {
-	descriptor_manager_destroy(&ctx.descriptor_manager)
-
+	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 	frames_data_destroy(ctx)
 
-	for &f in ctx.frames {
-		buffer_destroy(&f.uniform_buffer, ctx.device)
-	}
-
 	swapchain_manager_destroy(&ctx.swapchain_manager)
-
-	image_destroy(&ctx.raytracing_image, ctx^)
-	vk.DestroyImageView(ctx.device.logical_device.ptr, ctx.raytracing_image_view, nil)
 
 	device_destroy(ctx.device)
 	free(ctx.device)
 }
 
-ctx_create_rt_descriptor_set :: proc(ctx: ^Vulkan_Context, tlas: ^vk.AccelerationStructureKHR) {
-	layout: Descriptor_Set_Layout
+ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> vk.CommandBuffer {
+	frame := &ctx.frames[ctx.current_frame]
+	cmd := command_pool_request_command_buffer(&frame.command_pool)
 
-	descriptor_set_layout_init(
-		&layout,
-		ctx.device,
-		{
-			{ 	// TLAS
-				binding         = 0,
-				descriptorType  = .ACCELERATION_STRUCTURE_KHR,
-				descriptorCount = 1,
-				stageFlags      = {.RAYGEN_KHR},
-			},
-			{ 	// Output Image
-				binding         = 1,
-				descriptorType  = .STORAGE_IMAGE,
-				descriptorCount = 1,
-				stageFlags      = {.RAYGEN_KHR},
-			},
-		},
-	)
+	begin_info := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+		flags = {.ONE_TIME_SUBMIT},
+	}
 
-	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "raytracing_main", layout)
-	descriptor_manager_write_acceleration_structure(
-		&ctx.descriptor_manager,
-		"raytracing_main",
-		0,
-		0,
-		tlas,
-	)
+	vk.BeginCommandBuffer(cmd, &begin_info)
 
-	descriptor_manager_write_image(
-		&ctx.descriptor_manager,
-		"raytracing_main",
-		0,
-		1,
-		ctx.raytracing_image_view,
-	)
-
-	descriptor_set_layout_init(
-		&layout,
-		ctx.device,
-		{
-			{
-				binding = 0,
-				descriptorType = .STORAGE_BUFFER,
-				descriptorCount = 1,
-				stageFlags = {.CLOSEST_HIT_KHR},
-			},
-			{
-				binding = 1,
-				descriptorType = .STORAGE_BUFFER,
-				descriptorCount = 1,
-				stageFlags = {.CLOSEST_HIT_KHR},
-			},
-		},
-	)
-
-	descriptor_manager_register_descriptor_sets(&ctx.descriptor_manager, "scene_data", layout)
+	return cmd
 }
 
-ctx_begin_frame :: proc(
-	ctx: ^Vulkan_Context,
-) -> (
-	cmd: vk.CommandBuffer,
-	image_index: u32,
-	err: Render_Error,
+@(require_results)
+ctx_get_swapchain_render_pass :: proc(
+	ctx: Vulkan_Context,
+	clear_value: Vec4 = {},
+	load_op: vk.AttachmentLoadOp = .CLEAR,
+	store_op: vk.AttachmentStoreOp = .STORE,
+) -> vk.RenderingInfo {
+	image_view := ctx.swapchain_manager.image_views[ctx.current_image]
+
+	// TODO: probably find a more suitable way of doing this without allocating memory
+	color_attachment := new(vk.RenderingAttachmentInfo, context.temp_allocator)
+	color_attachment^ = {
+		sType = .RENDERING_ATTACHMENT_INFO,
+		imageView = image_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp = load_op,
+		storeOp = store_op,
+		clearValue = {color = {float32 = clear_value}},
+	}
+
+	return vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = ctx.swapchain_manager.extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = color_attachment,
+	}
+}
+
+ctx_transition_swapchain_image :: proc(
+	ctx: Vulkan_Context,
+	cmd: Command_Buffer,
+	old_layout, new_layout: vk.ImageLayout,
+	src_stage, dst_stage: vk.PipelineStageFlags2,
+	src_access, dst_access: vk.AccessFlags2,
 ) {
+	image_transition(
+		cmd.buffer,
+		image = ctx.swapchain_manager.images[ctx.current_image],
+		old_layout = old_layout,
+		new_layout = new_layout,
+		src_stage = src_stage,
+		dst_stage = dst_stage,
+		src_access = src_access,
+		dst_access = dst_access,
+	)
+}
+
+ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_Error) {
 	frame := &ctx.frames[ctx.current_frame]
 	device := ctx.device.logical_device.ptr
 
@@ -193,22 +150,16 @@ ctx_begin_frame :: proc(
 	)
 
 	result := swapchain_acquire_next_image(&ctx.swapchain_manager, frame.image_available) or_return
+	ctx.current_image = result.image_index
 
 	_ = vk_check(
 		vk.ResetFences(device, 1, &frame.in_flight_fence),
 		"Error reseting in_flight_fence",
 	)
 
-	cmd = frame.primary_buffer
-	_ = vk_check(vk.ResetCommandBuffer(cmd, {}), "Error reseting command buffer")
+	command_pool_begin(&frame.command_pool)
 
-	return cmd, result.image_index, nil
-}
-
-ctx_update_uniform_buffer :: proc(ctx: ^Vulkan_Context, data: rawptr) {
-	buffer := &ctx.frames[ctx.current_frame].uniform_buffer
-	buffer_write(buffer, data)
-	buffer_flush(buffer, ctx.device^)
+	return result.image_index, nil
 }
 
 ctx_swapchain_present :: proc(
@@ -283,100 +234,12 @@ ctx_handle_resize :: proc(
 	return nil
 }
 
-ctx_descriptor_sets_init :: proc(ctx: ^Vulkan_Context) {
-	{ 	// init uniform buffers
-		for &f in ctx.frames {
-			buffer_init(
-				&f.uniform_buffer,
-				ctx.device,
-				size_of(Global_Ubo),
-				1,
-				{.UNIFORM_BUFFER},
-				.Cpu_To_Gpu,
-			)
-
-			buffer_map(&f.uniform_buffer, ctx.device)
-		}
-	}
-
-	{
-		layout: Descriptor_Set_Layout
-		descriptor_set_layout_init(
-			&layout,
-			ctx.device,
-			{
-				{
-					binding = 0,
-					descriptorType = .UNIFORM_BUFFER,
-					descriptorCount = 1,
-					stageFlags = {.VERTEX, .RAYGEN_KHR},
-				},
-			},
-		)
-		descriptor_manager_register_descriptor_sets(
-			&ctx.descriptor_manager,
-			"camera",
-			layout,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-	}
-
-	{ 	// descriptor sets
-		for &f, i in ctx.frames {
-			buffer := f.uniform_buffer
-			descriptor_manager_write_buffer(
-				&ctx.descriptor_manager,
-				"camera",
-				u32(i),
-				0,
-				buffer.handle,
-				vk.DeviceSize(size_of(Global_Ubo)),
-			)
-		}
-	}
-}
-
 frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
+	graphics_queue_index := vkb.device_get_queue_index(ctx.device.logical_device, .Graphics)
+
 	for &f in ctx.frames {
 		{ 	// Create command pool and buffer
-			pool_info := vk.CommandPoolCreateInfo {
-				sType            = .COMMAND_POOL_CREATE_INFO,
-				flags            = {.RESET_COMMAND_BUFFER},
-				queueFamilyIndex = vkb.device_get_queue_index(
-					ctx.device.logical_device,
-					.Graphics,
-				),
-			}
-
-			if result := vk_check(
-				vk.CreateCommandPool(
-					ctx.device.logical_device.ptr,
-					&pool_info,
-					nil,
-					&f.command_pool,
-				),
-				"Failed to create command pool",
-			); result != .SUCCESS {
-				return .Command_Pool_Creation_Failed
-			}
-
-			buffer_info := vk.CommandBufferAllocateInfo {
-				sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-				commandPool        = f.command_pool,
-				level              = .PRIMARY,
-				commandBufferCount = 1,
-			}
-
-			if result := vk_check(
-				vk.AllocateCommandBuffers(
-					ctx.device.logical_device.ptr,
-					&buffer_info,
-					&f.primary_buffer,
-				),
-				"Failed to Allocate command buffer",
-			); result != .SUCCESS {
-				return .Command_Buffer_Creation_Failed
-			}
+			command_pool_init(&f.command_pool, ctx.device, graphics_queue_index)
 		}
 
 		{ 	// Create sync objects
@@ -434,8 +297,7 @@ frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
 frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 	device := ctx.device.logical_device.ptr
 	for &f in ctx.frames {
-		vk.FreeCommandBuffers(device, f.command_pool, 1, &f.primary_buffer)
-		vk.DestroyCommandPool(device, f.command_pool, nil)
+		command_pool_destroy(&f.command_pool)
 		vk.DestroyFence(device, f.in_flight_fence, nil)
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)

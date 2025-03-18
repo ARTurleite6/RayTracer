@@ -3,15 +3,24 @@ package raytracer
 import "core:log"
 import "core:math"
 import glm "core:math/linalg"
+import vk "vendor:vulkan"
 _ :: log
 
 CAMERA_SPEED :: f32(5.0)
 CAMERA_SENSIVITY :: f32(0.001)
 
+
 Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
 Vec4 :: glm.Vector4f32
 Mat4 :: glm.Matrix4f32
+
+Camera_UBO :: struct {
+	projection:         Mat4,
+	view:               Mat4,
+	inverse_view:       Mat4,
+	inverse_projection: Mat4,
+}
 
 Direction :: enum {
 	Front,
@@ -31,12 +40,20 @@ Camera :: struct {
 	// mouse movement
 	last_mouse_position:                    Vec2,
 	sensivity:                              f32,
+
+	// vulkan resources
+	ubo_buffer:                             Buffer,
+	descriptor_set_layout:                  vk.DescriptorSetLayout,
+	descriptor_sets:                        vk.DescriptorSet,
+	device:                                 ^Device,
 }
 
 camera_init :: proc(
 	camera: ^Camera,
 	position: Vec3,
 	aspect: f32,
+	device: ^Device,
+	descriptor_pool: vk.DescriptorPool,
 	target: Vec3 = {0, 0, 0},
 	up: Vec3 = {0, 1, 0},
 	fov: f32 = 45,
@@ -52,14 +69,82 @@ camera_init :: proc(
 		far       = far,
 		speed     = CAMERA_SPEED,
 		sensivity = CAMERA_SENSIVITY,
+		device    = device,
 	}
 	camera_look_at(camera, target, up)
 	camera_update_matrices(camera)
+
+	buffer_init(
+		&camera.ubo_buffer,
+		camera.device,
+		size_of(Camera_UBO),
+		1,
+		{.UNIFORM_BUFFER},
+		.Gpu_To_Cpu,
+	)
+	buffer_map(&camera.ubo_buffer, camera.device)
+	camera.descriptor_set_layout, _ = create_descriptor_set_layout(
+		[]vk.DescriptorSetLayoutBinding{
+			{
+				binding = 0,
+				descriptorType = .UNIFORM_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+			},
+		},
+		device.logical_device.ptr,
+	)
+
+
+	camera.descriptor_sets, _ = allocate_single_descriptor_set(
+		descriptor_pool,
+		&camera.descriptor_set_layout,
+		device.logical_device.ptr,
+	)
+
+	buffer_info := vk.DescriptorBufferInfo {
+		buffer = camera.ubo_buffer.handle,
+		offset = 0,
+		range  = size_of(Camera_UBO),
+	}
+
+	write := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = camera.descriptor_sets,
+		dstBinding      = 0,
+		dstArrayElement = 0,
+		descriptorType  = .UNIFORM_BUFFER,
+		descriptorCount = 1,
+		pBufferInfo     = &buffer_info,
+	}
+
+	vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
+}
+
+camera_destroy :: proc(camera: ^Camera) {
+	buffer_destroy(&camera.ubo_buffer, camera.device)
+	descriptor_set_layout_destroy(camera.descriptor_set_layout, camera.device.logical_device.ptr)
+
+	camera^ = {}
 }
 
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.forward = glm.normalize(target - camera.position)
 	camera.right = glm.cross(camera.forward, camera.up)
+}
+
+camera_update_buffers :: proc(camera: ^Camera) {
+	ubo_data := Camera_UBO {
+		projection         = camera.proj,
+		view               = camera.view,
+		inverse_view       = camera.inverse_view,
+		inverse_projection = camera.inverse_proj,
+	}
+
+	data := &ubo_data
+	buffer := &camera.ubo_buffer
+	buffer_write(buffer, data)
+	buffer_flush(buffer, camera.device^)
 }
 
 camera_update_aspect_ratio :: proc(camera: ^Camera, aspect_ratio: f32) {

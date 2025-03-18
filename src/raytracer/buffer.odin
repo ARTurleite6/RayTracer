@@ -24,23 +24,6 @@ Buffer_Error :: enum {
 	Invalid_Size,
 }
 
-vertex_buffer_init :: proc(buffer: ^Buffer, device: ^Device, vertices: []Vertex) -> Buffer_Error {
-	buffer_init_with_staging_buffer(
-		buffer,
-		device,
-		raw_data(vertices),
-		size_of(Vertex),
-		len(vertices),
-		{
-			.VERTEX_BUFFER,
-			.SHADER_DEVICE_ADDRESS,
-			.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-		},
-	) or_return
-
-	return .None
-}
-
 buffer_init :: proc(
 	buffer: ^Buffer,
 	device: ^Device,
@@ -48,6 +31,7 @@ buffer_init :: proc(
 	instance_count: int,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
+	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
 	size := instance_size * vk.DeviceSize(instance_count)
 	if size <= 0 {
@@ -67,6 +51,24 @@ buffer_init :: proc(
 
 	alloc_create_info := vma.Allocation_Create_Info {
 		usage = memory_usage,
+	}
+
+	if alignment > 0 {
+		if vk_check(
+			   vma.create_buffer_with_alignment(
+				   device.allocator,
+				   buffer_info,
+				   alloc_create_info,
+				   alignment,
+				   &buffer.handle,
+				   &buffer.allocation,
+				   nil,
+			   ),
+			   "Failed to create aligned buffer",
+		   ) !=
+		   .SUCCESS {
+			return .Creation_Failed
+		}
 	}
 
 	if vk_check(

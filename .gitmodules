@@ -10,3 +10,6 @@
 [submodule "external/odin-imgui"]
 	path = external/odin-imgui
 	url = git@gitlab.com:L-4/odin-imgui.git
+[submodule "external/odin-spirv-reflect/SPIRV-Reflect"]
+	path = external/odin-spirv-reflect/SPIRV-Reflect
+	url = git@github.com:KhronosGroup/SPIRV-Reflect.git

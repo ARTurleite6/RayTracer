@@ -28,7 +28,8 @@ Build_Acceleration_Structure :: struct {
 	as:         Acceleration_Structure,
 }
 
-create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
+// TODO: probably in the future change this to be able to update the instance buffer without creating a new one
+create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device, update := false) {
 	tlas := make(
 		[dynamic]vk.AccelerationStructureInstanceKHR,
 		0,
@@ -53,7 +54,7 @@ create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, devic
 		append(&tlas, ray_inst)
 	}
 
-	build_tlas(rt_builder, tlas[:], device)
+	build_tlas(rt_builder, tlas[:], device, update = update)
 }
 
 build_tlas :: proc(
@@ -63,7 +64,7 @@ build_tlas :: proc(
 	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
 	update := false,
 ) {
-	assert(rt_builder.tlas.handle == 0, "Cannot build tlas twice, only update")
+	assert(rt_builder.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
 
 	count_instance := u32(len(instances))
 
@@ -76,12 +77,14 @@ build_tlas :: proc(
 		int(count_instance),
 		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 	)
+	defer buffer_destroy(&instances_buffer, device)
+	scratch_buffer: Buffer
+	defer buffer_destroy(&scratch_buffer, device)
 	{
 		cmd := device_begin_single_time_commands(device, device.command_pool)
 		defer device_end_single_time_commands(device, device.command_pool, cmd)
 
 
-		scratch_buffer: Buffer
 		cmd_create_tlas(
 			rt_builder,
 			cmd,
@@ -103,6 +106,7 @@ create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, de
 	for &mesh in scene.meshes {
 		append(&inputs, mesh_to_geometry(&mesh, device^))
 	}
+
 	build_blas(rt_builder, inputs[:], {.PREFER_FAST_TRACE}, device)
 }
 
@@ -143,7 +147,7 @@ build_blas :: proc(
 		)
 
 		total_size += info.size_info.accelerationStructureSize
-		max_scratch_size += max(info.size_info.buildScratchSize, max_scratch_size)
+		max_scratch_size = max(info.size_info.buildScratchSize, max_scratch_size)
 		number_compactions += 1 if .ALLOW_COMPACTION in info.build_info.flags else 0
 	}
 
@@ -155,8 +159,9 @@ build_blas :: proc(
 		1,
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 		.Gpu_Only,
+		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED IN THE FUTURE
 	)
-
+	defer buffer_destroy(&scratch_buffer, device)
 
 	query_pool: vk.QueryPool
 	if number_compactions > 0 {
@@ -173,7 +178,7 @@ build_blas :: proc(
 		)
 	}
 
-	indices := make([dynamic]u32)
+	indices := make([dynamic]u32, context.temp_allocator)
 
 	batch_size: vk.DeviceSize
 	batch_limit: vk.DeviceSize = 256_000_000
@@ -299,7 +304,9 @@ cmd_create_tlas :: proc(
 		size  = size_info.accelerationStructureSize,
 	}
 
-	rt_builder.tlas = create_acceleration(&create_info, device)
+	if !update {
+		rt_builder.tlas = create_acceleration(&create_info, device)
+	}
 
 	buffer_init(
 		scratch_buffer,
@@ -308,6 +315,7 @@ cmd_create_tlas :: proc(
 		1,
 		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
+		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
 	)
 
 	build_info.srcAccelerationStructure = 0

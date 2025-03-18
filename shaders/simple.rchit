@@ -18,18 +18,18 @@ layout(buffer_reference, scalar) buffer Indices {
     ivec3 indices[];
 };
 
-layout(set = 2, binding = 0, scalar) buffer MaterialsBuffer {
-    Material materials[];
-};
-
-layout(set = 2, binding = 1, scalar) buffer ObjectsData {
+layout(set = 1, binding = 1, scalar) buffer ObjectsData {
     ObjectData objects[];
-};
+} objects_data;
+
+layout(set = 1, binding = 2, scalar) buffer MaterialsBuffer {
+    Material materials[];
+} materials_data;
 
 void main()
 {
-    ObjectData object = objects[gl_InstanceCustomIndexEXT];
-    Material mat = materials[object.material_index];
+    ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
+    Material mat = materials_data.materials[object.material_index];
 
     Vertices vert = Vertices(object.vertex_address);
     Indices indices = Indices(object.index_address);
