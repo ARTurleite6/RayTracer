@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:strings"
-import "core:container/queue"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
@@ -48,8 +47,8 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 		Device = device.logical_device.ptr,
 		Queue = device.graphics_queue,
 		DescriptorPool = ctx.pool,
-		MinImageCount = 3,
-		ImageCount = 3,
+		MinImageCount = 2,
+		ImageCount = 2,
 		UseDynamicRendering = true,
 		PipelineRenderingCreateInfo = {
 			sType = .PIPELINE_RENDERING_CREATE_INFO,
@@ -82,7 +81,7 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
 
-	info := ctx_get_swapchain_render_pass(ctx^, load_op = .CLEAR)
+	info := ctx_get_swapchain_render_pass(ctx^, load_op = .LOAD)
 	command_buffer_begin_render_pass(cmd, &info)
 
 	imgui_vulkan.NewFrame()
@@ -154,19 +153,11 @@ render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Dev
 
 				new_position := object.transform.position
 				if imgui.DragFloat3("Position", &new_position, 0.01) {
-					queue.push(&renderer.events, Scene_Object_Update_Position {
-						object_index = selected_object,
-						new_position = new_position,
-					})
 				}
 
 				imgui.Separator()
 				new_material := i32(object.material_index + 1)
 				if imgui.InputInt("Material", &new_material, 1) {
-					queue.push(&renderer.events, Scene_Object_Material_Change {
-						object_index = selected_object,
-						new_material_index = int(new_material) - 1,
-					})
 				}
 			}
 		}

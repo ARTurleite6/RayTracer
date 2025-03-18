@@ -308,14 +308,13 @@ create_cube :: proc() -> (mesh: Mesh) {
 create_scene :: proc() -> (scene: Scene) {
 	scene_init(&scene)
 
-	//cube_mesh := create_cube()
-	//cube_index := scene_add_mesh(&scene, cube_mesh)
-	sphere_mesh := create_sphere()
-	sphere_index := scene_add_mesh(&scene, sphere_mesh)
+	cube_mesh := create_cube()
+	sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
+	cube_index := scene_add_mesh(&scene, cube_mesh)
 
 	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1, 0, 0})
-	scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {-2, 0, 0})
-	scene_add_object(&scene, "Ground", sphere_index, 0, position = {-0.5, 0, 0})
+	scene_add_object(&scene, "Sphere 2", cube_index, 2, position = {-2, 0, 0})
+	scene_add_object(&scene, "Ground", cube_index, 0, position = {-0.5, 0, 0})
 
 	scene.dirty = true
 

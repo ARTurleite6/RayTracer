@@ -31,25 +31,25 @@ void main()
     ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
     Material mat = materials_data.materials[object.material_index];
     //
-    // Vertices vert = Vertices(object.vertex_address);
-    // Indices indices = Indices(object.index_address);
-    //
-    // ivec3 ind = indices.indices[gl_PrimitiveID];
-    //
-    // Vertex v0 = vert.v[ind.x];
-    // Vertex v1 = vert.v[ind.y];
-    // Vertex v2 = vert.v[ind.z];
-    //
-    // const vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
-    // const vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
-    // vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
-    //
-    // const vec3 norm = v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z;
-    // const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
+    Vertices vert = Vertices(object.vertex_address);
+    Indices indices = Indices(object.index_address);
+
+    ivec3 ind = indices.indices[gl_PrimitiveID];
+
+    Vertex v0 = vert.v[ind.x];
+    Vertex v1 = vert.v[ind.y];
+    Vertex v2 = vert.v[ind.z];
+
+    const vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+    const vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
+    vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
+
+    const vec3 norm = v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z;
+    const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
     payload.color = mat.albedo;
     payload.material = mat;
-    // payload.hitPosition = worldPos;
-    // payload.hitNormal = worldNrm;
+    payload.hitPosition = worldPos;
+    payload.hitNormal = worldNrm;
     payload.hit = true;
 }

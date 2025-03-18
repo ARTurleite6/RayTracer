@@ -1,9 +1,44 @@
 package raytracer
 
 import "core:mem"
+import "core:mem/tlsf"
 import "core:strings"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
+
+Shader_Binding_Table :: struct {
+	raygen_buffer, miss_buffer, hit_buffer: Buffer,
+}
+
+Stage_Indices :: enum {
+	Raygen = 0,
+	Miss,
+	Closest_Hit,
+}
+
+Pipeline_Error :: enum {
+	None = 0,
+	Cache_Creation_Failed,
+	Layout_Creation_Failed,
+	Pipeline_Creation_Failed,
+	Descriptor_Set_Creation_Failed,
+	Pool_Creation_Failed,
+	Shader_Creation_Failed,
+}
+
+Pipeline :: struct {
+	pipeline: vk.Pipeline,
+	layout:   vk.PipelineLayout,
+}
+
+Raytracing_Push_Constant :: struct {
+	clear_color:        Vec3,
+	accumulation_frame: u32,
+}
+
+align_up :: proc(x, align: u32) -> u32 {
+	return u32(tlsf.align_up(uint(x), uint(align)))
+}
 
 Raytracing_Pass :: struct {
 	pipeline:                    Pipeline,
@@ -171,8 +206,8 @@ raytracing_pass_init :: proc(
 		vk.CreateRayTracingPipelinesKHR(device, 0, 0, 1, &create_info, nil, &rt.pipeline.pipeline),
 		"Failed to create raytracing pipeline",
 	)
-    
-    raytracing_pass_create_shader_binding_table(rt)
+
+	raytracing_pass_create_shader_binding_table(rt)
 }
 
 raytracing_pass_render :: proc(

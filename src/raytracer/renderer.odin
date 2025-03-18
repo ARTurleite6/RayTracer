@@ -1,10 +1,8 @@
 package raytracer
 
-import "core:container/queue"
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
-import "vendor:glfw"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
@@ -16,51 +14,90 @@ Render_Error :: union {
 }
 
 Renderer :: struct {
-	ctx:                Vulkan_Context,
-	window:             ^Window,
+	ctx:                          Vulkan_Context,
+	window:                       ^Window,
 	// TODO: remove the scene
 
 	// GPU representation of the scene for now
-	raytracing_pass:    Raytracing_Pass,
-	scene_raytracing:   Raytracing_Builder,
-	gpu_scene:          ^GPU_Scene,
-	camera: Camera,
+	raytracing_pass:              Raytracing_Pass,
+	scene_raytracing:             Raytracing_Builder,
+	gpu_scene:                    ^GPU_Scene,
 
-	// TODO: probably move this in the future
-	shaders:            [dynamic]Shader,
-	events:             queue.Queue(Event),
+	// Camera stuff
+	camera_descriptor_set_layout: vk.DescriptorSetLayout,
+	camera_descriptor_set:        vk.DescriptorSet,
+	camera_ubo:                   Buffer,
 
 	// vulkan stuff
-	current_cmd:        Command_Buffer,
-	current_image:      u32,
+	current_cmd:                  Command_Buffer,
+	current_image:                u32,
 
 	// ray tracing properties
-	ui_ctx:             UI_Context,
+	ui_ctx:                       UI_Context,
 
 	// time
-	last_frame_time:    f64,
-	delta_time:         f32,
-	accumulation_frame: u32,
+	accumulation_frame:           u32,
 }
 
-renderer_init :: proc(
-	renderer: ^Renderer,
-	window: ^Window,
-	allocator := context.allocator,
-) {
+renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
 
 	renderer.gpu_scene = new(GPU_Scene)
 	gpu_scene_init(renderer.gpu_scene, &renderer.ctx)
-	camera_init(
-		&renderer.camera,
-		{0, 0, -3},
-		window_aspect_ratio(window^),
-		renderer.ctx.device,
-		renderer.ctx.descriptor_pool,
-	)
 
+	{ 	// Initialize camera stuff
+		device := renderer.ctx.device
+		camera_ubo := &renderer.camera_ubo
+		camera_descriptor_set_layout := &renderer.camera_descriptor_set_layout
+		camera_descriptor_set := &renderer.camera_descriptor_set
+		buffer_init(
+			camera_ubo,
+			renderer.ctx.device,
+			size_of(Camera_UBO),
+			1,
+			{.UNIFORM_BUFFER},
+			.Gpu_To_Cpu,
+		)
+		buffer_map(camera_ubo, device)
+		camera_descriptor_set_layout^, _ = create_descriptor_set_layout(
+			[]vk.DescriptorSetLayoutBinding {
+				{
+					binding = 0,
+					descriptorType = .UNIFORM_BUFFER,
+					descriptorCount = 1,
+					stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+				},
+			},
+			device.logical_device.ptr,
+		)
+
+
+		camera_descriptor_set^, _ = allocate_single_descriptor_set(
+			renderer.ctx.descriptor_pool,
+			camera_descriptor_set_layout,
+			device.logical_device.ptr,
+		)
+
+		buffer_info := vk.DescriptorBufferInfo {
+			buffer = camera_ubo.handle,
+			offset = 0,
+			range  = size_of(Camera_UBO),
+		}
+
+		write := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			dstSet          = camera_descriptor_set^,
+			dstBinding      = 0,
+			dstArrayElement = 0,
+			descriptorType  = .UNIFORM_BUFFER,
+			descriptorCount = 1,
+			pBufferInfo     = &buffer_info,
+		}
+
+		vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
+
+	}
 
 	{
 		shaders: [3]Shader
@@ -97,10 +134,9 @@ renderer_init :: proc(
 			&renderer.ctx,
 			shaders[:],
 			renderer.gpu_scene.descriptor_set_layout,
-			renderer.camera.descriptor_set_layout,
+			renderer.camera_descriptor_set_layout,
 		)
 	}
-
 
 	ui_context_init(
 		&renderer.ui_ctx,
@@ -108,101 +144,17 @@ renderer_init :: proc(
 		renderer.window^,
 		renderer.ctx.swapchain_manager.format,
 	)
-
-	// renderer.raytracing_pass_init(&renderer.raytracing_pass, &renderer.ctx)
-
-	when false {
-		// renderer.scene = create_scene(renderer.ctx.device)
-		rt_resources_init(
-			&renderer.rt_resources,
-			&renderer.ctx,
-			renderer.scene,
-			renderer.ctx.descriptor_pool,
-			renderer.ctx.swapchain_manager.extent,
-		)
-
-		{
-			shader: [3]Shader
-			shader_init(
-				&shader[0],
-				renderer.ctx.device,
-				"main",
-				"main",
-				"shaders/rgen.spv",
-				{.RAYGEN_KHR},
-			)
-			shader_init(
-				&shader[1],
-				renderer.ctx.device,
-				"main",
-				"main",
-				"shaders/rmiss.spv",
-				{.MISS_KHR},
-			)
-			shader_init(
-				&shader[2],
-				renderer.ctx.device,
-				"main",
-				"main",
-				"shaders/rchit.spv",
-				{.CLOSEST_HIT_KHR},
-			)
-
-			defer for &s in shader {
-				shader_destroy(&s)
-			}
-
-			rt_init(
-				&renderer.rt_ctx,
-				&renderer.ctx,
-				{
-					renderer.camera.descriptor_set_layout,
-					renderer.rt_resources.descriptor_sets_layouts[.Scene],
-					renderer.rt_resources.descriptor_sets_layouts[.Storage_Image],
-				},
-				{
-					vk.PushConstantRange {
-						stageFlags = {.RAYGEN_KHR},
-						offset = 0,
-						size = size_of(Raytracing_Push_Constant),
-					},
-				},
-				shader[:],
-			)
-		}
-	}
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
-
-	// scene_destroy(&renderer.scene, renderer.ctx.device)
-
-	// for &shader in renderer.shaders {
-	// 	shader_destroy(&shader)
-	// }
-
-	// delete(renderer.shaders)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
-	// rt_destroy(&renderer.rt_ctx)
-	// rt_resources_destroy(&renderer.rt_resources, renderer.ctx)
-	// window_destroy(renderer.window^)
-
 	if renderer.gpu_scene != nil {
 		gpu_scene_destroy(renderer.gpu_scene)
 		free(renderer.gpu_scene)
 	}
 
-	// camera_destroy(&renderer.camera)
 	ctx_destroy(&renderer.ctx)
-
-	// queue.destroy(&renderer.events)
-}
-
-renderer_update :: proc(renderer: ^Renderer) {
-	current_time := glfw.GetTime()
-	renderer.delta_time = f32(current_time - renderer.last_frame_time)
-	renderer.last_frame_time = current_time
 }
 
 renderer_begin_frame :: proc(renderer: ^Renderer) {
@@ -225,7 +177,7 @@ renderer_end_frame :: proc(renderer: ^Renderer) {
 	renderer.current_cmd = {}
 }
 
-renderer_render :: proc(renderer: ^Renderer, scene: ^Scene) {
+renderer_render :: proc(renderer: ^Renderer, scene: ^Scene, camera: ^Camera) {
 	if renderer.window.framebuffer_resized {
 		renderer.window.framebuffer_resized = false
 		renderer_handle_resizing(renderer)
@@ -254,15 +206,32 @@ renderer_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 		vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
 
 		scene.dirty = false
+		renderer.accumulation_frame = 0
 	}
 
-	camera_update_buffers(&renderer.camera)
+	if camera.dirty {
+		log.debug("Updating camera information")
+		ubo_data := Camera_UBO {
+			projection         = camera.proj,
+			view               = camera.view,
+			inverse_view       = camera.inverse_view,
+			inverse_projection = camera.inverse_proj,
+		}
+
+		data := &ubo_data
+		buffer := &renderer.camera_ubo
+		buffer_write(buffer, data)
+		buffer_flush(buffer, renderer.ctx.device^)
+
+		camera.dirty = false
+		renderer.accumulation_frame = 0
+	}
 
 	raytracing_pass_render(
 		&renderer.raytracing_pass,
 		&renderer.current_cmd,
 		renderer.gpu_scene.descriptor_set,
-		renderer.camera.descriptor_sets,
+		renderer.camera_descriptor_set,
 		renderer.accumulation_frame,
 		renderer.current_image,
 	)
@@ -276,7 +245,6 @@ renderer_handle_resizing :: proc(
 	allocator := context.allocator,
 ) -> Swapchain_Error {
 	extent := window_get_extent(renderer.window^)
-	camera_update_aspect_ratio(&renderer.camera, window_aspect_ratio(renderer.window^))
 	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
 
 	renderer.accumulation_frame = 0
