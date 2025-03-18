@@ -51,15 +51,9 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		camera_ubo := &renderer.camera_ubo
 		camera_descriptor_set_layout := &renderer.camera_descriptor_set_layout
 		camera_descriptor_set := &renderer.camera_descriptor_set
-		buffer_init(
-			camera_ubo,
-			renderer.ctx.device,
-			size_of(Camera_UBO),
-			1,
-			{.UNIFORM_BUFFER},
-			.Gpu_To_Cpu,
-		)
-		buffer_map(camera_ubo, device)
+
+		buffer_init(camera_ubo, &renderer.ctx, size_of(Camera_UBO), {.UNIFORM_BUFFER}, .Gpu_To_Cpu)
+		buffer_map(camera_ubo)
 		camera_descriptor_set_layout^, _ = create_descriptor_set_layout(
 			[]vk.DescriptorSetLayoutBinding {
 				{
@@ -150,7 +144,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
 
-	buffer_destroy(&renderer.camera_ubo, renderer.ctx.device)
+	buffer_destroy(&renderer.camera_ubo)
 	vk.DestroyDescriptorSetLayout(
 		vulkan_get_device_handle(&renderer.ctx),
 		renderer.camera_descriptor_set_layout,
@@ -162,11 +156,11 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 		device := vulkan_get_device_handle(&renderer.ctx)
 		for &as in renderer.scene_raytracing.as {
-			buffer_destroy(&as.buffer, renderer.ctx.device)
+			buffer_destroy(&as.buffer)
 			vk.DestroyAccelerationStructureKHR(device, as.handle, nil)
 		}
 
-		buffer_destroy(&renderer.scene_raytracing.tlas.buffer, renderer.ctx.device)
+		buffer_destroy(&renderer.scene_raytracing.tlas.buffer)
 		vk.DestroyAccelerationStructureKHR(device, renderer.scene_raytracing.tlas.handle, nil)
 
 		delete(renderer.scene_raytracing.as)
@@ -242,7 +236,7 @@ renderer_render :: proc(renderer: ^Renderer, scene: ^Scene, camera: ^Camera) {
 		data := &ubo_data
 		buffer := &renderer.camera_ubo
 		buffer_write(buffer, data)
-		buffer_flush(buffer, renderer.ctx.device^)
+		buffer_flush(buffer)
 
 		camera.dirty = false
 		renderer.accumulation_frame = 0
@@ -329,15 +323,15 @@ renderer_build_tlas :: proc(
 	instances_buffer: Buffer
 	buffer_init_with_staging_buffer(
 		&instances_buffer,
-		device,
+		&renderer.ctx,
 		raw_data(instances),
 		size_of(vk.AccelerationStructureInstanceKHR),
 		int(count_instance),
 		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 	)
-	defer buffer_destroy(&instances_buffer, device)
+	defer buffer_destroy(&instances_buffer)
 	scratch_buffer: Buffer
-	defer buffer_destroy(&scratch_buffer, device)
+	defer buffer_destroy(&scratch_buffer)
 	{
 		cmd := device_begin_single_time_commands(device, device.command_pool)
 		defer device_end_single_time_commands(device, device.command_pool, cmd)
@@ -347,12 +341,12 @@ renderer_build_tlas :: proc(
 			&renderer.scene_raytracing,
 			cmd,
 			count_instance,
-			buffer_get_device_address(instances_buffer, device^),
+			buffer_get_device_address(instances_buffer),
 			&scratch_buffer,
 			flags,
 			update,
 			false,
-			device,
+			&renderer.ctx,
 		)
 	}
 
@@ -419,14 +413,13 @@ renderer_build_blas :: proc(
 	scratch_buffer: Buffer
 	buffer_init(
 		&scratch_buffer,
-		device,
+		&renderer.ctx,
 		max_scratch_size,
-		1,
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED IN THE FUTURE
 	)
-	defer buffer_destroy(&scratch_buffer, device)
+	defer buffer_destroy(&scratch_buffer)
 
 	query_pool: vk.QueryPool
 	if number_compactions > 0 {
@@ -461,9 +454,9 @@ renderer_build_blas :: proc(
 					cmd,
 					indices[:],
 					build_infos,
-					buffer_get_device_address(scratch_buffer, device^),
+					buffer_get_device_address(scratch_buffer),
 					query_pool,
-					device,
+					&renderer.ctx,
 				)
 			}
 

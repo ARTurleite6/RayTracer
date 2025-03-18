@@ -80,18 +80,22 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 
 @(require_results)
 vulkan_get_device_handle :: proc(ctx: ^Vulkan_Context) -> vk.Device {
-	return ctx.device.logical_device.ptr	
+	return ctx.device.logical_device.ptr
 }
 
 @(require_results)
-vulkan_get_raytracing_pipeline_propertis :: proc(ctx: ^Vulkan_Context) -> (props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR) {
+vulkan_get_raytracing_pipeline_propertis :: proc(
+	ctx: ^Vulkan_Context,
+) -> (
+	props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
+) {
 	props.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
 	properties := vk.PhysicalDeviceProperties2 {
 		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
 		pNext = &props,
 	}
 	vk.GetPhysicalDeviceProperties2(ctx.device.physical_device.ptr, &properties)
-	
+
 	return props
 }
 

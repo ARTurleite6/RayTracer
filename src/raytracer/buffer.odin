@@ -15,6 +15,7 @@ Buffer :: struct {
 	instance_count: int,
 	mapped_data:    rawptr,
 	usage:          vk.BufferUsageFlags,
+	ctx:            ^Vulkan_Context,
 }
 
 Buffer_Error :: enum {
@@ -26,21 +27,24 @@ Buffer_Error :: enum {
 
 buffer_init :: proc(
 	buffer: ^Buffer,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 	instance_size: vk.DeviceSize,
-	instance_count: int,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
+	instance_count := 1,
 	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
 	size := instance_size * vk.DeviceSize(instance_count)
 	if size <= 0 {
 		return .Invalid_Size
 	}
+	buffer.ctx = ctx
 	buffer.size = size // TODO: this should be handled better in the future
 	buffer.instance_size = instance_size
 	buffer.instance_count = instance_count
 	buffer.usage = usage
+
+	device := buffer.ctx.device
 
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
@@ -91,7 +95,7 @@ buffer_init :: proc(
 
 buffer_init_with_staging_buffer :: proc(
 	buffer: ^Buffer,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 	data: rawptr,
 	instance_size: vk.DeviceSize,
 	instance_count: int,
@@ -100,47 +104,49 @@ buffer_init_with_staging_buffer :: proc(
 ) -> (
 	err: Buffer_Error,
 ) {
+	buffer.ctx = ctx
+	device := buffer.ctx.device
 	buffer_init(
 		buffer,
-		device,
+		buffer.ctx,
 		instance_size,
-		instance_count,
 		{.TRANSFER_DST} | usage,
 		memory_usage,
+		instance_count = instance_count,
 	) or_return
 
 	staging_buffer: Buffer
 	buffer_init(
 		&staging_buffer,
-		device,
+		buffer.ctx,
 		instance_size,
-		instance_count,
 		{.TRANSFER_SRC} | usage,
 		.Cpu_To_Gpu,
+		instance_count = instance_count,
 	) or_return
-	defer buffer_destroy(&staging_buffer, device)
+	defer buffer_destroy(&staging_buffer)
 
-	buffer_map(&staging_buffer, device) or_return
+	buffer_map(&staging_buffer) or_return
 	buffer_write(&staging_buffer, data)
 
 	device_copy_buffer(device, staging_buffer.handle, buffer.handle, staging_buffer.size)
 	return nil
 }
 
-buffer_destroy :: proc(buffer: ^Buffer, device: ^Device) {
+buffer_destroy :: proc(buffer: ^Buffer) {
 	if buffer.mapped_data != nil {
-		vma.unmap_memory(device.allocator, buffer.allocation)
+		vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 	}
 
 	if buffer.handle != 0 {
-		vma.destroy_buffer(device.allocator, buffer.handle, buffer.allocation)
+		vma.destroy_buffer(buffer.ctx.device.allocator, buffer.handle, buffer.allocation)
 	}
 	buffer^ = {}
 }
 
-buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {
+buffer_map :: proc(buffer: ^Buffer) -> (rawptr, Buffer_Error) {
 	if result := vk_check(
-		vma.map_memory(device.allocator, buffer.allocation, &buffer.mapped_data),
+		vma.map_memory(buffer.ctx.device.allocator, buffer.allocation, &buffer.mapped_data),
 		"Failed to map buffer",
 	); result != .SUCCESS {
 		return nil, .Mapping_Failed
@@ -149,8 +155,8 @@ buffer_map :: proc(buffer: ^Buffer, device: ^Device) -> (rawptr, Buffer_Error) {
 	return buffer.mapped_data, .None
 }
 
-buffer_unmap :: proc(buffer: ^Buffer, device: ^Device) {
-	vma.unmap_memory(device.allocator, buffer.allocation)
+buffer_unmap :: proc(buffer: ^Buffer) {
+	vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 }
 
 buffer_write :: proc(
@@ -168,18 +174,18 @@ buffer_write :: proc(
 	}
 }
 
-buffer_flush :: proc(buffer: ^Buffer, device: Device, size := vk.WHOLE_SIZE) {
+buffer_flush :: proc(buffer: ^Buffer, size := vk.WHOLE_SIZE) {
 	_ = vk_check(
-		vma.flush_allocation(device.allocator, buffer.allocation, 0, buffer.size),
+		vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, 0, buffer.size),
 		"Failed to upload data to uniform buffer",
 	)
 }
 
-buffer_get_device_address :: proc(buffer: Buffer, device: Device) -> vk.DeviceAddress {
+buffer_get_device_address :: proc(buffer: Buffer) -> vk.DeviceAddress {
 	address_info := vk.BufferDeviceAddressInfo {
 		sType  = .BUFFER_DEVICE_ADDRESS_INFO,
 		buffer = buffer.handle,
 	}
 
-	return vk.GetBufferDeviceAddress(device.logical_device.ptr, &address_info)
+	return vk.GetBufferDeviceAddress(vulkan_get_device_handle(buffer.ctx), &address_info)
 }

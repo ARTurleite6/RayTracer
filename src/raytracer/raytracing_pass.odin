@@ -218,9 +218,9 @@ raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	image_view_destroy(rt.image_view, rt.ctx^)
 
 	vk.DestroyDescriptorSetLayout(device, rt.image_descriptor_set_layout, nil)
-	buffer_destroy(&rt.sbt.raygen_buffer, rt.ctx.device)
-	buffer_destroy(&rt.sbt.hit_buffer, rt.ctx.device)
-	buffer_destroy(&rt.sbt.miss_buffer, rt.ctx.device)
+	buffer_destroy(&rt.sbt.raygen_buffer)
+	buffer_destroy(&rt.sbt.hit_buffer)
+	buffer_destroy(&rt.sbt.miss_buffer)
 }
 
 raytracing_pass_render :: proc(
@@ -266,19 +266,19 @@ raytracing_pass_render :: proc(
 	)
 
 	raygen_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.raygen_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.raygen_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
@@ -383,25 +383,22 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 
 	buffer_init(
 		&rt.sbt.raygen_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
 	buffer_init(
 		&rt.sbt.miss_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
 	buffer_init(
 		&rt.sbt.hit_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
@@ -421,24 +418,24 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	)
 
 	data: rawptr
-	data, _ = buffer_map(&rt.sbt.raygen_buffer, device)
+	data, _ = buffer_map(&rt.sbt.raygen_buffer)
 	mem.copy(data, raw_data(shader_handle_storage), int(handle_size))
 
-	data, _ = buffer_map(&rt.sbt.miss_buffer, device)
+	data, _ = buffer_map(&rt.sbt.miss_buffer)
 	mem.copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned)),
 		int(handle_size),
 	)
 
-	data, _ = buffer_map(&rt.sbt.hit_buffer, device)
+	data, _ = buffer_map(&rt.sbt.hit_buffer)
 	mem.copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
 		int(handle_size),
 	)
 
-	buffer_unmap(&rt.sbt.raygen_buffer, device)
-	buffer_unmap(&rt.sbt.miss_buffer, device)
-	buffer_unmap(&rt.sbt.hit_buffer, device)
+	buffer_unmap(&rt.sbt.raygen_buffer)
+	buffer_unmap(&rt.sbt.miss_buffer)
+	buffer_unmap(&rt.sbt.hit_buffer)
 }

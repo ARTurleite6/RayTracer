@@ -94,7 +94,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 
 		buffer_init_with_staging_buffer(
 			&gpu_mesh.vertex_buffer,
-			gpu_scene.vulkan_ctx.device,
+			gpu_scene.vulkan_ctx,
 			raw_data(mesh.vertices),
 			size_of(Vertex),
 			len(mesh.vertices),
@@ -103,7 +103,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 
 		buffer_init_with_staging_buffer(
 			&gpu_mesh.index_buffer,
-			gpu_scene.vulkan_ctx.device,
+			gpu_scene.vulkan_ctx,
 			raw_data(mesh.indices),
 			size_of(u32),
 			len(mesh.indices),
@@ -123,7 +123,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 	}
 	buffer_init_with_staging_buffer(
 		&gpu_scene.materials_buffer,
-		gpu_scene.vulkan_ctx.device,
+		gpu_scene.vulkan_ctx,
 		raw_data(materials_data),
 		size_of(Material_Data),
 		len(materials_data),
@@ -135,14 +135,8 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		gpu_object: Object_GPU_Data
 		mesh := gpu_scene.meshes_data[object.mesh_index]
 
-		gpu_object.vertex_buffer_address = buffer_get_device_address(
-			mesh.vertex_buffer,
-			gpu_scene.vulkan_ctx.device^,
-		)
-		gpu_object.index_buffer_address = buffer_get_device_address(
-			mesh.index_buffer,
-			gpu_scene.vulkan_ctx.device^,
-		)
+		gpu_object.vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer)
+		gpu_object.index_buffer_address = buffer_get_device_address(mesh.index_buffer)
 		gpu_object.material_index = u32(object.material_index)
 		gpu_object.mesh_index = u32(object.mesh_index)
 
@@ -151,7 +145,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 
 	buffer_init_with_staging_buffer(
 		&gpu_scene.objects_buffer,
-		gpu_scene.vulkan_ctx.device,
+		gpu_scene.vulkan_ctx,
 		raw_data(objects_data),
 		size_of(Object_GPU_Data),
 		len(objects_data),
@@ -201,11 +195,11 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 
 gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 	for &mesh in scene.meshes_data {
-		buffer_destroy(&mesh.vertex_buffer, scene.vulkan_ctx.device)
-		buffer_destroy(&mesh.index_buffer, scene.vulkan_ctx.device)
+		buffer_destroy(&mesh.vertex_buffer)
+		buffer_destroy(&mesh.index_buffer)
 	}
-	buffer_destroy(&scene.objects_buffer, scene.vulkan_ctx.device)
-	buffer_destroy(&scene.materials_buffer, scene.vulkan_ctx.device)
+	buffer_destroy(&scene.objects_buffer)
+	buffer_destroy(&scene.materials_buffer)
 
 	vk.DestroyDescriptorSetLayout(
 		vulkan_get_device_handle(scene.vulkan_ctx),
