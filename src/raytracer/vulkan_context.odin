@@ -78,17 +78,35 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context) {
 	free(ctx.device)
 }
 
-ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> vk.CommandBuffer {
+@(require_results)
+vulkan_get_device_handle :: proc(ctx: ^Vulkan_Context) -> vk.Device {
+	return ctx.device.logical_device.ptr	
+}
+
+@(require_results)
+vulkan_get_raytracing_pipeline_propertis :: proc(ctx: ^Vulkan_Context) -> (props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR) {
+	props.sType = .PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR
+	properties := vk.PhysicalDeviceProperties2 {
+		sType = .PHYSICAL_DEVICE_PROPERTIES_2,
+		pNext = &props,
+	}
+	vk.GetPhysicalDeviceProperties2(ctx.device.physical_device.ptr, &properties)
+	
+	return props
+}
+
+ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> (cmd: Command_Buffer) {
 	frame := &ctx.frames[ctx.current_frame]
-	cmd := command_pool_request_command_buffer(&frame.command_pool)
+	buffer := command_pool_request_command_buffer(&frame.command_pool)
 
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 		flags = {.ONE_TIME_SUBMIT},
 	}
 
-	vk.BeginCommandBuffer(cmd, &begin_info)
+	vk.BeginCommandBuffer(buffer, &begin_info)
 
+	command_buffer_init(&cmd, buffer)
 	return cmd
 }
 

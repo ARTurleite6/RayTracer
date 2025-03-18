@@ -2,11 +2,12 @@
 
 from optparse import OptionParser
 import subprocess
+import platform
 
-build_odin_commands = {
-    'release': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -o:speed",
-    'debug': "odin build src -vet -strict-style -collection:external=external -out:raytracer.exe -show-timings -debug"
-  }
+RED = '\033[91m'
+RESET = '\033[0m'
+
+os = platform.system()
 
 shaders = [
     {
@@ -31,12 +32,36 @@ shaders = [
     }
 ]
 
+def print_command_result(result: subprocess.CompletedProcess[str]):
+    if result.stdout:
+        print(result.stdout)
+
+    if result.stderr:
+        print(f"{RED}Error: {result.stderr}{RESET}")
+
+def get_build_command(build_mode):
+    os = platform.system()
+    file = ""
+    if os == "Windows":
+        file = "raytracer.exe"
+    elif os == "Linux":
+        file = "raytracer"
+    else:
+        raise RuntimeError(f"Unsupported os #{os}")
+
+    command = "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings"
+    if build_mode == "debug":
+        command += " -debug"
+    else:
+        command += " -o:speed"
+
+    return command
+
 def build_shaders():
     print("Building shaders...")
     for shader in shaders:
         result = subprocess.run(["glslc", "--target-env=vulkan1.2", shader["src"], "-o", shader["out"]], capture_output=True, text=True)
-        print("Output:", result.stdout)
-        print("Error:", result.stderr)
+        print_command_result(result)
 
 def main():
     parser = OptionParser()
@@ -49,12 +74,11 @@ def main():
 
     build_shaders()
 
-    command = build_odin_commands[options.build_mode]
+    command = get_build_command(options.build_mode)
     print("Building raytracer...")
+    print(command)
     result = subprocess.run(command.split(), capture_output=True, text=True)
-
-    print("Output:", result.stdout)
-    print("Error:", result.stderr)
+    print_command_result(result)
 
     if options.run:
         subprocess.run(["./raytracer"])

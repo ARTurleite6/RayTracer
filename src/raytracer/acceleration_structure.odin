@@ -28,204 +28,11 @@ Build_Acceleration_Structure :: struct {
 	as:         Acceleration_Structure,
 }
 
-// TODO: probably in the future change this to be able to update the instance buffer without creating a new one
-create_top_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device, update := false) {
-	tlas := make(
-		[dynamic]vk.AccelerationStructureInstanceKHR,
-		0,
-		len(scene.objects),
-		context.temp_allocator,
-	)
-
-	for obj, i in scene.objects {
-		ray_inst := vk.AccelerationStructureInstanceKHR {
-			transform                              = matrix_to_transform_matrix_khr(
-				obj.transform.model_matrix,
-			),
-			instanceCustomIndex                    = u32(i),
-			mask                                   = 0xFF,
-			instanceShaderBindingTableRecordOffset = 0,
-			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
-			accelerationStructureReference         = u64(
-				get_blas_device_address(rt_builder.as[obj.mesh_index], device.logical_device.ptr),
-			),
-		}
-
-		append(&tlas, ray_inst)
-	}
-
-	build_tlas(rt_builder, tlas[:], device, update = update)
-}
-
-build_tlas :: proc(
-	rt_builder: ^Raytracing_Builder,
-	instances: []vk.AccelerationStructureInstanceKHR,
-	device: ^Device,
-	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
-	update := false,
-) {
-	assert(rt_builder.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
-
-	count_instance := u32(len(instances))
-
-	instances_buffer: Buffer
-	buffer_init_with_staging_buffer(
-		&instances_buffer,
-		device,
-		raw_data(instances),
-		size_of(vk.AccelerationStructureInstanceKHR),
-		int(count_instance),
-		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
-	)
-	defer buffer_destroy(&instances_buffer, device)
-	scratch_buffer: Buffer
-	defer buffer_destroy(&scratch_buffer, device)
-	{
-		cmd := device_begin_single_time_commands(device, device.command_pool)
-		defer device_end_single_time_commands(device, device.command_pool, cmd)
-
-
-		cmd_create_tlas(
-			rt_builder,
-			cmd,
-			count_instance,
-			buffer_get_device_address(instances_buffer, device^),
-			&scratch_buffer,
-			flags,
-			update,
-			false,
-			device,
-		)
-	}
-
-}
-
-create_bottom_level_as :: proc(rt_builder: ^Raytracing_Builder, scene: Scene, device: ^Device) {
-	inputs := make([dynamic]Bottom_Level_Input, 0, len(scene.meshes), context.temp_allocator)
-
-	for &mesh in scene.meshes {
-		append(&inputs, mesh_to_geometry(&mesh, device^))
-	}
-
-	build_blas(rt_builder, inputs[:], {.PREFER_FAST_TRACE}, device)
-}
-
-build_blas :: proc(
-	rt_builder: ^Raytracing_Builder,
-	inputs: []Bottom_Level_Input,
-	flags: vk.BuildAccelerationStructureFlagsKHR,
-	device: ^Device,
-) {
-	build_infos := make([]Build_Acceleration_Structure, len(inputs), context.temp_allocator)
-
-	n_blas := u32(len(inputs))
-	total_size: vk.DeviceSize
-	max_scratch_size: vk.DeviceSize
-	number_compactions: u32
-	for &input, i in inputs {
-		info := &build_infos[i]
-
-		info.build_info = {
-			sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-			type          = .BOTTOM_LEVEL,
-			mode          = .BUILD,
-			flags         = flags,
-			geometryCount = 1,
-			pGeometries   = &input.geometry,
-		}
-
-		info.range_info = input.offset
-
-		max_prim_counts := [?]u32{info.range_info.primitiveCount}
-		info.size_info.sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
-		vk.GetAccelerationStructureBuildSizesKHR(
-			device.logical_device.ptr,
-			.DEVICE,
-			&info.build_info,
-			raw_data(max_prim_counts[:]),
-			&info.size_info,
-		)
-
-		total_size += info.size_info.accelerationStructureSize
-		max_scratch_size = max(info.size_info.buildScratchSize, max_scratch_size)
-		number_compactions += 1 if .ALLOW_COMPACTION in info.build_info.flags else 0
-	}
-
-	scratch_buffer: Buffer
-	buffer_init(
-		&scratch_buffer,
-		device,
-		max_scratch_size,
-		1,
-		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
-		.Gpu_Only,
-		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED IN THE FUTURE
-	)
-	defer buffer_destroy(&scratch_buffer, device)
-
-	query_pool: vk.QueryPool
-	if number_compactions > 0 {
-		assert(number_compactions == n_blas)
-		create_info := vk.QueryPoolCreateInfo {
-			sType      = .QUERY_POOL_CREATE_INFO,
-			queryCount = n_blas,
-			queryType  = .ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
-		}
-
-		_ = vk_check(
-			vk.CreateQueryPool(device.logical_device.ptr, &create_info, nil, &query_pool),
-			"Failed to create query_pool",
-		)
-	}
-
-	indices := make([dynamic]u32, context.temp_allocator)
-
-	batch_size: vk.DeviceSize
-	batch_limit: vk.DeviceSize = 256_000_000
-	for i in 0 ..< n_blas {
-		append(&indices, i)
-
-		batch_size += build_infos[i].size_info.accelerationStructureSize
-
-		if batch_size >= batch_limit || i == n_blas - 1 {
-			{
-				cmd := device_begin_single_time_commands(device, device.command_pool)
-				defer device_end_single_time_commands(device, device.command_pool, cmd)
-
-				cmd_create_blas(
-					cmd,
-					indices[:],
-					build_infos,
-					buffer_get_device_address(scratch_buffer, device^),
-					query_pool,
-					device,
-				)
-			}
-
-			if query_pool != 0 {
-				// cmd := device_begin_single_time_commands(device, device.command_pool)
-				// defer device_end_single_time_commands(device, device.command_pool, cmd)
-
-				// compact
-			}
-
-			batch_size = 0
-			clear(&indices)
-		}
-	}
-
-	rt_builder.as = make([dynamic]Acceleration_Structure, 0, len(build_infos))
-
-	for b in build_infos {
-		append(&rt_builder.as, b.as)
-	}
-}
-
-mesh_to_geometry :: proc(mesh: ^Mesh, device: Device) -> Bottom_Level_Input {
+mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_Input {
 	vertex_address := buffer_get_device_address(mesh.vertex_buffer, device)
 	index_address := buffer_get_device_address(mesh.index_buffer, device)
 
-	max_primitives := mesh.index_count / 3
+	max_primitives := u32(mesh.index_buffer.instance_count) / 3
 
 	triangles := vk.AccelerationStructureGeometryTrianglesDataKHR {
 		sType = .ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
@@ -234,7 +41,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh, device: Device) -> Bottom_Level_Input {
 		vertexStride = size_of(Vertex),
 		indexType = .UINT32,
 		indexData = {deviceAddress = index_address},
-		maxVertex = mesh.vertex_count - 1,
+		maxVertex = u32(mesh.vertex_buffer.instance_count) - 1,
 	}
 
 	geom := vk.AccelerationStructureGeometryKHR {
@@ -317,6 +124,7 @@ cmd_create_tlas :: proc(
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
 	)
+	defer buffer_destroy(scratch_buffer, device)
 
 	build_info.srcAccelerationStructure = 0
 	build_info.dstAccelerationStructure = rt_builder.tlas.handle

@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:strings"
-import "core:container/queue"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
@@ -48,8 +47,8 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 		Device = device.logical_device.ptr,
 		Queue = device.graphics_queue,
 		DescriptorPool = ctx.pool,
-		MinImageCount = 3,
-		ImageCount = 3,
+		MinImageCount = 2,
+		ImageCount = 2,
 		UseDynamicRendering = true,
 		PipelineRenderingCreateInfo = {
 			sType = .PIPELINE_RENDERING_CREATE_INFO,
@@ -67,9 +66,12 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer) {
+ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
+	scene := scene
+	cmd := &renderer.current_cmd
+	ctx := &renderer.ctx
 	ctx_transition_swapchain_image(
-		ctx,
+		ctx^,
 		cmd^,
 		old_layout = .UNDEFINED,
 		new_layout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -79,7 +81,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 		dst_access = {.COLOR_ATTACHMENT_WRITE},
 	)
 
-	info := ctx_get_swapchain_render_pass(ctx, load_op = .LOAD)
+	info := ctx_get_swapchain_render_pass(ctx^, load_op = .LOAD)
 	command_buffer_begin_render_pass(cmd, &info)
 
 	imgui_vulkan.NewFrame()
@@ -89,7 +91,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 	if imgui.BeginMainMenuBar() {
 		if imgui.BeginMenu("File") {
 			if imgui.MenuItem("Exit", "Q") {
-				window_set_should_close(renderer.window^)
+				window_set_should_close(renderer.window)
 			}
 			imgui.EndMenu()
 		}
@@ -97,9 +99,9 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 		imgui.EndMainMenuBar()
 	}
 
-	render_statistics(renderer.scene)
+	render_statistics(scene^)
 
-	render_scene_properties(renderer, renderer.ctx.device)
+	render_scene_properties(renderer, scene, renderer.ctx.device)
 
 
 	imgui.Render()
@@ -108,7 +110,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 	command_buffer_end_render_pass(cmd)
 
 	ctx_transition_swapchain_image(
-		ctx,
+		ctx^,
 		cmd^,
 		old_layout = .COLOR_ATTACHMENT_OPTIMAL,
 		new_layout = .PRESENT_SRC_KHR,
@@ -120,8 +122,7 @@ ui_render :: proc(ctx: Vulkan_Context, cmd: ^Command_Buffer, renderer: ^Renderer
 }
 
 @(private = "file")
-render_scene_properties :: proc(renderer: ^Renderer,  device: ^Device) {
-	scene := &renderer.scene
+render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
 		if imgui.CollapsingHeader("Objects", {}) {
 			@(static) selected_object := -1
@@ -152,19 +153,11 @@ render_scene_properties :: proc(renderer: ^Renderer,  device: ^Device) {
 
 				new_position := object.transform.position
 				if imgui.DragFloat3("Position", &new_position, 0.01) {
-					queue.push(&renderer.events, Scene_Object_Update_Position {
-						object_index = selected_object,
-						new_position = new_position,
-					})
 				}
 
 				imgui.Separator()
 				new_material := i32(object.material_index + 1)
 				if imgui.InputInt("Material", &new_material, 1) {
-					queue.push(&renderer.events, Scene_Object_Material_Change {
-						object_index = selected_object,
-						new_material_index = int(new_material) - 1,
-					})
 				}
 			}
 		}

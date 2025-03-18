@@ -18,6 +18,7 @@ struct ObjectData {
     uint64_t vertex_address;
     uint64_t index_address;
     uint material_index;
+    uint mesh_index;
 };
 
 struct Vertex {

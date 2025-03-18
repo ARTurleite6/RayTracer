@@ -30,7 +30,7 @@ void main()
 {
     ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
     Material mat = materials_data.materials[object.material_index];
-
+    //
     Vertices vert = Vertices(object.vertex_address);
     Indices indices = Indices(object.index_address);
 

@@ -5,14 +5,14 @@
 #include "random.glsl"
 #include "ray_common.glsl"
 
-layout(binding = 0, set = 0) uniform CameraProperties {
+layout(binding = 0, set = 0, rgba32f) uniform image2D image;
+layout(binding = 0, set = 1) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 0, set = 2) uniform CameraProperties {
     mat4 proj;
     mat4 view;
     mat4 inverse_view;
     mat4 inverse_proj;
 } cam;
-layout(binding = 0, set = 1) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 0, set = 2, rgba32f) uniform image2D image;
 layout(location = 0) rayPayloadEXT RayPayload payload;
 
 layout(push_constant) uniform Push {
@@ -35,7 +35,7 @@ vec3 randomHemisphereDirection(vec3 normal, vec2 random) {
     );
 }
 
-const int MAX_DEPTH = 4;
+const int MAX_DEPTH = 5;
 
 void main() {
     if (push.frame_number < 1000) {
