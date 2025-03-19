@@ -204,7 +204,6 @@ renderer_render :: proc(renderer: ^Renderer, scene: ^Scene, camera: ^Camera) {
 	}
 
 	if camera.dirty {
-		log.debug("Updating camera information")
 		ubo_data := Camera_UBO {
 			projection         = camera.proj,
 			view               = camera.view,
@@ -332,20 +331,23 @@ renderer_build_tlas :: proc(
 
 @(private = "file")
 update_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
-	if .Updated_Material in scene.dirty {
+	if scene_check_dirty_flags_and_clear(scene, {.Updated_Material, .Deleted_Material}) {
 		log.debug("Updating material")
-
 		gpu_scene_update_materials_buffer(renderer.gpu_scene, scene)
-		scene.dirty -= {.Updated_Material}
 	}
 
-	if .Updated_Object in scene.dirty {
+	if scene_check_dirty_flags_and_clear(scene, {.Added_Material}) {
+		log.debug("Added new material")
+
+		gpu_scene_recreate_materials_buffer(renderer.gpu_scene, scene^)
+	}
+
+	if scene_check_dirty_flags_and_clear(scene, {.Updated_Object}) {
 		log.debug("Updating object")
 		gpu_scene_update_objects_buffer(renderer.gpu_scene, scene)
-		scene.dirty -= {.Updated_Object}
 	}
 
-	if .Acceleration_Structure in scene.dirty {
+	if scene_check_dirty_flags_and_clear(scene, {.Acceleration_Structure}) {
 		log.debug("Recreating scene acceleration structure")
 		// TODO: handle the destruction of the old scene by now
 		scene_compile(renderer.gpu_scene, scene^)
@@ -366,8 +368,6 @@ update_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
 			descriptorCount = 1,
 		}
 		vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
-
-		scene.dirty -= {.Acceleration_Structure}
 	}
 }
 

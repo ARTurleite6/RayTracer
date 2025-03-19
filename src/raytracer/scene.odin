@@ -15,6 +15,8 @@ Vertex :: struct {
 
 Scene_Dirty_Flag :: enum {
 	Acceleration_Structure,
+	Added_Material,
+	Deleted_Material,
 	Updated_Material,
 	Updated_Object,
 }
@@ -93,6 +95,22 @@ scene_destroy :: proc(scene: ^Scene) {
 	scene^ = {}
 }
 
+scene_add_material :: proc(scene: ^Scene, material: Material) {
+	append(&scene.materials, material)
+	scene.dirty += {.Added_Material}
+}
+
+scene_delete_material :: proc(scene: ^Scene, material_index: int) {
+	material := scene.materials[material_index]
+	delete(material.name)
+	unordered_remove(&scene.materials, material_index)
+
+	for _, i in scene.objects {
+		scene_update_object_material(scene, i, 0)
+	}
+	scene.dirty += {.Deleted_Material}
+}
+
 scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Material) {
 	scene.materials[material_idx] = material
 	scene.dirty_materials[material_idx] = true
@@ -140,6 +158,12 @@ scene_add_object :: proc(
 
 	append(&scene.objects, object)
 	return len(scene.objects) - 1
+}
+
+scene_check_dirty_flags_and_clear :: proc(scene: ^Scene, flags: Scene_Dirty_Flags) -> bool {
+	result := scene.dirty & flags != {}
+	scene.dirty -= flags
+	return result
 }
 
 object_update_position :: proc(object: ^Object, new_pos: Vec3) {
@@ -334,8 +358,8 @@ create_scene :: proc() -> (scene: Scene) {
 	sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
 	cube_index := scene_add_mesh(&scene, cube_mesh)
 
-	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1, 0, 0})
-	scene_add_object(&scene, "Sphere 2", cube_index, 2, position = {-2, 0, 0})
+	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1.5, 0, 0})
+	scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {-2, 0, 0})
 	scene_add_object(&scene, "Ground", cube_index, 0, position = {-0.5, 0, 0})
 
 	scene.dirty = {.Acceleration_Structure}

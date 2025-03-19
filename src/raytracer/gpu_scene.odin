@@ -113,23 +113,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		gpu_scene.meshes_data[i] = gpu_mesh
 	}
 
-	materials_data := make([]Material_Data, len(scene.materials), context.temp_allocator)
-	for material, i in scene.materials {
-		materials_data[i] = {
-			albedo         = material.albedo,
-			emission_power = material.emission_power,
-			emission_color = material.emission_color,
-		}
-	}
-	buffer_init_with_staging_buffer(
-		&gpu_scene.materials_buffer,
-		gpu_scene.vulkan_ctx,
-		raw_data(materials_data),
-		size_of(Material_Data),
-		len(materials_data),
-		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
-	)
-
+	gpu_scene_create_materials_buffer(gpu_scene, scene)
 
 	for object, i in scene.objects {
 		gpu_object: Object_GPU_Data
@@ -152,7 +136,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
-	write_info: [2]vk.WriteDescriptorSet
+	write_info: [1]vk.WriteDescriptorSet
 	{
 		buffer_info := vk.DescriptorBufferInfo {
 			buffer = gpu_scene.objects_buffer.handle,
@@ -168,21 +152,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			descriptorCount = 1,
 		}
 	}
-	{
-		buffer_info := vk.DescriptorBufferInfo {
-			buffer = gpu_scene.materials_buffer.handle,
-			offset = 0,
-			range  = gpu_scene.materials_buffer.size,
-		}
-		write_info[1] = {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			pBufferInfo     = &buffer_info,
-			dstSet          = gpu_scene.descriptor_set,
-			dstBinding      = 2,
-			descriptorType  = .STORAGE_BUFFER,
-			descriptorCount = 1,
-		}
-	}
+
 
 	vk.UpdateDescriptorSets(
 		vulkan_get_device_handle(gpu_scene.vulkan_ctx),
@@ -208,6 +178,54 @@ gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 	)
 
 	delete(scene.meshes_data)
+}
+
+gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
+	materials_data := make([]Material_Data, len(scene.materials), context.temp_allocator)
+	for material, i in scene.materials {
+		materials_data[i] = {
+			albedo         = material.albedo,
+			emission_power = material.emission_power,
+			emission_color = material.emission_color,
+		}
+	}
+	buffer_init_with_staging_buffer(
+		&gpu_scene.materials_buffer,
+		gpu_scene.vulkan_ctx,
+		raw_data(materials_data),
+		size_of(Material_Data),
+		len(materials_data),
+		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
+	)
+
+	{
+		buffer_info := vk.DescriptorBufferInfo {
+			buffer = gpu_scene.materials_buffer.handle,
+			offset = 0,
+			range  = gpu_scene.materials_buffer.size,
+		}
+		write_info := vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			pBufferInfo     = &buffer_info,
+			dstSet          = gpu_scene.descriptor_set,
+			dstBinding      = 2,
+			descriptorType  = .STORAGE_BUFFER,
+			descriptorCount = 1,
+		}
+
+		vk.UpdateDescriptorSets(
+			vulkan_get_device_handle(gpu_scene.vulkan_ctx),
+			1,
+			&write_info,
+			0,
+			nil,
+		)
+	}
+}
+
+gpu_scene_recreate_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
+	buffer_destroy(&gpu_scene.materials_buffer)
+	gpu_scene_create_materials_buffer(gpu_scene, scene)
 }
 
 gpu_scene_update_objects_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) {

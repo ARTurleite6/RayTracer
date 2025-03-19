@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
@@ -7,7 +8,12 @@ import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import vk "vendor:vulkan"
 
 UI_Context :: struct {
-	pool: vk.DescriptorPool,
+	pool:              vk.DescriptorPool,
+	selected_object:   int,
+	selected_material: int,
+
+	// New material creation
+	new_material_name: [256]byte,
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
@@ -59,6 +65,9 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 	}
 	imgui_vulkan.Init(&init_info)
 	imgui_vulkan.CreateFontsTexture()
+
+	ctx.selected_object = -1
+	ctx.selected_material = -1
 }
 
 ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
@@ -124,26 +133,44 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 @(private = "file")
 render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
-		render_object_properties(scene)
-		render_material_properties(scene)
+		render_object_properties(renderer, scene)
+		render_material_properties(renderer, scene)
 	}
 	imgui.End()
 }
 
 @(private = "file")
-render_material_properties :: proc(scene: ^Scene) {
-	if imgui.CollapsingHeader("Materials", {}) {
-		@(static) selected_material := -1
+render_material_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
+	if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
+		imgui.Text("New material")
+		new_material_name := renderer.ui_ctx.new_material_name[:]
+		imgui.InputText(
+			"Material name",
+			strings.unsafe_string_to_cstring(string(new_material_name)),
+			len(renderer.ui_ctx.new_material_name),
+		)
+		if imgui.Button("Submit", {100, 0}) {
+			material := Material {
+				name = strings.clone(string(new_material_name)),
+			}
 
+			scene_add_material(scene, material)
+
+			slice.zero(new_material_name)
+		}
+
+		imgui.Separator()
+
+		selected_material := &renderer.ui_ctx.selected_material
 		if imgui.BeginListBox("##MaterialList", {0, 100}) {
 			for material, i in scene.materials {
-				is_selected := selected_material == i
+				is_selected := selected_material^ == i
 
 				if imgui.Selectable(
 					strings.clone_to_cstring(material.name, context.temp_allocator),
 					is_selected,
 				) {
-					selected_material = i
+					selected_material^ = i
 				}
 
 				if is_selected {
@@ -153,8 +180,8 @@ render_material_properties :: proc(scene: ^Scene) {
 
 			imgui.EndListBox()
 		}
-		if selected_material >= 0 && selected_material < len(scene.materials) {
-			material := &scene.materials[selected_material]
+		if selected_material^ >= 0 && selected_material^ < len(scene.materials) {
+			material := &scene.materials[selected_material^]
 
 			imgui.Separator()
 
@@ -177,27 +204,30 @@ render_material_properties :: proc(scene: ^Scene) {
 				update_material = true
 			}
 
+			if imgui.Button("Delete Material", {100, 0}) {
+				scene_delete_material(scene, selected_material^)
+			}
+
 			if update_material {
-				scene_update_material(scene, selected_material, material^)
+				scene_update_material(scene, selected_material^, material^)
 			}
 		}
 	}
 }
 
 @(private = "file")
-render_object_properties :: proc(scene: ^Scene) {
-	if imgui.CollapsingHeader("Objects", {}) {
-		@(static) selected_object := -1
-
+render_object_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
+	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+		selected_object := &renderer.ui_ctx.selected_object
 		if imgui.BeginListBox("##ObjectList", {0, 100}) {
 			for object, i in scene.objects {
-				is_selected := selected_object == i
+				is_selected := selected_object^ == i
 
 				if imgui.Selectable(
 					strings.clone_to_cstring(object.name, context.temp_allocator),
 					is_selected,
 				) {
-					selected_object = i
+					selected_object^ = i
 				}
 
 				if is_selected {
@@ -207,8 +237,8 @@ render_object_properties :: proc(scene: ^Scene) {
 
 			imgui.EndListBox()
 		}
-		if selected_object >= 0 && selected_object < len(scene.objects) {
-			object := &scene.objects[selected_object]
+		if selected_object^ >= 0 && selected_object^ < len(scene.objects) {
+			object := &scene.objects[selected_object^]
 
 			imgui.Separator()
 			imgui.Text("Transform")
@@ -221,7 +251,7 @@ render_object_properties :: proc(scene: ^Scene) {
 			// Addding one to the material so it appears nicer to the user
 			new_material := i32(object.material_index + 1)
 			if imgui.InputInt("Material", &new_material, 1) {
-				scene_update_object_material(scene, selected_object, int(new_material - 1))
+				scene_update_object_material(scene, selected_object^, int(new_material - 1))
 			}
 		}
 	}
