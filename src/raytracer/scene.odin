@@ -66,11 +66,7 @@ Material :: struct {
 	emission_power: f32,
 }
 
-scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
-	scene.meshes = make([dynamic]Mesh, allocator)
-	scene.objects = make([dynamic]Object, allocator)
-	scene.materials = make([dynamic]Material, allocator)
-
+scene_init :: proc(scene: ^Scene) {
 	append(
 		&scene.materials,
 		Material{name = "green", albedo = {0.0, 1.0, 0.0}},

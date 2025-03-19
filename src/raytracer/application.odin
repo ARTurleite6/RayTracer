@@ -25,7 +25,6 @@ application_init :: proc(
 	app: ^Application,
 	window_width, window_height: c.int,
 	window_title: cstring,
-	allocator := context.allocator,
 ) -> (
 	err: Error,
 ) {
@@ -37,11 +36,11 @@ application_init :: proc(
 		app.window,
 		Event_Handler{data = app, on_event = application_on_event},
 	)
-	input_system_init(&app.input_system, allocator)
+	input_system_init(&app.input_system)
 
 
 	{ 	// create rendering stuff
-		renderer_init(&app.renderer, app.window, allocator)
+		renderer_init(&app.renderer, app.window)
 		// TODO: change this
 		app.scene = create_scene()
 

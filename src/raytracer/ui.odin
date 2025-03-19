@@ -16,7 +16,7 @@ UI_Context :: struct {
 	new_material_name: [256]byte,
 }
 
-ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
+ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 	descriptor_pool_init(
 		&ctx.pool,
 		device,
@@ -37,7 +37,16 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 		{.FREE_DESCRIPTOR_SET},
 	)
 
+	imgui.CHECKVERSION()
 	imgui.CreateContext()
+
+	io := imgui.GetIO()
+	io.ConfigFlags += {.NavEnableGamepad, .NavEnableKeyboard, .DockingEnable, .ViewportsEnable}
+	style := imgui.GetStyle()
+	style.WindowRounding = 0
+	style.Colors[imgui.Col.WindowBg] = 1
+	imgui.StyleColorsDark()
+
 	imgui_vulkan.LoadFunctions(
 		proc "c" (name: cstring, vulkan_instance: rawptr) -> vk.ProcVoidFunction {
 			return vk.GetInstanceProcAddr(cast(vk.Instance)vulkan_instance, name)
@@ -46,7 +55,7 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 	)
 
 	imgui_glfw.InitForVulkan(window.handle, true)
-	format := format
+	@(static) format: vk.Format = .B8G8R8A8_SRGB
 	init_info := imgui_vulkan.InitInfo {
 		Instance = device.instance.ptr,
 		PhysicalDevice = device.physical_device.ptr,
@@ -72,6 +81,8 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 
 ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	imgui_vulkan.Shutdown()
+	imgui_glfw.Shutdown()
+	imgui.DestroyContext()
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
@@ -112,8 +123,13 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 
 	render_scene_properties(renderer, scene, renderer.ctx.device)
 
+	imgui.EndFrame()
 
 	imgui.Render()
+
+	imgui.UpdatePlatformWindows()
+	imgui.RenderPlatformWindowsDefault()
+
 	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd.buffer)
 
 	command_buffer_end_render_pass(cmd)

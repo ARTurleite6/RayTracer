@@ -165,9 +165,7 @@ Key_Mod :: enum u32 {
 
 Key_Mod_Flags :: bit_set[Key_Mod]
 
-input_system_init :: proc(system: ^Input_System, allocator := context.allocator) {
-	system.key_states = make(map[Key_Code]Key_State, allocator = allocator)
-	system.mouse_key_states = make(map[Mouse_Key_Code]Key_State, allocator = allocator)
+input_system_init :: proc(system: ^Input_System) {
 }
 
 input_system_destroy :: proc(system: ^Input_System) {

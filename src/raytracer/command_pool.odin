@@ -13,9 +13,6 @@ Command_Pool :: struct {
 
 command_pool_init :: proc(pool: ^Command_Pool, device: ^Device, queue_family_index: u32) {
 	pool.device = device
-	pool.buffers = make([dynamic]vk.CommandBuffer)
-	pool.secondary_buffers = make([dynamic]vk.CommandBuffer)
-
 	create_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		flags            = {.TRANSIENT},

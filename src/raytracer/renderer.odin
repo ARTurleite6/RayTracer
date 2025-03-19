@@ -132,12 +132,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		)
 	}
 
-	ui_context_init(
-		&renderer.ui_ctx,
-		renderer.ctx.device,
-		renderer.window^,
-		renderer.ctx.swapchain_manager.format,
-	)
+	ui_context_init(&renderer.ui_ctx, renderer.ctx.device, renderer.window^)
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
