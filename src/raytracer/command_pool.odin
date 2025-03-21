@@ -28,10 +28,10 @@ command_pool_init :: proc(pool: ^Command_Pool, device: ^Device, queue_family_ind
 command_pool_destroy :: proc(pool: ^Command_Pool) {
 	vk.DestroyCommandPool(pool.device.logical_device.ptr, pool.pool, nil)
 
-	// TODO: free command buffers
-
 	delete(pool.buffers)
 	delete(pool.secondary_buffers)
+
+	pool^ = {}
 }
 
 command_pool_begin :: proc(pool: ^Command_Pool) {

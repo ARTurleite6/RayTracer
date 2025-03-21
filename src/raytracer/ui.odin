@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:container/queue"
 import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
@@ -41,7 +42,7 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 	imgui.CreateContext()
 
 	io := imgui.GetIO()
-	io.ConfigFlags += {.NavEnableGamepad, .NavEnableKeyboard, .DockingEnable, .ViewportsEnable}
+	io.ConfigFlags += {.NavEnableGamepad, .NavEnableKeyboard, .DockingEnable}
 	style := imgui.GetStyle()
 	style.WindowRounding = 0
 	style.Colors[imgui.Col.WindowBg] = 1
@@ -86,8 +87,8 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
-	scene := scene
+ui_render :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
 	cmd := &renderer.current_cmd
 	ctx := &renderer.ctx
 	ctx_transition_swapchain_image(
@@ -121,7 +122,7 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 
 	render_statistics(scene^)
 
-	render_scene_properties(renderer, scene, renderer.ctx.device)
+	render_scene_properties(renderer, renderer.ctx.device)
 
 	imgui.EndFrame()
 
@@ -147,16 +148,17 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 }
 
 @(private = "file")
-render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
+render_scene_properties :: proc(renderer: ^Renderer, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
-		render_object_properties(renderer, scene)
-		render_material_properties(renderer, scene)
+		render_object_properties(renderer)
+		render_material_properties(renderer)
 	}
 	imgui.End()
 }
 
 @(private = "file")
-render_material_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
+render_material_properties :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
 	if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
 		imgui.Text("New material")
 		new_material_name := renderer.ui_ctx.new_material_name[:]
@@ -171,6 +173,7 @@ render_material_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
 			}
 
 			scene_add_material(scene, material)
+			queue.push_back(&renderer.ui_events, New_Material{})
 
 			slice.zero(new_material_name)
 		}
@@ -221,18 +224,21 @@ render_material_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
 			}
 
 			if imgui.Button("Delete Material", {100, 0}) {
+				queue.push_back(&renderer.ui_events, Update_Material{})
 				scene_delete_material(scene, selected_material^)
 			}
 
 			if update_material {
 				scene_update_material(scene, selected_material^, material^)
+				queue.push_back(&renderer.ui_events, Update_Material{})
 			}
 		}
 	}
 }
 
 @(private = "file")
-render_object_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
+render_object_properties :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
 	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
 		selected_object := &renderer.ui_ctx.selected_object
 		if imgui.BeginListBox("##ObjectList", {0, 100}) {
@@ -261,13 +267,26 @@ render_object_properties :: proc(renderer: ^Renderer, scene: ^Scene) {
 
 			new_position := object.transform.position
 			if imgui.DragFloat3("Position", &new_position, 0.01) {
+				scene_update_object_position(scene, selected_object^, new_position)
+				queue.push_back(
+					&renderer.ui_events,
+					Update_Object_Transform{object_index = selected_object^},
+				)
 			}
 
 			imgui.Separator()
 			// Addding one to the material so it appears nicer to the user
 			new_material := i32(object.material_index + 1)
 			if imgui.InputInt("Material", &new_material, 1) {
-				scene_update_object_material(scene, selected_object^, int(new_material - 1))
+				scene_update_object_material(
+					renderer.scene,
+					selected_object^,
+					int(new_material - 1),
+				)
+				queue.push(
+					&renderer.ui_events,
+					Update_Object_Material{object_index = selected_object^},
+				)
 			}
 		}
 	}

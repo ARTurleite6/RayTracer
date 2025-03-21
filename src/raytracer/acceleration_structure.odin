@@ -7,8 +7,9 @@ import vk "vendor:vulkan"
 _ :: fmt
 
 Raytracing_Builder :: struct {
-	tlas: Acceleration_Structure,
-	as:   [dynamic]Acceleration_Structure,
+	tlas:       Acceleration_Structure,
+	as:         [dynamic]Acceleration_Structure,
+	tlas_infos: [dynamic]vk.AccelerationStructureInstanceKHR,
 }
 
 Acceleration_Structure :: struct {
@@ -83,13 +84,12 @@ cmd_create_tlas :: proc(
 	}
 
 	build_info := vk.AccelerationStructureBuildGeometryInfoKHR {
-		sType                    = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-		flags                    = flags,
-		geometryCount            = 1,
-		pGeometries              = &top_as_geometry,
-		mode                     = update ? .UPDATE : .BUILD,
-		type                     = .TOP_LEVEL,
-		srcAccelerationStructure = 0,
+		sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		flags         = flags,
+		geometryCount = 1,
+		pGeometries   = &top_as_geometry,
+		mode          = update ? .UPDATE : .BUILD,
+		type          = .TOP_LEVEL,
 	}
 
 	size_info := vk.AccelerationStructureBuildSizesInfoKHR {
@@ -111,9 +111,6 @@ cmd_create_tlas :: proc(
 		size  = size_info.accelerationStructureSize,
 	}
 
-	if !update {
-		rt_builder.tlas = create_acceleration(&create_info, ctx)
-	}
 
 	buffer_init(
 		scratch_buffer,
@@ -125,7 +122,12 @@ cmd_create_tlas :: proc(
 	)
 	defer buffer_destroy(scratch_buffer)
 
-	build_info.srcAccelerationStructure = 0
+	if update {
+		build_info.srcAccelerationStructure = rt_builder.tlas.handle
+	} else {
+		rt_builder.tlas = create_acceleration(&create_info, ctx)
+	}
+
 	build_info.dstAccelerationStructure = rt_builder.tlas.handle
 	build_info.scratchData.deviceAddress = buffer_get_device_address(scratch_buffer^)
 

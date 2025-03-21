@@ -64,24 +64,6 @@ raytracing_pass_init :: proc(
 	rt.ctx = ctx
 	rt.rt_props = vulkan_get_raytracing_pipeline_propertis(rt.ctx)
 
-	image_init(&rt.image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
-	image_view_init(&rt.image_view, rt.image, ctx)
-
-	{
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-		image_transition_layout_stage_access(
-			cmd,
-			rt.image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
 	device := vulkan_get_device_handle(ctx)
 	{ 	// create image descriptor set layout
 		bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -114,22 +96,7 @@ raytracing_pass_init :: proc(
 			&rt.image_descriptor_set,
 		)
 
-		image_info := vk.DescriptorImageInfo {
-			imageView   = rt.image_view,
-			imageLayout = .GENERAL,
-		}
-
-		write_info := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			dstSet          = rt.image_descriptor_set,
-			dstBinding      = 0, // Assuming binding 0 is for storage image
-			descriptorType  = .STORAGE_IMAGE,
-			descriptorCount = 1,
-			pImageInfo      = &image_info,
-		}
-
-		// Update the descriptor set
-		vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
+		raytracing_pass_create_image(rt)
 	}
 
 	{ 	// create pipeline layout
@@ -221,6 +188,52 @@ raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	buffer_destroy(&rt.sbt.raygen_buffer)
 	buffer_destroy(&rt.sbt.hit_buffer)
 	buffer_destroy(&rt.sbt.miss_buffer)
+}
+
+raytracing_pass_resize_image :: proc(rt: ^Raytracing_Pass) {
+	image_destroy(&rt.image, rt.ctx^)
+	image_view_destroy(rt.image_view, rt.ctx^)
+
+	raytracing_pass_create_image(rt)
+}
+
+raytracing_pass_create_image :: proc(rt: ^Raytracing_Pass) {
+	ctx := rt.ctx
+
+	image_init(&rt.image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
+	image_view_init(&rt.image_view, rt.image, ctx)
+
+	{
+		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
+		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
+		image_transition_layout_stage_access(
+			cmd,
+			rt.image.handle,
+			.UNDEFINED,
+			.GENERAL,
+			{.ALL_COMMANDS},
+			{.ALL_COMMANDS},
+			{},
+			{},
+		)
+	}
+
+	image_info := vk.DescriptorImageInfo {
+		imageView   = rt.image_view,
+		imageLayout = .GENERAL,
+	}
+
+	write_info := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt.image_descriptor_set,
+		dstBinding      = 0, // Assuming binding 0 is for storage image
+		descriptorType  = .STORAGE_IMAGE,
+		descriptorCount = 1,
+		pImageInfo      = &image_info,
+	}
+
+	// Update the descriptor set
+	vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
 }
 
 raytracing_pass_render :: proc(
