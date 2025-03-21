@@ -1,5 +1,7 @@
 package raytracer
 
+import "core:container/queue"
+import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
@@ -7,10 +9,15 @@ import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import vk "vendor:vulkan"
 
 UI_Context :: struct {
-	pool: vk.DescriptorPool,
+	pool:              vk.DescriptorPool,
+	selected_object:   int,
+	selected_material: int,
+
+	// New material creation
+	new_material_name: [256]byte,
 }
 
-ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, format: vk.Format) {
+ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 	descriptor_pool_init(
 		&ctx.pool,
 		device,
@@ -31,7 +38,16 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 		{.FREE_DESCRIPTOR_SET},
 	)
 
+	imgui.CHECKVERSION()
 	imgui.CreateContext()
+
+	io := imgui.GetIO()
+	io.ConfigFlags += {.NavEnableGamepad, .NavEnableKeyboard, .DockingEnable}
+	style := imgui.GetStyle()
+	style.WindowRounding = 0
+	style.Colors[imgui.Col.WindowBg] = 1
+	imgui.StyleColorsDark()
+
 	imgui_vulkan.LoadFunctions(
 		proc "c" (name: cstring, vulkan_instance: rawptr) -> vk.ProcVoidFunction {
 			return vk.GetInstanceProcAddr(cast(vk.Instance)vulkan_instance, name)
@@ -40,7 +56,7 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 	)
 
 	imgui_glfw.InitForVulkan(window.handle, true)
-	format := format
+	@(static) format: vk.Format = .B8G8R8A8_SRGB
 	init_info := imgui_vulkan.InitInfo {
 		Instance = device.instance.ptr,
 		PhysicalDevice = device.physical_device.ptr,
@@ -59,15 +75,20 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window, forma
 	}
 	imgui_vulkan.Init(&init_info)
 	imgui_vulkan.CreateFontsTexture()
+
+	ctx.selected_object = -1
+	ctx.selected_material = -1
 }
 
 ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	imgui_vulkan.Shutdown()
+	imgui_glfw.Shutdown()
+	imgui.DestroyContext()
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
-	scene := scene
+ui_render :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
 	cmd := &renderer.current_cmd
 	ctx := &renderer.ctx
 	ctx_transition_swapchain_image(
@@ -101,10 +122,15 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 
 	render_statistics(scene^)
 
-	render_scene_properties(renderer, scene, renderer.ctx.device)
+	render_scene_properties(renderer, renderer.ctx.device)
 
+	imgui.EndFrame()
 
 	imgui.Render()
+
+	imgui.UpdatePlatformWindows()
+	imgui.RenderPlatformWindowsDefault()
+
 	imgui_vulkan.RenderDrawData(imgui.GetDrawData(), cmd.buffer)
 
 	command_buffer_end_render_pass(cmd)
@@ -122,48 +148,148 @@ ui_render :: proc(renderer: ^Renderer, scene: ^Scene) {
 }
 
 @(private = "file")
-render_scene_properties :: proc(renderer: ^Renderer, scene: ^Scene, device: ^Device) {
+render_scene_properties :: proc(renderer: ^Renderer, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
-		if imgui.CollapsingHeader("Objects", {}) {
-			@(static) selected_object := -1
-
-			if imgui.BeginListBox("##ObjectList", {0, 100}) {
-				for object, i in scene.objects {
-					is_selected := selected_object == i
-
-					if imgui.Selectable(
-						strings.clone_to_cstring(object.name, context.temp_allocator),
-						is_selected,
-					) {
-						selected_object = i
-					}
-
-					if is_selected {
-						imgui.SetItemDefaultFocus()
-					}
-				}
-
-				imgui.EndListBox()
-			}
-			if selected_object >= 0 && selected_object < len(scene.objects) {
-				object := &scene.objects[selected_object]
-
-				imgui.Separator()
-				imgui.Text("Transform")
-
-				new_position := object.transform.position
-				if imgui.DragFloat3("Position", &new_position, 0.01) {
-				}
-
-				imgui.Separator()
-				new_material := i32(object.material_index + 1)
-				if imgui.InputInt("Material", &new_material, 1) {
-				}
-			}
-		}
-
+		render_object_properties(renderer)
+		render_material_properties(renderer)
 	}
 	imgui.End()
+}
+
+@(private = "file")
+render_material_properties :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
+	if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
+		imgui.Text("New material")
+		new_material_name := renderer.ui_ctx.new_material_name[:]
+		imgui.InputText(
+			"Material name",
+			strings.unsafe_string_to_cstring(string(new_material_name)),
+			len(renderer.ui_ctx.new_material_name),
+		)
+		if imgui.Button("Submit", {100, 0}) {
+			material := Material {
+				name = strings.clone(string(new_material_name)),
+			}
+
+			scene_add_material(scene, material)
+			queue.push_back(&renderer.ui_events, New_Material{})
+
+			slice.zero(new_material_name)
+		}
+
+		imgui.Separator()
+
+		selected_material := &renderer.ui_ctx.selected_material
+		if imgui.BeginListBox("##MaterialList", {0, 100}) {
+			for material, i in scene.materials {
+				is_selected := selected_material^ == i
+
+				if imgui.Selectable(
+					strings.clone_to_cstring(material.name, context.temp_allocator),
+					is_selected,
+				) {
+					selected_material^ = i
+				}
+
+				if is_selected {
+					imgui.SetItemDefaultFocus()
+				}
+			}
+
+			imgui.EndListBox()
+		}
+		if selected_material^ >= 0 && selected_material^ < len(scene.materials) {
+			material := &scene.materials[selected_material^]
+
+			imgui.Separator()
+
+			update_material := false
+			new_albedo := material.albedo
+			if imgui.ColorPicker3("Albedo", &new_albedo, {}) {
+				material.albedo = new_albedo
+				update_material = true
+			}
+
+			new_emission_color := material.emission_color
+			if imgui.ColorPicker3("Emission Color", &new_emission_color) {
+				material.emission_color = new_emission_color
+				update_material = true
+			}
+
+			new_emission_power := material.emission_power
+			if imgui.DragFloat("Emission Power", &new_emission_power) {
+				material.emission_power = new_emission_power
+				update_material = true
+			}
+
+			if imgui.Button("Delete Material", {100, 0}) {
+				queue.push_back(&renderer.ui_events, Update_Material{})
+				scene_delete_material(scene, selected_material^)
+			}
+
+			if update_material {
+				scene_update_material(scene, selected_material^, material^)
+				queue.push_back(&renderer.ui_events, Update_Material{})
+			}
+		}
+	}
+}
+
+@(private = "file")
+render_object_properties :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
+	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+		selected_object := &renderer.ui_ctx.selected_object
+		if imgui.BeginListBox("##ObjectList", {0, 100}) {
+			for object, i in scene.objects {
+				is_selected := selected_object^ == i
+
+				if imgui.Selectable(
+					strings.clone_to_cstring(object.name, context.temp_allocator),
+					is_selected,
+				) {
+					selected_object^ = i
+				}
+
+				if is_selected {
+					imgui.SetItemDefaultFocus()
+				}
+			}
+
+			imgui.EndListBox()
+		}
+		if selected_object^ >= 0 && selected_object^ < len(scene.objects) {
+			object := &scene.objects[selected_object^]
+
+			imgui.Separator()
+			imgui.Text("Transform")
+
+			new_position := object.transform.position
+			if imgui.DragFloat3("Position", &new_position, 0.01) {
+				scene_update_object_position(scene, selected_object^, new_position)
+				queue.push_back(
+					&renderer.ui_events,
+					Update_Object_Transform{object_index = selected_object^},
+				)
+			}
+
+			imgui.Separator()
+			// Addding one to the material so it appears nicer to the user
+			new_material := i32(object.material_index + 1)
+			if imgui.InputInt("Material", &new_material, 1) {
+				scene_update_object_material(
+					renderer.scene,
+					selected_object^,
+					int(new_material - 1),
+				)
+				queue.push(
+					&renderer.ui_events,
+					Update_Object_Material{object_index = selected_object^},
+				)
+			}
+		}
+	}
 }
 
 @(private = "file")

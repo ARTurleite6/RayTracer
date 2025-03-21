@@ -64,24 +64,6 @@ raytracing_pass_init :: proc(
 	rt.ctx = ctx
 	rt.rt_props = vulkan_get_raytracing_pipeline_propertis(rt.ctx)
 
-	image_init(&rt.image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
-	image_view_init(&rt.image_view, rt.image, ctx)
-
-	{
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-		image_transition_layout_stage_access(
-			cmd,
-			rt.image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
 	device := vulkan_get_device_handle(ctx)
 	{ 	// create image descriptor set layout
 		bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -114,22 +96,7 @@ raytracing_pass_init :: proc(
 			&rt.image_descriptor_set,
 		)
 
-		image_info := vk.DescriptorImageInfo {
-			imageView   = rt.image_view,
-			imageLayout = .GENERAL,
-		}
-
-		write_info := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			dstSet          = rt.image_descriptor_set,
-			dstBinding      = 0, // Assuming binding 0 is for storage image
-			descriptorType  = .STORAGE_IMAGE,
-			descriptorCount = 1,
-			pImageInfo      = &image_info,
-		}
-
-		// Update the descriptor set
-		vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
+		raytracing_pass_create_image(rt)
 	}
 
 	{ 	// create pipeline layout
@@ -218,9 +185,55 @@ raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	image_view_destroy(rt.image_view, rt.ctx^)
 
 	vk.DestroyDescriptorSetLayout(device, rt.image_descriptor_set_layout, nil)
-	buffer_destroy(&rt.sbt.raygen_buffer, rt.ctx.device)
-	buffer_destroy(&rt.sbt.hit_buffer, rt.ctx.device)
-	buffer_destroy(&rt.sbt.miss_buffer, rt.ctx.device)
+	buffer_destroy(&rt.sbt.raygen_buffer)
+	buffer_destroy(&rt.sbt.hit_buffer)
+	buffer_destroy(&rt.sbt.miss_buffer)
+}
+
+raytracing_pass_resize_image :: proc(rt: ^Raytracing_Pass) {
+	image_destroy(&rt.image, rt.ctx^)
+	image_view_destroy(rt.image_view, rt.ctx^)
+
+	raytracing_pass_create_image(rt)
+}
+
+raytracing_pass_create_image :: proc(rt: ^Raytracing_Pass) {
+	ctx := rt.ctx
+
+	image_init(&rt.image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
+	image_view_init(&rt.image_view, rt.image, ctx)
+
+	{
+		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
+		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
+		image_transition_layout_stage_access(
+			cmd,
+			rt.image.handle,
+			.UNDEFINED,
+			.GENERAL,
+			{.ALL_COMMANDS},
+			{.ALL_COMMANDS},
+			{},
+			{},
+		)
+	}
+
+	image_info := vk.DescriptorImageInfo {
+		imageView   = rt.image_view,
+		imageLayout = .GENERAL,
+	}
+
+	write_info := vk.WriteDescriptorSet {
+		sType           = .WRITE_DESCRIPTOR_SET,
+		dstSet          = rt.image_descriptor_set,
+		dstBinding      = 0, // Assuming binding 0 is for storage image
+		descriptorType  = .STORAGE_IMAGE,
+		descriptorCount = 1,
+		pImageInfo      = &image_info,
+	}
+
+	// Update the descriptor set
+	vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
 }
 
 raytracing_pass_render :: proc(
@@ -266,19 +279,19 @@ raytracing_pass_render :: proc(
 	)
 
 	raygen_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.raygen_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.raygen_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
 	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer, rt.ctx.device^),
+		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
 		stride        = vk.DeviceSize(handle_size_aligned),
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
@@ -383,25 +396,22 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 
 	buffer_init(
 		&rt.sbt.raygen_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
 	buffer_init(
 		&rt.sbt.miss_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
 	buffer_init(
 		&rt.sbt.hit_buffer,
-		device,
+		rt.ctx,
 		vk.DeviceSize(handle_size),
-		1,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
@@ -421,24 +431,24 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	)
 
 	data: rawptr
-	data, _ = buffer_map(&rt.sbt.raygen_buffer, device)
+	data, _ = buffer_map(&rt.sbt.raygen_buffer)
 	mem.copy(data, raw_data(shader_handle_storage), int(handle_size))
 
-	data, _ = buffer_map(&rt.sbt.miss_buffer, device)
+	data, _ = buffer_map(&rt.sbt.miss_buffer)
 	mem.copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned)),
 		int(handle_size),
 	)
 
-	data, _ = buffer_map(&rt.sbt.hit_buffer, device)
+	data, _ = buffer_map(&rt.sbt.hit_buffer)
 	mem.copy(
 		data,
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
 		int(handle_size),
 	)
 
-	buffer_unmap(&rt.sbt.raygen_buffer, device)
-	buffer_unmap(&rt.sbt.miss_buffer, device)
-	buffer_unmap(&rt.sbt.hit_buffer, device)
+	buffer_unmap(&rt.sbt.raygen_buffer)
+	buffer_unmap(&rt.sbt.miss_buffer)
+	buffer_unmap(&rt.sbt.hit_buffer)
 }

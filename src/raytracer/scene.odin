@@ -14,13 +14,14 @@ Vertex :: struct {
 }
 
 Scene :: struct {
-	meshes:    [dynamic]Mesh,
-	objects:   [dynamic]Object,
-	materials: [dynamic]Material,
+	meshes:          [dynamic]Mesh,
+	objects:         [dynamic]Object,
+	materials:       [dynamic]Material,
 
 	// state tracking
 	// TODO: I need to see this better in the future
-	dirty:     bool,
+	dirty_materials: map[int]bool,
+	dirty_objects:   map[int]bool,
 }
 
 Object :: struct {
@@ -54,11 +55,7 @@ Material :: struct {
 	emission_power: f32,
 }
 
-scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
-	scene.meshes = make([dynamic]Mesh, allocator)
-	scene.objects = make([dynamic]Object, allocator)
-	scene.materials = make([dynamic]Material, allocator)
-
+scene_init :: proc(scene: ^Scene) {
 	append(
 		&scene.materials,
 		Material{name = "green", albedo = {0.0, 1.0, 0.0}},
@@ -83,9 +80,40 @@ scene_destroy :: proc(scene: ^Scene) {
 	scene^ = {}
 }
 
+scene_add_material :: proc(scene: ^Scene, material: Material) {
+	append(&scene.materials, material)
+}
+
+scene_delete_material :: proc(scene: ^Scene, material_index: int) {
+	material := scene.materials[material_index]
+	delete(material.name)
+	unordered_remove(&scene.materials, material_index)
+
+	for _, i in scene.objects {
+		scene_update_object_material(scene, i, 0)
+	}
+}
+
+scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Material) {
+	scene.materials[material_idx] = material
+	scene.dirty_materials[material_idx] = true
+}
+
+scene_update_object_material :: proc(scene: ^Scene, object_idx: int, new_material_idx: int) {
+	scene.objects[object_idx].material_index = new_material_idx
+	scene.dirty_objects[object_idx] = true
+}
+
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
 	append(&scene.meshes, mesh)
 	return len(scene.meshes) - 1
+}
+
+scene_update_object_position :: proc(scene: ^Scene, object_index: int, new_position: Vec3) {
+	object := &scene.objects[object_index]
+	object_update_position(object, new_position)
+
+	scene.dirty_objects[object_index] = true
 }
 
 scene_add_object :: proc(
@@ -312,11 +340,9 @@ create_scene :: proc() -> (scene: Scene) {
 	sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
 	cube_index := scene_add_mesh(&scene, cube_mesh)
 
-	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1, 0, 0})
-	scene_add_object(&scene, "Sphere 2", cube_index, 2, position = {-2, 0, 0})
+	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {1.5, 0, 0})
+	scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {-2, 0, 0})
 	scene_add_object(&scene, "Ground", cube_index, 0, position = {-0.5, 0, 0})
-
-	scene.dirty = true
 
 	return scene
 }

@@ -7,8 +7,9 @@ import vk "vendor:vulkan"
 _ :: fmt
 
 Raytracing_Builder :: struct {
-	tlas: Acceleration_Structure,
-	as:   [dynamic]Acceleration_Structure,
+	tlas:       Acceleration_Structure,
+	as:         [dynamic]Acceleration_Structure,
+	tlas_infos: [dynamic]vk.AccelerationStructureInstanceKHR,
 }
 
 Acceleration_Structure :: struct {
@@ -29,8 +30,8 @@ Build_Acceleration_Structure :: struct {
 }
 
 mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_Input {
-	vertex_address := buffer_get_device_address(mesh.vertex_buffer, device)
-	index_address := buffer_get_device_address(mesh.index_buffer, device)
+	vertex_address := buffer_get_device_address(mesh.vertex_buffer)
+	index_address := buffer_get_device_address(mesh.index_buffer)
 
 	max_primitives := u32(mesh.index_buffer.instance_count) / 3
 
@@ -69,7 +70,7 @@ cmd_create_tlas :: proc(
 	scratch_buffer: ^Buffer,
 	flags: vk.BuildAccelerationStructureFlagsKHR,
 	update, motion: bool,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 ) {
 	instances_vk := vk.AccelerationStructureGeometryInstancesDataKHR {
 		sType = .ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
@@ -83,13 +84,12 @@ cmd_create_tlas :: proc(
 	}
 
 	build_info := vk.AccelerationStructureBuildGeometryInfoKHR {
-		sType                    = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-		flags                    = flags,
-		geometryCount            = 1,
-		pGeometries              = &top_as_geometry,
-		mode                     = update ? .UPDATE : .BUILD,
-		type                     = .TOP_LEVEL,
-		srcAccelerationStructure = 0,
+		sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+		flags         = flags,
+		geometryCount = 1,
+		pGeometries   = &top_as_geometry,
+		mode          = update ? .UPDATE : .BUILD,
+		type          = .TOP_LEVEL,
 	}
 
 	size_info := vk.AccelerationStructureBuildSizesInfoKHR {
@@ -98,7 +98,7 @@ cmd_create_tlas :: proc(
 
 	count_instance := count_instance
 	vk.GetAccelerationStructureBuildSizesKHR(
-		device.logical_device.ptr,
+		vulkan_get_device_handle(ctx),
 		.DEVICE,
 		&build_info,
 		&count_instance,
@@ -111,24 +111,25 @@ cmd_create_tlas :: proc(
 		size  = size_info.accelerationStructureSize,
 	}
 
-	if !update {
-		rt_builder.tlas = create_acceleration(&create_info, device)
-	}
 
 	buffer_init(
 		scratch_buffer,
-		device,
+		ctx,
 		size_info.buildScratchSize,
-		1,
 		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
 	)
-	defer buffer_destroy(scratch_buffer, device)
+	defer buffer_destroy(scratch_buffer)
 
-	build_info.srcAccelerationStructure = 0
+	if update {
+		build_info.srcAccelerationStructure = rt_builder.tlas.handle
+	} else {
+		rt_builder.tlas = create_acceleration(&create_info, ctx)
+	}
+
 	build_info.dstAccelerationStructure = rt_builder.tlas.handle
-	build_info.scratchData.deviceAddress = buffer_get_device_address(scratch_buffer^, device^)
+	build_info.scratchData.deviceAddress = buffer_get_device_address(scratch_buffer^)
 
 	range_info := vk.AccelerationStructureBuildRangeInfoKHR {
 		primitiveCount  = count_instance,
@@ -147,10 +148,10 @@ cmd_create_blas :: proc(
 	infos: []Build_Acceleration_Structure,
 	scratch_address: vk.DeviceAddress,
 	query_pool: vk.QueryPool,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 ) {
 	if query_pool != 0 {
-		vk.ResetQueryPool(device.logical_device.ptr, query_pool, 0, u32(len(indices)))
+		vk.ResetQueryPool(vulkan_get_device_handle(ctx), query_pool, 0, u32(len(indices)))
 	}
 	query_count: u32
 
@@ -161,7 +162,7 @@ cmd_create_blas :: proc(
 			size  = infos[idx].size_info.accelerationStructureSize,
 		}
 
-		infos[idx].as = create_acceleration(&create_info, device)
+		infos[idx].as = create_acceleration(&create_info, ctx)
 
 		infos[idx].build_info.dstAccelerationStructure = infos[idx].as.handle
 		infos[idx].build_info.scratchData.deviceAddress = scratch_address
@@ -208,22 +209,26 @@ cmd_compact_blas :: proc(
 
 create_acceleration :: proc(
 	create_info: ^vk.AccelerationStructureCreateInfoKHR,
-	device: ^Device,
+	ctx: ^Vulkan_Context,
 ) -> (
 	as: Acceleration_Structure,
 ) {
 	buffer_init(
 		&as.buffer,
-		device,
+		ctx,
 		create_info.size,
-		1,
 		{.ACCELERATION_STRUCTURE_STORAGE_KHR, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 	)
 	create_info.buffer = as.buffer.handle
 
 	_ = vk_check(
-		vk.CreateAccelerationStructureKHR(device.logical_device.ptr, create_info, nil, &as.handle),
+		vk.CreateAccelerationStructureKHR(
+			vulkan_get_device_handle(ctx),
+			create_info,
+			nil,
+			&as.handle,
+		),
 		"Failed to create acceleration structure",
 	)
 
