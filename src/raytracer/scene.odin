@@ -49,10 +49,9 @@ Mesh_Error :: union {
 }
 
 Material :: struct {
-	name:           string,
-	albedo:         Vec3,
-	emission_color: Vec3,
-	emission_power: f32,
+	name:                                                   string,
+	albedo, emission_color:                                 Vec3,
+	emission_power, roughness, metallic, transmission, ior: f32,
 }
 
 scene_init :: proc(scene: ^Scene) {

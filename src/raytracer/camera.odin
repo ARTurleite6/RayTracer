@@ -8,7 +8,6 @@ _ :: log
 CAMERA_SPEED :: f32(5.0)
 CAMERA_SENSIVITY :: f32(0.001)
 
-
 Vec2 :: glm.Vector2f32
 Vec3 :: glm.Vector3f32
 Vec4 :: glm.Vector4f32
@@ -66,7 +65,6 @@ camera_init :: proc(
 	}
 	camera_look_at(camera, target, up)
 	camera_update_matrices(camera)
-
 }
 
 camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
@@ -74,7 +72,8 @@ camera_look_at :: proc(camera: ^Camera, target: Vec3, up: Vec3) {
 	camera.right = glm.cross(camera.forward, camera.up)
 }
 
-camera_update_aspect_ratio :: proc(camera: ^Camera, aspect_ratio: f32) {
+
+camera_on_resize :: proc(camera: ^Camera, aspect_ratio: f32) {
 	camera.aspect = aspect_ratio
 	camera_update_matrices(camera)
 }
@@ -99,7 +98,9 @@ camera_process_mouse :: proc(camera: ^Camera, x, y: f32, move: bool) {
 	delta := current_pos - camera.last_mouse_position
 	camera.last_mouse_position = current_pos
 
-	if !move || delta == {} do return
+	if !move || delta == {} {
+		return
+	}
 
 	pitch_delta := delta.y * camera.sensivity
 	yaw_delta := delta.x * camera.sensivity

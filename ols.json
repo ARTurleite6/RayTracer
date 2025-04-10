@@ -10,5 +10,5 @@
   "enable_document_symbols": true,
   "enable_hover": true,
   "enable_snippets": true,
-  "checker_args": "-vet -strict-style"
+  "checker_args": "-vet -strict-style -debug -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
 }

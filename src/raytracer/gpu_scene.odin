@@ -15,9 +15,8 @@ GPU_Scene :: struct {
 }
 
 Material_Data :: struct {
-	albedo:         Vec3,
-	emission_color: Vec3,
-	emission_power: f32,
+	albedo, emission_color:                                 Vec3,
+	emission_power, roughness, metallic, transmission, ior: f32,
 }
 
 Object_GPU_Data :: struct {
@@ -185,8 +184,12 @@ gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 	for material, i in scene.materials {
 		materials_data[i] = {
 			albedo         = material.albedo,
-			emission_power = material.emission_power,
 			emission_color = material.emission_color,
+			emission_power = material.emission_power,
+			roughness      = material.roughness,
+			metallic       = material.metallic,
+			transmission   = material.transmission,
+			ior            = material.ior,
 		}
 	}
 	buffer_init_with_staging_buffer(
@@ -261,6 +264,10 @@ gpu_scene_update_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) 
 			albedo         = material.albedo,
 			emission_color = material.emission_color,
 			emission_power = material.emission_power,
+			roughness      = material.roughness,
+			metallic       = material.metallic,
+			transmission   = material.transmission,
+			ior            = material.ior,
 		}
 
 		offset := vk.DeviceSize(dirty_material * size_of(Material_Data))

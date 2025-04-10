@@ -11,14 +11,6 @@ os = platform.system()
 
 shaders = [
     {
-        "src": "shaders/simple.vert",
-        "out": "shaders/vert.spv",
-    },
-    {
-        "src": "shaders/simple.frag",
-        "out": "shaders/frag.spv",
-    },
-    {
         "src": "shaders/simple.rgen",
         "out": "shaders/rgen.spv",
     },
@@ -29,6 +21,10 @@ shaders = [
     {
         "src": "shaders/simple.rchit",
         "out": "shaders/rchit.spv",
+    },
+    {
+        "src": "shaders/shadow.rmiss",
+        "out": "shaders/shadow.spv",
     }
 ]
 
@@ -49,7 +45,7 @@ def get_build_command(build_mode):
     else:
         raise RuntimeError(f"Unsupported os #{os}")
 
-    command = "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings"
+    command = "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
     if build_mode == "debug":
         command += " -debug"
     else:

@@ -120,11 +120,10 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		}
 
 		vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
-
 	}
 
 	{
-		shaders: [3]Shader
+		shaders: [4]Shader
 		shader_init(
 			&shaders[0],
 			renderer.ctx.device,
@@ -143,6 +142,14 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		)
 		shader_init(
 			&shaders[2],
+			renderer.ctx.device,
+			"main",
+			"main",
+			"shaders/shadow.spv",
+			{.MISS_KHR},
+		)
+		shader_init(
+			&shaders[3],
 			renderer.ctx.device,
 			"main",
 			"main",
@@ -265,11 +272,6 @@ renderer_update :: proc(renderer: ^Renderer) {
 }
 
 renderer_begin_frame :: proc(renderer: ^Renderer) {
-	if renderer.window.framebuffer_resized {
-		renderer.window.framebuffer_resized = false
-		renderer_handle_resizing(renderer)
-	}
-
 	renderer.current_image, _ = ctx_begin_frame(&renderer.ctx)
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
 }
@@ -285,11 +287,6 @@ renderer_end_frame :: proc(renderer: ^Renderer) {
 }
 
 renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
-	if renderer.window.framebuffer_resized {
-		renderer.window.framebuffer_resized = false
-		renderer_handle_resizing(renderer)
-	}
-
 	if camera.dirty {
 		ubo_data := Camera_UBO {
 				projection         = camera.proj,
@@ -319,13 +316,12 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 	renderer.accumulation_frame += 1
 }
 
-@(private = "file")
-renderer_handle_resizing :: proc(
+renderer_on_resize :: proc(
 	renderer: ^Renderer,
+	width, height: u32,
 	allocator := context.allocator,
 ) -> Swapchain_Error {
-	extent := window_get_extent(renderer.window^)
-	ctx_handle_resize(&renderer.ctx, extent.width, extent.height, allocator) or_return
+	ctx_handle_resize(&renderer.ctx, width, height, allocator) or_return
 	raytracing_pass_resize_image(&renderer.raytracing_pass)
 
 	renderer.accumulation_frame = 0

@@ -13,6 +13,7 @@ Shader_Binding_Table :: struct {
 Stage_Indices :: enum {
 	Raygen = 0,
 	Miss,
+	Shadow_Miss,
 	Closest_Hit,
 }
 
@@ -143,6 +144,14 @@ raytracing_pass_init :: proc(
 		{
 			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
 			type = .TRIANGLES_HIT_GROUP,
+			generalShader = u32(Stage_Indices.Shadow_Miss),
+			closestHitShader = ~u32(0),
+			anyHitShader = ~u32(0),
+			intersectionShader = ~u32(0),
+		},
+		{
+			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+			type = .TRIANGLES_HIT_GROUP,
 			generalShader = ~u32(0),
 			closestHitShader = u32(Stage_Indices.Closest_Hit),
 			anyHitShader = ~u32(0),
@@ -165,7 +174,7 @@ raytracing_pass_init :: proc(
 		pStages                      = raw_data(shader_stages),
 		groupCount                   = u32(len(groups)),
 		pGroups                      = raw_data(groups[:]),
-		maxPipelineRayRecursionDepth = 1,
+		maxPipelineRayRecursionDepth = 2,
 		layout                       = rt.pipeline.layout,
 	}
 
@@ -284,16 +293,20 @@ raytracing_pass_render :: proc(
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
-	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
-		stride        = vk.DeviceSize(handle_size_aligned),
-		size          = vk.DeviceSize(handle_size_aligned),
+	miss_sbt_entry := [?]vk.StridedDeviceAddressRegionKHR {
+		{
+			deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
+			stride = vk.DeviceSize(handle_size_aligned),
+			size = vk.DeviceSize(handle_size_aligned * 2),
+		},
 	}
 
-	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
-		stride        = vk.DeviceSize(handle_size_aligned),
-		size          = vk.DeviceSize(handle_size_aligned),
+	hit_sbt_entry := [?]vk.StridedDeviceAddressRegionKHR {
+		{
+			deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
+			stride = vk.DeviceSize(handle_size_aligned),
+			size = vk.DeviceSize(handle_size_aligned),
+		},
 	}
 	callable_entry := vk.StridedDeviceAddressRegionKHR{}
 
@@ -301,8 +314,8 @@ raytracing_pass_render :: proc(
 	vk.CmdTraceRaysKHR(
 		cmd.buffer,
 		&raygen_sbt_entry,
-		&miss_sbt_entry,
-		&hit_sbt_entry,
+		raw_data(miss_sbt_entry[:]),
+		raw_data(hit_sbt_entry[:]),
 		&callable_entry,
 		extent.width,
 		extent.height,
@@ -383,7 +396,7 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	handle_alignment := rt.rt_props.shaderGroupHandleAlignment
 	handle_size_aligned := align_up(handle_size, handle_alignment)
 
-	group_count: u32 = 3
+	group_count: u32 = 4
 	sbt_size := group_count * handle_size_aligned
 
 	sbt_buffer_usage_flags: vk.BufferUsageFlags = {
@@ -404,7 +417,7 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	buffer_init(
 		&rt.sbt.miss_buffer,
 		rt.ctx,
-		vk.DeviceSize(handle_size),
+		vk.DeviceSize(handle_size * 2),
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
@@ -441,10 +454,17 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 		int(handle_size),
 	)
 
+	data, _ = buffer_map(&rt.sbt.miss_buffer)
+	mem.copy(
+		rawptr(uintptr(data) + uintptr(handle_size_aligned)),
+		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
+		int(handle_size),
+	)
+
 	data, _ = buffer_map(&rt.sbt.hit_buffer)
 	mem.copy(
 		data,
-		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
+		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 3)),
 		int(handle_size),
 	)
 

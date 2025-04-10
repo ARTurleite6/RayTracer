@@ -20,104 +20,62 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
-#define M_PI 3.14159265359
-
-vec3 generateCosineWeightedDirection(vec2 random) {
-    float phi = 2.0 * M_PI * random.x;
-    float cosTheta = sqrt(random.y);
-    float sinTheta = sqrt(1 - random.y);
-
-    float x = cos(phi) * sinTheta;
-    float y = sin(phi) * sinTheta;
-    float z = cosTheta;
-
-    return vec3(x, y, z);
+float fresnel_schlick(float NoI, float f0, float roughness) {
+    return mix(mix(pow(abs(1.0 + NoI), 5.0), 1.0, f0), f0, roughness);
 }
 
-vec3 generateLambertianRay(vec3 normal, vec2 random) {
-    vec3 nt = normalize(abs(normal.x) > 0.1f ? vec3(0, 1, 0) : vec3(1, 0, 0));
-    vec3 tangent = normalize(cross(nt, normal));
-    vec3 bitangent = cross(normal, tangent);
-
-    vec3 localDir = generateCosineWeightedDirection(random);
-
-    return normalize(
-        localDir.x * tangent + localDir.y * bitangent + localDir.z * normal
-    );
-}
-
-float lambertianPDF(vec3 normal, vec3 direction) {
-    float cosTheta = max(0.0, dot(normal, direction));
-
-    return cosTheta / M_PI;
-}
-
-const int MAX_DEPTH = 5;
+const int MAX_DEPTH = 1;
 
 void main() {
-    if (push.frame_number < 1000) {
-        uint seed = tea(gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.x, push.frame_number);
-        float r1 = rnd(seed);
-        float r2 = rnd(seed);
-        vec2 subpixel_jitter = push.frame_number == 0 ? vec2(0.5, 0.5) : vec2(r1, r2);
+    uint seed = tea(gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.x, push.frame_number);
+    float r1 = rnd(seed);
+    float r2 = rnd(seed);
+    vec2 subpixel_jitter = push.frame_number == 0 ? vec2(0.5, 0.5) : vec2(r1, r2);
 
-        const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + subpixel_jitter;
-        const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
-        vec2 d = inUV * 2.0 - 1.0;
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + subpixel_jitter;
+    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = inUV * 2.0 - 1.0;
 
-        vec4 origin = cam.inverse_view * vec4(0, 0, 0, 1);
-        vec4 target = cam.inverse_proj * vec4(d.xy, 1, 1);
-        vec4 direction = cam.inverse_view * vec4(normalize(target.xyz), 0);
+    vec4 origin = cam.inverse_view * vec4(0, 0, 0, 1);
+    vec4 target = cam.inverse_proj * vec4(d.xy, 1, 1);
+    vec4 direction = cam.inverse_view * vec4(normalize(target.xyz), 0);
 
-        vec3 rayOrigin = origin.xyz;
-        vec3 rayDirection = direction.xyz;
-        vec3 finalColor = vec3(0.0);
-        vec3 throughput = vec3(1.0);
+    vec3 rayOrigin = origin.xyz;
+    vec3 rayDirection = direction.xyz;
 
-        for (int depth = 0; depth < MAX_DEPTH; depth++) {
-            traceRayEXT(
-                topLevelAS,
-                gl_RayFlagsOpaqueEXT,
-                0xFF,
-                0,
-                0,
-                0,
-                rayOrigin,
-                0.001,
-                rayDirection,
-                10000.0,
-                0
-            );
+    payload.seed = seed;
+    payload.color = vec3(0.0);
+    payload.throughput = vec3(1.0);
 
-            if (!payload.hit) {
-                finalColor += throughput * push.clear_color;
-                break;
-            }
+    for (int depth = 0; depth < MAX_DEPTH; depth++) {
+        traceRayEXT(
+            topLevelAS,
+            gl_RayFlagsOpaqueEXT,
+            0xFF,
+            0,
+            0,
+            0,
+            rayOrigin,
+            0.001,
+            rayDirection,
+            10000.0,
+            0
+        );
 
-            Material mat = payload.material;
-            finalColor += mat.emission_color * mat.emission_power;
-
-            vec2 random = vec2(
-                    rnd(seed),
-                    rnd(seed)
-                );
-
-            rayOrigin = payload.hitPosition;
-
-            rayDirection = generateLambertianRay(payload.hitNormal, random);
-            float cosTheta = max(0.0, dot(payload.hitNormal, rayDirection));
-
-            vec3 brdf = (payload.color / M_PI);
-            float pdf = lambertianPDF(payload.hitNormal, rayDirection);
-            throughput *= brdf * cosTheta / pdf;
+        if (!payload.hit) {
+            payload.color += payload.throughput * push.clear_color;
+            break;
         }
 
-        if (push.frame_number == 0) {
-            imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(finalColor, 1.f));
-        } else {
-            float a = 1.0 / float(push.frame_number + 1);
-            vec3 old_color = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;
-            imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(mix(old_color, finalColor, a), 1.f));
-        }
+        rayOrigin = payload.hitPosition;
+        rayDirection = payload.nextDirection;
+    }
+
+    if (push.frame_number == 0) {
+        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.color, 1.f));
+    } else {
+        float a = 1.0 / float(push.frame_number + 1);
+        vec3 old_color = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;
+        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(mix(old_color, payload.color, a), 1.f));
     }
 }

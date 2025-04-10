@@ -4,13 +4,18 @@ struct Material {
     vec3 albedo;
     vec3 emission_color;
     float emission_power;
+    float roughness;
+    float metallic;
+    float transmission;
+    float ior;
 };
 
 struct RayPayload {
     vec3 color;
-    Material material;
+    vec3 throughput;
     vec3 hitPosition;
-    vec3 hitNormal;
+    vec3 nextDirection;
+    uint seed;
     bool hit;
 };
 

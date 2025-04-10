@@ -26,8 +26,7 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&track)
 		}
 	}
-	app := &raytracer.Application{}
-	err := raytracer.application_init(app, 1920, 1080, "Raytracer")
+	app, err := raytracer.application_init(1920, 1080, "Raytracer")
 	if err != nil {
 		log.errorf("Application: Error launching application %v", err)
 		return
