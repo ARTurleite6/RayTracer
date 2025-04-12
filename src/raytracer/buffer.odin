@@ -144,6 +144,10 @@ buffer_destroy :: proc(buffer: ^Buffer) {
 	buffer^ = {}
 }
 
+buffer_descriptor_info :: proc(buffer: Buffer) -> vk.DescriptorBufferInfo {
+	return {buffer = buffer.handle, offset = 0, range = buffer.size}
+}
+
 buffer_map :: proc(buffer: ^Buffer) -> (rawptr, Buffer_Error) {
 	if result := vk_check(
 		vma.map_memory(buffer.ctx.device.allocator, buffer.allocation, &buffer.mapped_data),

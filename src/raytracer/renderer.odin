@@ -51,8 +51,8 @@ Renderer :: struct {
 	gpu_scene:                    ^GPU_Scene,
 
 	// Camera stuff
-	camera_descriptor_set_layout: vk.DescriptorSetLayout,
-	camera_descriptor_set:        vk.DescriptorSet,
+	camera_descriptor_set_layout: Descriptor_Set_Layout,
+	camera_descriptor_set:        Descriptor_Set,
 	camera_ubo:                   Buffer,
 
 	// vulkan stuff
@@ -77,49 +77,29 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	gpu_scene_init(renderer.gpu_scene, &renderer.ctx)
 
 	{ 	// Initialize camera stuff
-		device := renderer.ctx.device
 		camera_ubo := &renderer.camera_ubo
 		camera_descriptor_set_layout := &renderer.camera_descriptor_set_layout
 		camera_descriptor_set := &renderer.camera_descriptor_set
 
 		buffer_init(camera_ubo, &renderer.ctx, size_of(Camera_UBO), {.UNIFORM_BUFFER}, .Gpu_To_Cpu)
 		buffer_map(camera_ubo)
-		camera_descriptor_set_layout^, _ = create_descriptor_set_layout(
-			[]vk.DescriptorSetLayoutBinding {
-				{
-					binding = 0,
-					descriptorType = .UNIFORM_BUFFER,
-					descriptorCount = 1,
-					stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
-				},
+		camera_descriptor_set_layout^ = create_descriptor_set_layout(
+			&renderer.ctx,
+			{
+				binding = 0,
+				descriptorType = .UNIFORM_BUFFER,
+				descriptorCount = 1,
+				stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
 			},
-			device.logical_device.ptr,
 		)
 
 
-		camera_descriptor_set^, _ = allocate_single_descriptor_set(
-			renderer.ctx.descriptor_pool,
-			camera_descriptor_set_layout,
-			device.logical_device.ptr,
+		camera_descriptor_set^ = descriptor_set_allocate(camera_descriptor_set_layout)
+
+		descriptor_set_update(
+			camera_descriptor_set,
+			{binding = 0, write_info = buffer_descriptor_info(camera_ubo^)},
 		)
-
-		buffer_info := vk.DescriptorBufferInfo {
-			buffer = camera_ubo.handle,
-			offset = 0,
-			range  = size_of(Camera_UBO),
-		}
-
-		write := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			dstSet          = camera_descriptor_set^,
-			dstBinding      = 0,
-			dstArrayElement = 0,
-			descriptorType  = .UNIFORM_BUFFER,
-			descriptorCount = 1,
-			pBufferInfo     = &buffer_info,
-		}
-
-		vk.UpdateDescriptorSets(device.logical_device.ptr, 1, &write, 0, nil)
 	}
 
 	{
@@ -164,8 +144,8 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 			&renderer.raytracing_pass,
 			&renderer.ctx,
 			shaders[:],
-			renderer.gpu_scene.descriptor_set_layout,
-			renderer.camera_descriptor_set_layout,
+			renderer.gpu_scene.descriptor_set_layout.handle,
+			renderer.camera_descriptor_set_layout.handle,
 		)
 	}
 
@@ -177,11 +157,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
 
 	buffer_destroy(&renderer.camera_ubo)
-	vk.DestroyDescriptorSetLayout(
-		vulkan_get_device_handle(&renderer.ctx),
-		renderer.camera_descriptor_set_layout,
-		nil,
-	)
+	descriptor_set_layout_destroy(&renderer.camera_descriptor_set_layout)
 
 	if renderer.gpu_scene != nil {
 		gpu_scene_destroy(renderer.gpu_scene)
@@ -215,19 +191,17 @@ renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
 	renderer_create_bottom_level_as(renderer)
 	renderer_create_top_level_as(renderer, scene^)
 
-	as_write_info := vk.WriteDescriptorSetAccelerationStructureKHR {
-		sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-		accelerationStructureCount = 1,
-		pAccelerationStructures    = &renderer.scene_raytracing.tlas.handle,
-	}
-	write_info := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		pNext           = &as_write_info,
-		descriptorType  = .ACCELERATION_STRUCTURE_KHR,
-		dstSet          = renderer.gpu_scene.descriptor_set,
-		descriptorCount = 1,
-	}
-	vk.UpdateDescriptorSets(vulkan_get_device_handle(&renderer.ctx), 1, &write_info, 0, nil)
+	descriptor_set_update(
+		&renderer.gpu_scene.descriptor_set,
+		{
+			binding = 0,
+			write_info = vk.WriteDescriptorSetAccelerationStructureKHR {
+				sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+				accelerationStructureCount = 1,
+				pAccelerationStructures = &renderer.scene_raytracing.tlas.handle,
+			},
+		},
+	)
 
 	renderer.accumulation_frame = 0
 }
@@ -307,8 +281,8 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 	raytracing_pass_render(
 		&renderer.raytracing_pass,
 		&renderer.current_cmd,
-		renderer.gpu_scene.descriptor_set,
-		renderer.camera_descriptor_set,
+		renderer.gpu_scene.descriptor_set.handle,
+		renderer.camera_descriptor_set.handle,
 		renderer.accumulation_frame,
 		renderer.current_image,
 	)

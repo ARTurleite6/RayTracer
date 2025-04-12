@@ -276,7 +276,7 @@ create_cube :: proc() -> (mesh: Mesh) {
 		{{0.5, -0.5, 0.5}, {0, -1, 0}, {0, 1, 0}}, // 22
 		{{0.5, -0.5, -0.5}, {0, -1, 0}, {0, 1, 1}}, // 23
 	}
-	// Counter-clockwise indices for each face
+
 	indices := []u32 {
 		// Front face
 		0,
@@ -287,45 +287,47 @@ create_cube :: proc() -> (mesh: Mesh) {
 		3,
 
 		// Back face
-		7,
-		6,
-		5,
-		7,
-		5,
 		4,
+		5,
+		6,
+		4,
+		6,
+		7,
 
 		// Right face
-		3,
-		2,
-		6,
-		3,
-		6,
-		7,
+		8,
+		9,
+		10,
+		8,
+		10,
+		11,
 
 		// Left face
-		4,
-		5,
-		1,
-		4,
-		1,
-		0,
+		12,
+		13,
+		14,
+		12,
+		14,
+		15,
 
 		// Top face
-		1,
-		5,
-		6,
-		1,
-		6,
-		2,
+		16,
+		17,
+		18,
+		16,
+		18,
+		19,
 
 		// Bottom face
-		4,
-		0,
-		3,
-		4,
-		3,
-		7,
+		20,
+		21,
+		22,
+		20,
+		22,
+		23,
 	}
+
+	mesh_init(&mesh, vertices, indices, "Cube")
 
 	mesh_init(&mesh, vertices, indices, "Cube")
 	return mesh
@@ -333,13 +335,160 @@ create_cube :: proc() -> (mesh: Mesh) {
 
 @(private)
 create_scene :: proc() -> (scene: Scene) {
+	return create_cornell_box()
+	// scene_init(&scene)
+
+	// sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
+
+	// scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {8.0, 1, 0})
+	// scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {0, 0, 0})
+	// scene_add_object(&scene, "Ground", sphere_index, 0, position = {2.5, 0, 0})
+
+	// return scene
+}
+
+@(private)
+create_cornell_box :: proc() -> (scene: Scene) {
 	scene_init(&scene)
 
-	sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
+	white_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material{name = "white", albedo = {0.73, 0.73, 0.73}, roughness = 1.0},
+	)
 
-	scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {8.0, 1, 0})
-	scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {0, 0, 0})
-	scene_add_object(&scene, "Ground", sphere_index, 0, position = {2.5, 0, 0})
+	red_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material{name = "red", albedo = {0.65, 0.05, 0.05}, roughness = 1.0},
+	)
+
+	green_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material{name = "green", albedo = {0.12, 0.45, 0.15}, roughness = 1.0},
+	)
+
+	light_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material {
+			name = "light",
+			albedo = {0.8, 0.8, 0.8},
+			emission_color = {1.0, 1.0, 1.0},
+			emission_power = 15.0,
+		},
+	)
+
+	// Create a cube mesh for the walls, ceiling, floor and light
+	cube_mesh_idx := scene_add_mesh(&scene, create_cube())
+
+	// Create the room box (scaling the cube to make walls)
+	room_size: f32 = 5.0
+	wall_thickness: f32 = 0.1
+
+	// Floor (bottom wall)
+	scene_add_object(
+		&scene,
+		"Floor",
+		cube_mesh_idx,
+		white_material_idx,
+		position = {0, -room_size / 2, 0},
+		scale = {room_size, wall_thickness, room_size},
+	)
+
+	// Ceiling (top wall)
+	scene_add_object(
+		&scene,
+		"Ceiling",
+		cube_mesh_idx,
+		white_material_idx,
+		position = {0, room_size / 2, 0},
+		scale = {room_size, wall_thickness, room_size},
+	)
+
+	// Back wall
+	scene_add_object(
+		&scene,
+		"Back Wall",
+		cube_mesh_idx,
+		white_material_idx,
+		position = {0, 0, room_size / 2},
+		scale = {room_size, room_size, wall_thickness},
+	)
+
+	// Left wall (green)
+	scene_add_object(
+		&scene,
+		"Left Wall",
+		cube_mesh_idx,
+		green_material_idx,
+		position = {-room_size / 2, 0, 0},
+		scale = {wall_thickness, room_size, room_size},
+	)
+
+	// Right wall (red)
+	scene_add_object(
+		&scene,
+		"Right Wall",
+		cube_mesh_idx,
+		red_material_idx,
+		position = {room_size / 2, 0, 0},
+		scale = {wall_thickness, room_size, room_size},
+	)
+
+	// Light (on the ceiling)
+	light_size: f32 = 1.0
+	scene_add_object(
+		&scene,
+		"Light",
+		cube_mesh_idx,
+		light_material_idx,
+		position = {0, room_size / 2 - wall_thickness, 0},
+		scale = {light_size, wall_thickness / 2, light_size},
+	)
+
+	// Add some objects inside the box
+	sphere_mesh_idx := scene_add_mesh(&scene, create_sphere(stacks = 64, slices = 64))
+
+	// Create a shiny/metallic material
+	metallic_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material{name = "metallic", albedo = {0.8, 0.8, 0.8}, metallic = 1.0, roughness = 0.1},
+	)
+
+	// Create a glass material
+	glass_material_idx := len(scene.materials)
+	scene_add_material(
+		&scene,
+		Material {
+			name = "glass",
+			albedo = {1.0, 1.0, 1.0},
+			transmission = 1.0,
+			ior = 1.5,
+			roughness = 0.0,
+		},
+	)
+
+	// Add two spheres in the box
+	scene_add_object(
+		&scene,
+		"Metal Sphere",
+		sphere_mesh_idx,
+		metallic_material_idx,
+		position = {-1.0, -room_size / 2 + 1.0, -1.0},
+		scale = {1.0, 1.0, 1.0},
+	)
+
+	scene_add_object(
+		&scene,
+		"Glass Sphere",
+		sphere_mesh_idx,
+		glass_material_idx,
+		position = {1.5, -room_size / 2 + 0.5, 0.5},
+		scale = {0.5, 0.5, 0.5},
+	)
 
 	return scene
 }

@@ -20,11 +20,7 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
-float fresnel_schlick(float NoI, float f0, float roughness) {
-    return mix(mix(pow(abs(1.0 + NoI), 5.0), 1.0, f0), f0, roughness);
-}
-
-const int MAX_DEPTH = 5;
+const int MAX_DEPTH = 3;
 
 void main() {
     uint seed = tea(gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.x, push.frame_number);

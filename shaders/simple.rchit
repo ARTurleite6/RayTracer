@@ -29,6 +29,10 @@ layout(set = 1, binding = 2, scalar) buffer MaterialsBuffer {
     Material materials[];
 } materials_data;
 
+layout(set = 1, binding = 3, scalar) buffer LightsBuffer {
+    LightData lights[];
+} lights_data;
+
 layout(push_constant) uniform Push {
     vec3 clear_color;
     uint frame_number;
@@ -84,8 +88,12 @@ SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2
 vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
     vec3 directIllumination = vec3(0.0);
 
-    for (int i = 0; i < objects_data.objects.length(); i++) {
-        ObjectData lightObject = objects_data.objects[i];
+    const float ORIGIN_OFFSET = 0.001;
+    vec3 offsetHitPos = hitPos + normal * ORIGIN_OFFSET;
+
+    for (int i = 0; i < lights_data.lights.length(); i++) {
+        LightData light = lights_data.lights[i];
+        ObjectData lightObject = objects_data.objects[light.object_index];
         Material lightMaterial = materials_data.materials[lightObject.material_index];
 
         if (lightMaterial.emission_power <= 0)
@@ -96,7 +104,7 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         Indices lightIndices = Indices(lightObject.index_address);
 
         // Select a random triangle on the light
-        uint num_triangles = lightObject.num_triangles;
+        uint num_triangles = light.num_triangles;
         uint triangleIdx = min(int(rnd(seed) * num_triangles), num_triangles - 1);
         ivec3 ind = lightIndices.indices[triangleIdx];
 
@@ -119,14 +127,14 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         vec3 localLightPos = u * v0.pos + v * v1.pos + w * v2.pos;
 
         // Transform to world space using the light object's transform matrix
-        vec3 lightPos = vec3(lightObject.transform * vec4(localLightPos, 1.0));
+        vec3 lightPos = vec3(light.transform * vec4(localLightPos, 1.0));
 
         // Also get the normal at this point for area light calculation
         vec3 localLightNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
 
-        // Transform normal to world space (we use transpose of inverse for normals)
-        mat3 normalMatrix = transpose(inverse(mat3(lightObject.transform)));
-        // vec3 worldLightNormal = normalize(normalMatrix * localLightNormal);
+        // TODO: Transform normal to world space (we use transpose of inverse for normals)
+        mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
+        vec3 worldLightNormal = normalize(normalMatrix * localLightNormal);
 
         // Calculate light direction and distance
         vec3 toLight = lightPos - hitPos;
@@ -139,13 +147,13 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         if (NdotL <= 0.0) continue; // Light is behind the surface
 
         // Check if surface is visible from the light's perspective
-        // float LdotN = dot(-lightDir, worldLightNormal);
-        // if (LdotN <= 0.0) continue; // Surface is behind the light
+        float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
+        if (LdotN <= 0.001) continue; // Surface is behind the light
 
         // Cast shadow ray to check visibility
         isShadowed = true;
         const float tMin = 0.001;
-        const float tMax = lightDist - 0.001;
+        const float tMax = lightDist * 0.999;
 
         traceRayEXT(
             topLevelAS,
@@ -154,7 +162,7 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
             0,
             0,
             1,
-            hitPos,
+            offsetHitPos,
             tMin,
             lightDir,
             tMax,
@@ -162,10 +170,11 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         );
 
         if (!isShadowed) {
+            float attenuation = 1.0;
 
-            // Calculate light contribution with correct attenuation
             vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
-            directIllumination += emission * NdotL; // max(pdf, 0.001);
+
+            directIllumination += emission * NdotL * LdotN * attenuation;
         }
     }
 
@@ -190,8 +199,8 @@ void main() {
     const vec3 pos = v0.pos * barycentrics.x + v1.pos * barycentrics.y + v2.pos * barycentrics.z;
     vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
 
-    const vec3 norm = v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z;
-    const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
+    const vec3 norm = normalize(v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z);
+    const vec3 worldNrm = normalize(transpose(inverse(mat3(gl_ObjectToWorldEXT))) * norm);
 
     vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
 

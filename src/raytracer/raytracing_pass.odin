@@ -49,8 +49,8 @@ Raytracing_Pass :: struct {
 	image_view:                  vk.ImageView,
 
 	// TODO: this will change in the future with descriptor caching
-	image_descriptor_set_layout: vk.DescriptorSetLayout,
-	image_descriptor_set:        vk.DescriptorSet,
+	image_descriptor_set_layout: Descriptor_Set_Layout,
+	image_descriptor_set:        Descriptor_Set,
 	ctx:                         ^Vulkan_Context,
 	rt_props:                    vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 	sbt:                         Shader_Binding_Table,
@@ -67,42 +67,23 @@ raytracing_pass_init :: proc(
 
 	device := vulkan_get_device_handle(ctx)
 	{ 	// create image descriptor set layout
-		bindings := [?]vk.DescriptorSetLayoutBinding {
+		rt.image_descriptor_set_layout = create_descriptor_set_layout(
+			ctx,
 			{
 				binding = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_IMAGE,
 				stageFlags = {.RAYGEN_KHR},
 			},
-		}
-
-		create_info := vk.DescriptorSetLayoutCreateInfo {
-			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			bindingCount = u32(len(bindings)),
-			pBindings    = raw_data(bindings[:]),
-		}
-
-		vk.CreateDescriptorSetLayout(device, &create_info, nil, &rt.image_descriptor_set_layout)
-
-		alloc_info := vk.DescriptorSetAllocateInfo {
-			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-			descriptorPool     = rt.ctx.descriptor_pool,
-			descriptorSetCount = 1,
-			pSetLayouts        = &rt.image_descriptor_set_layout,
-		}
-
-		vk.AllocateDescriptorSets(
-			vulkan_get_device_handle(rt.ctx),
-			&alloc_info,
-			&rt.image_descriptor_set,
 		)
 
+		rt.image_descriptor_set = descriptor_set_allocate(&rt.image_descriptor_set_layout)
 		raytracing_pass_create_image(rt)
 	}
 
 	{ 	// create pipeline layout
 		layouts := [?]vk.DescriptorSetLayout {
-			rt.image_descriptor_set_layout,
+			rt.image_descriptor_set_layout.handle,
 			scene_descriptor_set_layout,
 			camera_descriptor_set_layout,
 		}
@@ -193,7 +174,7 @@ raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	image_destroy(&rt.image, rt.ctx^)
 	image_view_destroy(rt.image_view, rt.ctx^)
 
-	vk.DestroyDescriptorSetLayout(device, rt.image_descriptor_set_layout, nil)
+	descriptor_set_layout_destroy(&rt.image_descriptor_set_layout)
 	buffer_destroy(&rt.sbt.raygen_buffer)
 	buffer_destroy(&rt.sbt.hit_buffer)
 	buffer_destroy(&rt.sbt.miss_buffer)
@@ -227,22 +208,13 @@ raytracing_pass_create_image :: proc(rt: ^Raytracing_Pass) {
 		)
 	}
 
-	image_info := vk.DescriptorImageInfo {
-		imageView   = rt.image_view,
-		imageLayout = .GENERAL,
-	}
-
-	write_info := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = rt.image_descriptor_set,
-		dstBinding      = 0, // Assuming binding 0 is for storage image
-		descriptorType  = .STORAGE_IMAGE,
-		descriptorCount = 1,
-		pImageInfo      = &image_info,
-	}
-
-	// Update the descriptor set
-	vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
+	descriptor_set_update(
+		&rt.image_descriptor_set,
+		{
+			binding = 0,
+			write_info = vk.DescriptorImageInfo{imageView = rt.image_view, imageLayout = .GENERAL},
+		},
+	)
 }
 
 raytracing_pass_render :: proc(
@@ -252,7 +224,7 @@ raytracing_pass_render :: proc(
 	accumulation_frame, image_index: u32,
 ) {
 	descriptor_sets := [?]vk.DescriptorSet {
-		rt.image_descriptor_set,
+		rt.image_descriptor_set.handle,
 		scene_descriptor_set,
 		camera_descriptor_set,
 	}

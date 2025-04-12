@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:log"
-import "core:math"
 import glm "core:math/linalg"
 _ :: log
 
@@ -31,7 +30,7 @@ Direction :: enum {
 
 Camera :: struct {
 	position, forward, up, right:           Vec3,
-	fov, aspect, near, far:                 f32,
+	aspect:                                 f32,
 	view, proj, inverse_proj, inverse_view: Mat4,
 	// camera movement
 	speed:                                  f32,
@@ -49,17 +48,11 @@ camera_init :: proc(
 	aspect: f32,
 	target: Vec3 = {0, 0, 0},
 	up: Vec3 = {0, 1, 0},
-	fov: f32 = 45,
-	near: f32 = 0.1,
-	far: f32 = 100,
 ) {
 	camera^ = {
 		position  = position,
-		fov       = fov,
 		up        = up,
 		aspect    = aspect,
-		near      = near,
-		far       = far,
 		speed     = CAMERA_SPEED,
 		sensivity = CAMERA_SENSIVITY,
 	}
@@ -80,12 +73,7 @@ camera_on_resize :: proc(camera: ^Camera, aspect_ratio: f32) {
 
 camera_update_matrices :: proc(camera: ^Camera) {
 	camera.view = glm.matrix4_look_at(camera.position, camera.position + camera.forward, camera.up)
-	camera.proj = glm.matrix4_perspective(
-		math.to_radians(camera.fov),
-		camera.aspect,
-		camera.near,
-		camera.far,
-	)
+	camera.proj = glm.matrix_ortho3d_f32(-camera.aspect, camera.aspect, 1, -1, -1, 1)
 	camera.inverse_view = glm.matrix4_inverse_f32(camera.view)
 	camera.inverse_proj = glm.matrix4_inverse_f32(camera.proj)
 
@@ -107,7 +95,7 @@ camera_process_mouse :: proc(camera: ^Camera, x, y: f32, move: bool) {
 
 	rotation := glm.normalize(
 		glm.cross(
-			glm.quaternion_angle_axis_f32(pitch_delta, camera.right),
+			glm.quaternion_angle_axis_f32(-pitch_delta, camera.right),
 			glm.quaternion_angle_axis_f32(-yaw_delta, {0, 1, 0}),
 		),
 	)
@@ -124,9 +112,9 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 	direction_vector: Vec3
 	switch direction {
 	case .Up:
-		direction_vector = -camera.up
-	case .Down:
 		direction_vector = camera.up
+	case .Down:
+		direction_vector = -camera.up
 	case .Forward:
 		direction_vector = camera.forward
 	case .Backwards:

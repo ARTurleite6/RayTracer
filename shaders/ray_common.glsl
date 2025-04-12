@@ -21,10 +21,8 @@ struct RayPayload {
 };
 
 struct ObjectData {
-    mat4 transform;
     uint64_t vertex_address;
     uint64_t index_address;
-    uint num_triangles;
     uint material_index;
     uint mesh_index;
 };
