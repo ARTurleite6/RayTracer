@@ -88,10 +88,85 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         ObjectData lightObject = objects_data.objects[i];
         Material lightMaterial = materials_data.materials[lightObject.material_index];
 
-        if (lightMaterial.emission_power <= 0.0) continue;
+        if (lightMaterial.emission_power <= 0)
+            continue;
 
+        // Access vertex and index buffers
         Vertices lightVerts = Vertices(lightObject.vertex_address);
         Indices lightIndices = Indices(lightObject.index_address);
+
+        // Select a random triangle on the light
+        uint num_triangles = lightObject.num_triangles;
+        uint triangleIdx = min(int(rnd(seed) * num_triangles), num_triangles - 1);
+        ivec3 ind = lightIndices.indices[triangleIdx];
+
+        // Get vertices of the selected triangle
+        Vertex v0 = lightVerts.v[ind.x];
+        Vertex v1 = lightVerts.v[ind.y];
+        Vertex v2 = lightVerts.v[ind.z];
+
+        // Sample point on triangle with uniform area sampling
+        float r1 = rnd(seed);
+        float r2 = rnd(seed);
+        float sqrtR1 = sqrt(r1);
+
+        // Barycentric coordinates
+        float u = 1.0 - sqrtR1;
+        float v = sqrtR1 * (1.0 - r2);
+        float w = sqrtR1 * r2;
+
+        // Compute position on the light source (in local space)
+        vec3 localLightPos = u * v0.pos + v * v1.pos + w * v2.pos;
+
+        // Transform to world space using the light object's transform matrix
+        vec3 lightPos = vec3(lightObject.transform * vec4(localLightPos, 1.0));
+
+        // Also get the normal at this point for area light calculation
+        vec3 localLightNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+
+        // Transform normal to world space (we use transpose of inverse for normals)
+        mat3 normalMatrix = transpose(inverse(mat3(lightObject.transform)));
+        // vec3 worldLightNormal = normalize(normalMatrix * localLightNormal);
+
+        // Calculate light direction and distance
+        vec3 toLight = lightPos - hitPos;
+        float lightDistSq = dot(toLight, toLight);
+        float lightDist = sqrt(lightDistSq);
+        vec3 lightDir = toLight / lightDist; // Normalized direction
+
+        // Check if light direction is in the hemisphere of the surface normal
+        float NdotL = dot(normal, lightDir);
+        if (NdotL <= 0.0) continue; // Light is behind the surface
+
+        // Check if surface is visible from the light's perspective
+        // float LdotN = dot(-lightDir, worldLightNormal);
+        // if (LdotN <= 0.0) continue; // Surface is behind the light
+
+        // Cast shadow ray to check visibility
+        isShadowed = true;
+        const float tMin = 0.001;
+        const float tMax = lightDist - 0.001;
+
+        traceRayEXT(
+            topLevelAS,
+            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+            0xFF,
+            0,
+            0,
+            1,
+            hitPos,
+            tMin,
+            lightDir,
+            tMax,
+            1 // Payload location
+        );
+
+        if (!isShadowed) {
+
+            // Calculate light contribution with correct attenuation
+            vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
+            directIllumination += emission * NdotL; // max(pdf, 0.001);
+        }
     }
 
     return directIllumination;
@@ -118,9 +193,9 @@ void main() {
     const vec3 norm = v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z;
     const vec3 worldNrm = normalize(vec3(norm * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
-    { // direct illumination
-        isShadowed = false;
-    }
+    vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
+
+    payload.color += payload.throughput * mat.albedo * directLight / M_PI;
 
     vec2 random = vec2(
             rnd(seed),
@@ -133,9 +208,13 @@ void main() {
     float pdf = lambertianPDF(worldNrm, result.scatteredDirection);
 
     float cosTheta = max(0.0, dot(worldNrm, result.scatteredDirection));
-    payload.throughput *= result.brdf * cosTheta / result.pdf;
+    payload.throughput *= result.brdf * cosTheta;
 
-    payload.color += mat.emission_color * mat.emission_power;
+    if (payload.firstBounce) {
+        payload.color += mat.emission_color * mat.emission_power;
+        payload.firstBounce = false;
+    }
+
     payload.hitPosition = worldPos;
     payload.nextDirection = result.scatteredDirection;
     payload.hit = true;

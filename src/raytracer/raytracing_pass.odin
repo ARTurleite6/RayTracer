@@ -143,7 +143,7 @@ raytracing_pass_init :: proc(
 		},
 		{
 			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
-			type = .TRIANGLES_HIT_GROUP,
+			type = .GENERAL,
 			generalShader = u32(Stage_Indices.Shadow_Miss),
 			closestHitShader = ~u32(0),
 			anyHitShader = ~u32(0),
@@ -453,8 +453,6 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned)),
 		int(handle_size),
 	)
-
-	data, _ = buffer_map(&rt.sbt.miss_buffer)
 	mem.copy(
 		rawptr(uintptr(data) + uintptr(handle_size_aligned)),
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
