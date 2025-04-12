@@ -125,28 +125,66 @@ float lambertianPDF(vec3 normal, vec3 direction) {
 
 SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
     SurfaceInteractionResult result;
-    // result.scatteredDirection = generateLambertianRay(normal, random);
-    // result.brdf = material.albedo / M_PI;
-    // result.pdf = lambertianPDF(normal, result.scatteredDirection);
+    float roughness = max(0.01, material.roughness);
+    float metallic = material.metallic;
 
-    if (material.metallic > 0.9) {
-        // Perfect reflection (mirror)
-        // The reflection formula: R = I - 2.0 * N * dot(N, I)
-        // Note: gl_WorldRayDirectionEXT points FROM the ray origin, so we negate it
-        vec3 I = normalize(incomingRayDir);
-        result.scatteredDirection = reflect(I, normal);
+    vec3 F0 = mix(vec3(0.04), material.albedo, metallic);
 
-        // For perfect reflection, BRDF is material.albedo / cosTheta
-        // (though in practice, perfect mirrors modify throughput directly)
-        result.brdf = material.albedo;
-        result.pdf = 1.0; // PDF is 1 for deterministic sampling
-        // result.isSpecular = true;
+    vec3 V = -normalize(incomingRayDir);
+    float VoN = max(dot(V, normal), 0.0);
+
+    vec3 F = F_Schlick(VoN, F0);
+
+    float fresnel_factor = max(F.r, max(F.g, F.b));
+    bool do_specular = (random.x < fresnel_factor);
+
+    if (do_specular) {
+        vec2 Xi = vec2(random.y, rnd(payload.seed));
+
+        vec3 H = sampleGGX(Xi, roughness, normal);
+
+        vec3 L = reflect(-V, H);
+
+        if (dot(L, normal) <= 0.0) {
+            L = generateLambertianRay(normal, random);
+            result.isSpecular = false;
+        } else {
+            result.isSpecular = true;
+
+            float NoV = max(VoN, 0.001);
+
+            float NoL = max(dot(normal, L), 0.001);
+            float NoH = max(dot(normal, H), 0.001);
+            float VoH = max(dot(V, H), 0.001);
+
+            // Compute the microfacet terms
+            float D = D_GGX(NoH, roughness);
+            float G = G_Smith(NoV, NoL, roughness);
+            vec3 F_spec = F_Schlick(VoH, F0);
+
+            // Compute the full BRDF value
+            // Note: we divide by 4*NoV*NoL later when applying it
+            vec3 specular = D * G * F_spec;
+
+            // Compute the PDF for importance sampling of GGX
+            float pdf_H = D * NoH / (4.0 * VoH);
+            result.pdf = pdf_H / (4.0 * VoH);
+
+            // Compute the full BRDF with correct normalization
+            result.brdf = specular;
+        }
+
+        result.scatteredDirection = L;
     } else {
-        // Diffuse reflection (your existing lambertian implementation)
+        // Diffuse reflection (lambert)
         result.scatteredDirection = generateLambertianRay(normal, random);
-        result.brdf = material.albedo / M_PI;
+
+        // For diffuse, we use the Lambertian BRDF, but modulated by (1-F)
+        // This accounts for energy conservation
+        vec3 diffuse_contrib = (vec3(1.0) - F) * (1.0 - metallic);
+        result.brdf = diffuse_contrib * material.albedo / M_PI;
         result.pdf = lambertianPDF(normal, result.scatteredDirection);
-        // result.isSpecular = false;
+        result.isSpecular = false;
     }
 
     return result;
@@ -269,26 +307,61 @@ void main() {
     const vec3 norm = normalize(v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z);
     const vec3 worldNrm = normalize(transpose(inverse(mat3(gl_ObjectToWorldEXT))) * norm);
 
-    vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
+    vec3 incomingRayDir = gl_WorldRayDirectionEXT;
+    bool isEmissive = (mat.emission_power > 0.0);
 
-    payload.color += payload.throughput * mat.albedo * directLight / M_PI;
+    if (isEmissive) {
+        // For emissive surfaces, we only add emission on the first bounce
+        // This prevents double-counting when directly sampling lights
+        if (payload.firstBounce) {
+            // Add emission directly to the final color
+            payload.color += payload.throughput * mat.emission_color * mat.emission_power;
+        }
 
-    vec2 random = vec2(
-            rnd(seed),
-            rnd(seed)
-        );
+        // For emissive surfaces, we typically terminate the path or make it
+        // behave like a diffuse surface with very low intensity reflection
+        vec2 random = vec2(rnd(seed), rnd(seed));
+        payload.nextDirection = generateLambertianRay(worldNrm, random);
 
-    SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random, gl_WorldRayDirectionEXT);
+        // Optional: you might want to heavily attenuate throughput for emissive surfaces
+        // Since they mainly emit rather than reflect
+        payload.throughput *= mat.albedo * 0.1; // Low reflection for emissive surfaces
+    } else {
+        // For non-emissive surfaces, continue with your regular BRDF calculations
 
-    float cosTheta = max(0.0, dot(worldNrm, result.scatteredDirection));
-    payload.throughput *= result.brdf * cosTheta;
+        // Sample direct lighting for non-specular components
+        vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
 
-    if (payload.firstBounce) {
-        payload.color += mat.emission_color * mat.emission_power;
-        payload.firstBounce = false;
+        // Apply direct lighting for diffuse component
+        vec3 F0 = mix(vec3(0.04), mat.albedo, mat.metallic);
+        vec3 V = -normalize(incomingRayDir);
+        float VoN = max(dot(V, worldNrm), 0.0);
+        vec3 F = F_Schlick(VoN, F0);
+        vec3 diffuse_factor = (vec3(1.0) - F) * (1.0 - mat.metallic);
+
+        payload.color += payload.throughput * diffuse_factor * mat.albedo * directLight / M_PI;
+
+        vec2 random = vec2(rnd(seed), rnd(seed));
+
+        // Sample the BRDF to get the next ray direction
+        SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random, incomingRayDir);
+
+        // Apply the BRDF
+        vec3 L = result.scatteredDirection;
+        float NoL = max(dot(worldNrm, L), 0.001);
+
+        if (result.isSpecular) {
+            // For specular reflection, the BRDF is already divided by NoL
+            payload.throughput *= result.brdf * NoL / result.pdf;
+        } else {
+            // For diffuse
+            payload.throughput *= result.brdf * NoL / result.pdf;
+        }
+
+        payload.nextDirection = L;
     }
 
+    payload.firstBounce = false;
     payload.hitPosition = worldPos;
-    payload.nextDirection = result.scatteredDirection;
     payload.hit = true;
 }

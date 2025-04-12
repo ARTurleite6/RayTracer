@@ -211,6 +211,18 @@ render_material_properties :: proc(renderer: ^Renderer) {
 				update_material = true
 			}
 
+			new_roughness := material.roughness
+			if imgui.DragFloat("Roughness", &new_roughness, v_speed = 0.1, v_max = 1.0) {
+				material.roughness = new_roughness
+				update_material = true
+			}
+
+			new_metallic := material.metallic
+			if imgui.DragFloat("Metallic", &new_metallic, v_speed = 0.1, v_max = 1.0) {
+				material.metallic = new_metallic
+				update_material = true
+			}
+
 			new_emission_color := material.emission_color
 			if imgui.ColorPicker3("Emission Color", &new_emission_color) {
 				material.emission_color = new_emission_color

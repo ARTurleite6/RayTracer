@@ -457,16 +457,15 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		Material{name = "metallic", albedo = {0.8, 0.8, 0.8}, metallic = 1.0, roughness = 0.1},
 	)
 
-	// Create a glass material
-	glass_material_idx := len(scene.materials)
+	// Create a glossy material (lower roughness but not metallic)
+	glossy_material_idx := len(scene.materials)
 	scene_add_material(
 		&scene,
 		Material {
-			name = "glass",
-			albedo = {1.0, 1.0, 1.0},
-			transmission = 1.0,
-			ior = 1.5,
-			roughness = 0.0,
+			name      = "glossy",
+			albedo    = {0.3, 0.8, 0.3}, // Green glossy material
+			metallic  = 0.0, // Not a metal
+			roughness = 0.2, // Fairly smooth surface
 		},
 	)
 
@@ -482,9 +481,9 @@ create_cornell_box :: proc() -> (scene: Scene) {
 
 	scene_add_object(
 		&scene,
-		"Glass Sphere",
+		"Glossy Sphere",
 		sphere_mesh_idx,
-		glass_material_idx,
+		glossy_material_idx,
 		position = {1.5, -room_size / 2 + 0.5, 0.5},
 		scale = {0.5, 0.5, 0.5},
 	)
