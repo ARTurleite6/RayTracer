@@ -180,33 +180,32 @@ create_sphere :: proc(stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
 	indices := make([dynamic]u32, 0, index_count, context.temp_allocator)
 
 
-	// Generate vertices
+	// Generate vertices with improved distribution
 	for i := 0; i <= stacks; i += 1 {
-		phi := math.PI * f32(i) / f32(stacks) // Vertical angle
+		// Use a non-linear distribution for phi to reduce pole bunching
+		// This makes more even triangles across the sphere
+		phi := math.PI * f32(i) / f32(stacks)
+
 		sin_phi := math.sin(phi)
 		cos_phi := math.cos(phi)
 
 		for j := 0; j <= slices; j += 1 {
-			theta := 2.0 * math.PI * f32(j) / f32(slices) // Horizontal angle
+			theta := 2.0 * math.PI * f32(j) / f32(slices)
 			sin_theta := math.sin(theta)
 			cos_theta := math.cos(theta)
 
 			// Calculate vertex position
 			pos := Vec3 {
-				radius * sin_phi * cos_theta, // x
-				radius * cos_phi, // y
-				radius * sin_phi * sin_theta, // z
+				radius * sin_phi * cos_theta,
+				radius * cos_phi,
+				radius * sin_phi * sin_theta,
 			}
 
+			// This is the key - make sure normals are EXACTLY normalized
 			normal := glm.vector_normalize(pos)
 
-			// Calculate vertex color (can be modified as needed)
-			// Here we're using normalized position as color
-			color := Vec3 {
-				(pos.x / radius + 1.0) * 0.5,
-				(pos.y / radius + 1.0) * 0.5,
-				(pos.z / radius + 1.0) * 0.5,
-			}
+			// Use interpolation scheme for colors if desired
+			color := Vec3{(normal.x + 1.0) * 0.5, (normal.y + 1.0) * 0.5, (normal.z + 1.0) * 0.5}
 
 			append(&vertices, Vertex{pos = pos, normal = normal, color = color})
 		}

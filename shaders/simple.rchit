@@ -44,7 +44,54 @@ struct SurfaceInteractionResult {
     vec3 brdf;
     float pdf;
     vec3 scatteredDirection;
+    bool isSpecular;
 };
+
+// GGX/Towbridge-Reitz normal distribution function
+float D_GGX(float NoH, float roughness) {
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float denom = NoH * NoH * (alpha2 - 1.0) + 1.0;
+    return alpha2 / (M_PI * denom * denom);
+}
+
+// Smith's method with GGX
+float G_Smith(float NoV, float NoL, float roughness) {
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float G1_V = NoV / (NoV * (1.0 - alpha) + alpha);
+    float G1_L = NoL / (NoL * (1.0 - alpha) + alpha);
+    return G1_V * G1_L;
+}
+
+// Schlick's approximation for Fresnel
+vec3 F_Schlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
+// Importance sampling for GGX
+vec3 sampleGGX(vec2 Xi, float roughness, vec3 N) {
+    // Maps a 2D point to a hemisphere with spread based on roughness
+    float a = roughness * roughness;
+
+    float phi = 2.0 * M_PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    // Spherical to cartesian
+    vec3 H;
+    H.x = sinTheta * cos(phi);
+    H.y = sinTheta * sin(phi);
+    H.z = cosTheta;
+
+    // Tangent-space to world-space
+    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
 
 vec3 generateCosineWeightedDirection(vec2 random) {
     float phi = 2.0 * M_PI * random.x;
@@ -76,11 +123,31 @@ float lambertianPDF(vec3 normal, vec3 direction) {
     return cosTheta / M_PI;
 }
 
-SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random) {
+SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
     SurfaceInteractionResult result;
-    result.scatteredDirection = generateLambertianRay(normal, random);
-    result.brdf = material.albedo / M_PI;
-    result.pdf = lambertianPDF(normal, result.scatteredDirection);
+    // result.scatteredDirection = generateLambertianRay(normal, random);
+    // result.brdf = material.albedo / M_PI;
+    // result.pdf = lambertianPDF(normal, result.scatteredDirection);
+
+    if (material.metallic > 0.9) {
+        // Perfect reflection (mirror)
+        // The reflection formula: R = I - 2.0 * N * dot(N, I)
+        // Note: gl_WorldRayDirectionEXT points FROM the ray origin, so we negate it
+        vec3 I = normalize(incomingRayDir);
+        result.scatteredDirection = reflect(I, normal);
+
+        // For perfect reflection, BRDF is material.albedo / cosTheta
+        // (though in practice, perfect mirrors modify throughput directly)
+        result.brdf = material.albedo;
+        result.pdf = 1.0; // PDF is 1 for deterministic sampling
+        // result.isSpecular = true;
+    } else {
+        // Diffuse reflection (your existing lambertian implementation)
+        result.scatteredDirection = generateLambertianRay(normal, random);
+        result.brdf = material.albedo / M_PI;
+        result.pdf = lambertianPDF(normal, result.scatteredDirection);
+        // result.isSpecular = false;
+    }
 
     return result;
 }
@@ -211,10 +278,7 @@ void main() {
             rnd(seed)
         );
 
-    SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random);
-
-    vec3 brdf = (payload.color / M_PI);
-    float pdf = lambertianPDF(worldNrm, result.scatteredDirection);
+    SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random, gl_WorldRayDirectionEXT);
 
     float cosTheta = max(0.0, dot(worldNrm, result.scatteredDirection));
     payload.throughput *= result.brdf * cosTheta;
