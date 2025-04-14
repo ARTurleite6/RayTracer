@@ -75,7 +75,7 @@ vec3 sampleGGX(vec2 Xi, float roughness, vec3 N) {
     float a = roughness * roughness;
 
     float phi = 2.0 * M_PI * Xi.x;
-    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
+    float cosTheta = sqrt(max(0.0, (1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y)));
     float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 
     // Spherical to cartesian
@@ -125,67 +125,10 @@ float lambertianPDF(vec3 normal, vec3 direction) {
 
 SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
     SurfaceInteractionResult result;
-    float roughness = max(0.01, material.roughness);
-    float metallic = material.metallic;
 
-    vec3 F0 = mix(vec3(0.04), material.albedo, metallic);
-
-    vec3 V = -normalize(incomingRayDir);
-    float VoN = max(dot(V, normal), 0.0);
-
-    vec3 F = F_Schlick(VoN, F0);
-
-    float fresnel_factor = max(F.r, max(F.g, F.b));
-    bool do_specular = (random.x < fresnel_factor);
-
-    if (do_specular) {
-        vec2 Xi = vec2(random.y, rnd(payload.seed));
-
-        vec3 H = sampleGGX(Xi, roughness, normal);
-
-        vec3 L = reflect(-V, H);
-
-        if (dot(L, normal) <= 0.0) {
-            L = generateLambertianRay(normal, random);
-            result.isSpecular = false;
-        } else {
-            result.isSpecular = true;
-
-            float NoV = max(VoN, 0.001);
-
-            float NoL = max(dot(normal, L), 0.001);
-            float NoH = max(dot(normal, H), 0.001);
-            float VoH = max(dot(V, H), 0.001);
-
-            // Compute the microfacet terms
-            float D = D_GGX(NoH, roughness);
-            float G = G_Smith(NoV, NoL, roughness);
-            vec3 F_spec = F_Schlick(VoH, F0);
-
-            // Compute the full BRDF value
-            // Note: we divide by 4*NoV*NoL later when applying it
-            vec3 specular = D * G * F_spec;
-
-            // Compute the PDF for importance sampling of GGX
-            float pdf_H = D * NoH / (4.0 * VoH);
-            result.pdf = pdf_H / (4.0 * VoH);
-
-            // Compute the full BRDF with correct normalization
-            result.brdf = specular;
-        }
-
-        result.scatteredDirection = L;
-    } else {
-        // Diffuse reflection (lambert)
-        result.scatteredDirection = generateLambertianRay(normal, random);
-
-        // For diffuse, we use the Lambertian BRDF, but modulated by (1-F)
-        // This accounts for energy conservation
-        vec3 diffuse_contrib = (vec3(1.0) - F) * (1.0 - metallic);
-        result.brdf = diffuse_contrib * material.albedo / M_PI;
-        result.pdf = lambertianPDF(normal, result.scatteredDirection);
-        result.isSpecular = false;
-    }
+    result.scatteredDirection = generateLambertianRay(normal, random);
+    result.brdf = material.albedo / M_PI;
+    result.pdf = lambertianPDF(normal, result.scatteredDirection);
 
     return result;
 }
@@ -332,14 +275,7 @@ void main() {
         // Sample direct lighting for non-specular components
         vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
 
-        // Apply direct lighting for diffuse component
-        vec3 F0 = mix(vec3(0.04), mat.albedo, mat.metallic);
-        vec3 V = -normalize(incomingRayDir);
-        float VoN = max(dot(V, worldNrm), 0.0);
-        vec3 F = F_Schlick(VoN, F0);
-        vec3 diffuse_factor = (vec3(1.0) - F) * (1.0 - mat.metallic);
-
-        payload.color += payload.throughput * diffuse_factor * mat.albedo * directLight / M_PI;
+        payload.color += payload.throughput * mat.albedo * directLight / M_PI;
 
         vec2 random = vec2(rnd(seed), rnd(seed));
 
@@ -350,13 +286,8 @@ void main() {
         vec3 L = result.scatteredDirection;
         float NoL = max(dot(worldNrm, L), 0.001);
 
-        if (result.isSpecular) {
-            // For specular reflection, the BRDF is already divided by NoL
-            payload.throughput *= result.brdf * NoL / result.pdf;
-        } else {
-            // For diffuse
-            payload.throughput *= result.brdf * NoL / result.pdf;
-        }
+        // For diffuse
+        payload.throughput *= result.brdf * NoL / result.pdf;
 
         payload.nextDirection = L;
     }
