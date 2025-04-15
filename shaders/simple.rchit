@@ -40,6 +40,37 @@ layout(push_constant) uniform Push {
 
 #define M_PI 3.14159265359
 
+mat3 createBasis(vec3 normal) {
+    // Find a perpendicular vector to the normal
+    vec3 nt = normalize(abs(normal.x) > 0.1 ? vec3(0, 1, 0) : vec3(1, 0, 0));
+    vec3 tangent = normalize(cross(nt, normal));
+    vec3 bitangent = cross(normal, tangent);
+
+    return mat3(tangent, bitangent, normal);
+}
+
+// Transform a world-space direction to local space where normal is (0,0,1)
+vec3 worldToLocal(vec3 v, mat3 basis) {
+    return vec3(
+        dot(v, basis[0]),
+        dot(v, basis[1]),
+        dot(v, basis[2])
+    );
+}
+
+// Transform a local-space direction to world space
+vec3 localToWorld(vec3 v, mat3 basis) {
+    return basis[0] * v.x + basis[1] * v.y + basis[2] * v.z;
+}
+
+float cosTheta(vec3 w) {
+    return w.z;
+}
+
+float absCosTheta(vec3 w) {
+    return abs(w.z);
+}
+
 struct SurfaceInteractionResult {
     vec3 brdf;
     float pdf;
@@ -47,7 +78,10 @@ struct SurfaceInteractionResult {
     bool isSpecular;
 };
 
-// GGX/Towbridge-Reitz normal distribution function
+float max3(vec3 v) {
+    return max(v.x, max(v.y, v.z));
+}
+
 float D_GGX(float NoH, float roughness) {
     float alpha = roughness * roughness;
     float alpha2 = alpha * alpha;
@@ -55,42 +89,18 @@ float D_GGX(float NoH, float roughness) {
     return alpha2 / (M_PI * denom * denom);
 }
 
-// Smith's method with GGX
+// GGX Smith geometric shadowing function
 float G_Smith(float NoV, float NoL, float roughness) {
     float alpha = roughness * roughness;
-    float alpha2 = alpha * alpha;
-    float G1_V = NoV / (NoV * (1.0 - alpha) + alpha);
-    float G1_L = NoL / (NoL * (1.0 - alpha) + alpha);
-    return G1_V * G1_L;
+    float k = alpha * 0.5;
+    float G1V = NoV / (NoV * (1.0 - k) + k);
+    float G1L = NoL / (NoL * (1.0 - k) + k);
+    return G1V * G1L;
 }
 
-// Schlick's approximation for Fresnel
-vec3 F_Schlick(float cosTheta, vec3 F0) {
-    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
-}
-
-// Importance sampling for GGX
-vec3 sampleGGX(vec2 Xi, float roughness, vec3 N) {
-    // Maps a 2D point to a hemisphere with spread based on roughness
-    float a = roughness * roughness;
-
-    float phi = 2.0 * M_PI * Xi.x;
-    float cosTheta = sqrt(max(0.0, (1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y)));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-    // Spherical to cartesian
-    vec3 H;
-    H.x = sinTheta * cos(phi);
-    H.y = sinTheta * sin(phi);
-    H.z = cosTheta;
-
-    // Tangent-space to world-space
-    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(up, N));
-    vec3 bitangent = cross(N, tangent);
-
-    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
-    return normalize(sampleVec);
+// Schlick Fresnel approximation
+vec3 F_Schlick(vec3 F0, float VoH) {
+    return F0 + (1.0 - F0) * pow(1.0 - VoH, 5.0);
 }
 
 vec3 generateCosineWeightedDirection(vec2 random) {
@@ -105,16 +115,29 @@ vec3 generateCosineWeightedDirection(vec2 random) {
     return vec3(x, y, z);
 }
 
+vec3 sampleGGX(vec2 random, float roughness, vec3 normal) {
+    float a = roughness * roughness;
+
+    float phi = 2.0 * M_PI * random.x;
+
+    float cosTheta = sqrt((1.0 - random.y) / (1.0 + (a * a - 1.0) * random.y));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    // Convert to Cartesian coordinates in local space where normal is (0,0,1)
+    vec3 localH = vec3(
+            sinTheta * cos(phi),
+            sinTheta * sin(phi),
+            cosTheta
+        );
+    return localH;
+}
+
 vec3 generateLambertianRay(vec3 normal, vec2 random) {
-    vec3 nt = normalize(abs(normal.x) > 0.1f ? vec3(0, 1, 0) : vec3(1, 0, 0));
-    vec3 tangent = normalize(cross(nt, normal));
-    vec3 bitangent = cross(normal, tangent);
+    mat3 basis = createBasis(normal);
 
     vec3 localDir = generateCosineWeightedDirection(random);
 
-    return normalize(
-        localDir.x * tangent + localDir.y * bitangent + localDir.z * normal
-    );
+    return localToWorld(localDir, basis);
 }
 
 float lambertianPDF(vec3 normal, vec3 direction) {
@@ -126,9 +149,74 @@ float lambertianPDF(vec3 normal, vec3 direction) {
 SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
     SurfaceInteractionResult result;
 
-    result.scatteredDirection = generateLambertianRay(normal, random);
-    result.brdf = material.albedo / M_PI;
-    result.pdf = lambertianPDF(normal, result.scatteredDirection);
+    mat3 basis = createBasis(normal);
+    vec3 woLocal = worldToLocal(-incomingRayDir, basis);
+
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+
+    float specularProbability = max3(F0);
+    if (material.metallic > 0.0) {
+        specularProbability = mix(specularProbability, 1.0, material.metallic * 0.5);
+    }
+
+    if (rnd(payload.seed) < specularProbability) {
+        vec3 hLocal = sampleGGX(random, material.roughness, normal);
+
+        vec3 wiLocal = reflect(-woLocal, hLocal);
+
+        if (cosTheta(wiLocal) <= 0.0) {
+            vec3 diffuseLocal = generateCosineWeightedDirection(random);
+            result.scatteredDirection = localToWorld(diffuseLocal, basis);
+            result.brdf = material.albedo / M_PI;
+            result.pdf = cosTheta(diffuseLocal) / M_PI;
+            result.isSpecular = false;
+
+            return result;
+        } else {
+            // Calculate BRDF and PDF for the specular reflection
+            float NoL = cosTheta(wiLocal);
+            float NoV = cosTheta(woLocal);
+            float NoH = cosTheta(hLocal);
+            float VoH = dot(woLocal, hLocal);
+
+            // D term (normal distribution function)
+            float D = D_GGX(NoH, material.roughness);
+
+            // G term (geometric shadowing)
+            float G = G_Smith(NoV, NoL, material.roughness);
+
+            // F term (Fresnel)
+            vec3 F = F_Schlick(F0, VoH);
+
+            // Calculate the PDF of the GGX importance sampling
+            float pdf = D * NoH / (4.0 * VoH);
+
+            // The Cook-Torrance microfacet BRDF
+            vec3 specular = D * G * F / (4.0 * NoV * NoL);
+
+            // For metals, we modulate the specular by the albedo
+            if (material.metallic > 0.0) {
+                specular *= mix(vec3(1.0), material.albedo, material.metallic);
+            }
+
+            result.scatteredDirection = localToWorld(wiLocal, basis);
+            result.brdf = specular;
+            result.pdf = pdf;
+            result.isSpecular = true;
+            return result;
+        }
+    } else {
+        // Diffuse sampling
+        vec3 diffuseLocal = generateCosineWeightedDirection(random);
+        result.scatteredDirection = localToWorld(diffuseLocal, basis);
+
+        // For non-metals only, the diffuse component is weighted by (1 - metallic)
+        float nonMetalWeight = 1.0 - material.metallic;
+        result.brdf = material.albedo * nonMetalWeight / M_PI;
+        result.pdf = cosTheta(diffuseLocal) / M_PI;
+        result.isSpecular = false;
+        return result;
+    }
 
     return result;
 }
@@ -279,6 +367,7 @@ void main() {
 
         vec2 random = vec2(rnd(seed), rnd(seed));
 
+        // TODO: change this to convert incomingRayDir to local space and then use this on the other functions
         // Sample the BRDF to get the next ray direction
         SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random, incomingRayDir);
 
