@@ -223,11 +223,16 @@ SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2
     return result;
 }
 
-vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
+vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, uint seed) {
     vec3 directIllumination = vec3(0.0);
 
     const float ORIGIN_OFFSET = 0.001;
     vec3 offsetHitPos = hitPos + normal * ORIGIN_OFFSET;
+
+    mat3 basis = createBasis(normal);
+    vec3 woLocal = worldToLocal(-viewDir, basis);
+
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
 
     for (int i = 0; i < lights_data.lights.length(); i++) {
         LightData light = lights_data.lights[i];
@@ -308,10 +313,25 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
         );
 
         if (!isShadowed) {
+            vec3 wiLocal = worldToLocal(lightDir, basis);
+
+            if (cosTheta(wiLocal) <= 0) continue;
+
+            vec3 hLocal = normalize(woLocal + wiLocal);
+            float nonMetalWeight = 1.0 - material.metallic;
+
+            vec3 specular = microfacetF(woLocal, wiLocal, hLocal, material);
+
+            vec3 diffuse = material.albedo * nonMetalWeight / M_PI;
+
+            vec3 brdf = diffuse + specular;
+
             float attenuation = 1.0;
+            float NdotL = cosTheta(wiLocal);
+            float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
 
             vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
-            directIllumination += emission * NdotL * LdotN * attenuation;
+            directIllumination += emission * brdf * NdotL * LdotN * attenuation;
         }
     }
 
@@ -362,9 +382,9 @@ void main() {
         // For non-emissive surfaces, continue with your regular BRDF calculations
 
         // Sample direct lighting for non-specular components
-        vec3 directLight = sampleDirectLighting(worldPos, worldNrm, seed);
+        vec3 directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
 
-        payload.color += payload.throughput * mat.albedo * directLight / M_PI;
+        payload.color += payload.throughput * directLight;
 
         vec2 random = vec2(rnd(seed), rnd(seed));
 

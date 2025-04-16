@@ -43,6 +43,7 @@ void main() {
     payload.color = vec3(0.0);
     payload.throughput = vec3(1.0);
     payload.firstBounce = true;
+    payload.isSpecular = false;
 
     const float RR_START_DEPTH = 3;
 
