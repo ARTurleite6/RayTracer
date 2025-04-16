@@ -115,6 +115,37 @@ vec3 generateCosineWeightedDirection(vec2 random) {
     return vec3(x, y, z);
 }
 
+vec3 microfacetF(vec3 wo, vec3 wi, vec3 h, Material material) {
+    float NoL = cosTheta(wi);
+    float NoV = cosTheta(wo);
+    float NoH = cosTheta(h);
+    float VoH = dot(wo, h);
+
+    // D term (normal distribution function)
+    float D = D_GGX(NoH, material.roughness);
+
+    // G term (geometric shadowing)
+    float G = G_Smith(NoV, NoL, material.roughness);
+
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    // F term (Fresnel)
+    vec3 F = F_Schlick(F0, VoH);
+
+    // The Cook-Torrance microfacet BRDF
+    vec3 specular = D * G * F / (4.0 * NoV * NoL);
+
+    return specular;
+}
+
+float microfacetPDF(vec3 wo, vec3 h, float roughness) {
+    float NoH = cosTheta(h);
+    float VoH = dot(wo, h);
+
+    float D = D_GGX(NoH, roughness);
+
+    return D * NoH / (4.0 * VoH);
+}
+
 vec3 sampleGGX(vec2 random, float roughness, vec3 normal) {
     float a = roughness * roughness;
 
@@ -140,12 +171,6 @@ vec3 generateLambertianRay(vec3 normal, vec2 random) {
     return localToWorld(localDir, basis);
 }
 
-float lambertianPDF(vec3 normal, vec3 direction) {
-    float cosTheta = max(0.0, dot(normal, direction));
-
-    return cosTheta / M_PI;
-}
-
 SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
     SurfaceInteractionResult result;
 
@@ -166,56 +191,33 @@ SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2
 
         if (cosTheta(wiLocal) <= 0.0) {
             vec3 diffuseLocal = generateCosineWeightedDirection(random);
-            result.scatteredDirection = localToWorld(diffuseLocal, basis);
-            result.brdf = material.albedo / M_PI;
-            result.pdf = cosTheta(diffuseLocal) / M_PI;
-            result.isSpecular = false;
-
-            return result;
+            return SurfaceInteractionResult(
+                material.albedo / M_PI,
+                cosTheta(diffuseLocal) / M_PI,
+                localToWorld(diffuseLocal, basis),
+                false
+            );
         } else {
-            // Calculate BRDF and PDF for the specular reflection
-            float NoL = cosTheta(wiLocal);
-            float NoV = cosTheta(woLocal);
-            float NoH = cosTheta(hLocal);
-            float VoH = dot(woLocal, hLocal);
-
-            // D term (normal distribution function)
-            float D = D_GGX(NoH, material.roughness);
-
-            // G term (geometric shadowing)
-            float G = G_Smith(NoV, NoL, material.roughness);
-
-            // F term (Fresnel)
-            vec3 F = F_Schlick(F0, VoH);
-
-            // Calculate the PDF of the GGX importance sampling
-            float pdf = D * NoH / (4.0 * VoH);
-
-            // The Cook-Torrance microfacet BRDF
-            vec3 specular = D * G * F / (4.0 * NoV * NoL);
-
-            // For metals, we modulate the specular by the albedo
-            if (material.metallic > 0.0) {
-                specular *= mix(vec3(1.0), material.albedo, material.metallic);
-            }
-
-            result.scatteredDirection = localToWorld(wiLocal, basis);
-            result.brdf = specular;
-            result.pdf = pdf;
-            result.isSpecular = true;
-            return result;
+            return SurfaceInteractionResult(
+                microfacetF(woLocal, wiLocal, hLocal, material),
+                microfacetPDF(woLocal, hLocal, material.roughness),
+                localToWorld(wiLocal, basis),
+                true
+            );
         }
     } else {
         // Diffuse sampling
         vec3 diffuseLocal = generateCosineWeightedDirection(random);
-        result.scatteredDirection = localToWorld(diffuseLocal, basis);
 
         // For non-metals only, the diffuse component is weighted by (1 - metallic)
         float nonMetalWeight = 1.0 - material.metallic;
-        result.brdf = material.albedo * nonMetalWeight / M_PI;
-        result.pdf = cosTheta(diffuseLocal) / M_PI;
-        result.isSpecular = false;
-        return result;
+
+        return SurfaceInteractionResult(
+            material.albedo * nonMetalWeight / M_PI,
+            cosTheta(diffuseLocal) / M_PI,
+            localToWorld(diffuseLocal, basis),
+            false
+        );
     }
 
     return result;
@@ -309,7 +311,6 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, uint seed) {
             float attenuation = 1.0;
 
             vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
-
             directIllumination += emission * NdotL * LdotN * attenuation;
         }
     }
@@ -344,7 +345,7 @@ void main() {
     if (isEmissive) {
         // For emissive surfaces, we only add emission on the first bounce
         // This prevents double-counting when directly sampling lights
-        if (payload.firstBounce) {
+        if (payload.firstBounce || payload.isSpecular) {
             // Add emission directly to the final color
             payload.color += payload.throughput * mat.emission_color * mat.emission_power;
         }
@@ -375,10 +376,9 @@ void main() {
         vec3 L = result.scatteredDirection;
         float NoL = max(dot(worldNrm, L), 0.001);
 
-        // For diffuse
         payload.throughput *= result.brdf * NoL / result.pdf;
-
         payload.nextDirection = L;
+        payload.isSpecular = result.isSpecular;
     }
 
     payload.firstBounce = false;

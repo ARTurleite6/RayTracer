@@ -18,6 +18,7 @@ struct RayPayload {
     uint seed;
     bool hit;
     bool firstBounce;
+    bool isSpecular;
 };
 
 struct ObjectData {
