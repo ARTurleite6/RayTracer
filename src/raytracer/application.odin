@@ -2,6 +2,7 @@ package raytracer
 
 import "core:c"
 import "core:log"
+import imgui "external:odin-imgui"
 import "vendor:glfw"
 _ :: log
 
@@ -15,7 +16,7 @@ g_application: Application
 Application :: struct {
 	window:                      ^Window,
 	scene:                       Scene,
-	camera:                      Camera,
+	camera_controller:           Camera_Controller,
 	renderer:                    Renderer,
 	delta_time, last_frame_time: f64,
 	running:                     bool,
@@ -35,7 +36,7 @@ application_init :: proc(
 	app.running = true
 	app.window = new(Window)
 	window_init(app.window, window_width, window_height, window_title) or_return
-	camera_init(&app.camera, {0, 0, -3}, window_aspect_ratio(app.window^))
+	camera_controller_init(&app.camera_controller, {0, 0, -3}, window_aspect_ratio(app.window^))
 	window_set_window_user_pointer(app.window, app.window)
 	window_set_event_handler(app.window, application_event_handler(app))
 
@@ -49,12 +50,10 @@ application_init :: proc(
 }
 
 application_destroy :: proc(app: ^Application) {
-	{ 	// destroy scene
-		renderer_destroy(&app.renderer)
-		window_destroy(app.window)
-		free(app.window)
-		scene_destroy(&app.scene)
-	}
+	renderer_destroy(&app.renderer)
+	window_destroy(app.window)
+	free(app.window)
+	scene_destroy(&app.scene)
 }
 
 application_get :: proc() -> ^Application {
@@ -73,41 +72,12 @@ application_update :: proc(app: ^Application) {
 	app.last_frame_time = current_time
 
 	dt := f32(app.delta_time)
-	is_key_pressed(.W)
-	if is_key_pressed(.W) {
-		camera_move(&app.camera, .Forward, dt)
-	}
-	if is_key_pressed(.S) {
-		camera_move(&app.camera, .Backwards, dt)
-	}
-	if is_key_pressed(.A) {
-		camera_move(&app.camera, .Left, dt)
-	}
-	if is_key_pressed(.D) {
-		camera_move(&app.camera, .Right, dt)
-	}
-	if is_key_pressed(.Space) {
-		camera_move(&app.camera, .Up, dt)
-	}
-	if is_key_pressed(.Left_Shift) {
-		camera_move(&app.camera, .Down, dt)
-	}
 
-	if is_key_pressed(.Q) {
+	camera_controller_on_update(&app.camera_controller, dt)
+	io := imgui.GetIO()
+
+	if !io.WantCaptureKeyboard && is_key_pressed(.Q) {
 		app.running = false
-	}
-
-	{
-		move_camera := is_mouse_key_pressed(.MOUSE_BUTTON_2)
-		if move_camera {
-			set_input_mode(.Locked)
-
-		} else {
-			set_input_mode(.Normal)
-		}
-
-		x, y := mouse_position()
-		camera_process_mouse(&app.camera, f32(x), f32(y), move_camera)
 	}
 
 	renderer_update(&app.renderer)
@@ -117,7 +87,7 @@ application_render :: proc(app: ^Application) {
 	renderer_begin_frame(&app.renderer)
 
 	renderer_begin_scene(&app.renderer, &app.scene)
-	renderer_render(&app.renderer, &app.camera)
+	renderer_render(&app.renderer, &app.camera_controller.camera)
 	renderer_render_ui(&app.renderer)
 
 	renderer_end_frame(&app.renderer)
@@ -135,11 +105,12 @@ application_on_event :: proc(handler: ^Event_Handler, event: Event) {
 
 	dispatch(event, Resize_Event, application_on_resize, app)
 	dispatch(event, Window_Close_Event, application_on_window_close, app)
+
+	camera_controller_on_event(&app.camera_controller, event)
 }
 
 application_on_resize :: proc(user_data: rawptr, event: Resize_Event) -> bool {
 	app := (^Application)(user_data)
-	camera_on_resize(&app.camera, window_aspect_ratio(app.window^))
 	renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
 	return true
 }

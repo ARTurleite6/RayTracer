@@ -253,15 +253,102 @@ render_material_properties :: proc(renderer: ^Renderer) {
 render_object_properties :: proc(renderer: ^Renderer) {
 	scene := renderer.scene
 	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
+		// =================== OBJECT CREATION SECTION =======================
+		imgui.PushID("ObjectCreation")
+		{
+			defer imgui.PopID()
+
+			imgui.Text("Create New Object")
+
+			@(static) selected_mesh_idx: int = 0
+			if imgui.BeginCombo(
+				"Mesh",
+				temp_cstring(scene_get_mesh_name(scene, selected_mesh_idx)),
+			) {
+				defer imgui.EndCombo()
+				for mesh, i in scene.meshes {
+					is_selected := selected_mesh_idx == i
+					if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
+						selected_mesh_idx = i
+					}
+				}
+			}
+
+			@(static) selected_mat_idx: int = 0
+			if imgui.BeginCombo(
+				"Material",
+				temp_cstring(scene_get_material_name(scene^, selected_mat_idx)),
+			) {
+				defer imgui.EndCombo()
+				for material, i in scene.materials {
+					is_selected := selected_mat_idx == i
+					if imgui.Selectable(temp_cstring(material.name), is_selected) {
+						selected_mat_idx = i
+					}
+				}
+			}
+
+			@(static) new_obj_name: [128]byte
+			imgui.InputText(
+				"Object Name",
+				strings.unsafe_string_to_cstring(string(new_obj_name[:])),
+				len(new_obj_name),
+			)
+
+			if imgui.Button("Create Object", {150, 0}) {
+				name_str := strings.truncate_to_byte(string(new_obj_name[:]), 0)
+				name: string
+				if len(name_str) == 0 {
+					name = fmt.aprintf("Object_%d", len(scene.objects))
+				} else {
+					name = strings.clone(name_str)
+				}
+
+				scene_add_object(
+					scene,
+					name,
+					selected_mesh_idx,
+					selected_mat_idx,
+					position = {0, 0, 0},
+				)
+
+				renderer.ui_ctx.selected_object = len(scene.objects) - 1
+				slice.zero(new_obj_name[:])
+			}
+
+			imgui.Separator()
+		}
+
+		// ============= OBJECT SELECTION SECTION =============
 		selected_object := &renderer.ui_ctx.selected_object
-		if imgui.BeginListBox("##ObjectList", {0, 100}) {
+
+		// Object filtering
+		@(static) obj_filter: [128]byte
+		imgui.InputTextWithHint(
+			"##FilterObjects",
+			"Filter objects...",
+			strings.unsafe_string_to_cstring(string(obj_filter[:])),
+			len(obj_filter),
+		)
+		filter_str := strings.to_lower(
+			strings.truncate_to_byte(string(obj_filter[:]), 0),
+			context.temp_allocator,
+		)
+
+		if imgui.BeginListBox("##ObjectList", {0, 150}) {
 			for object, i in scene.objects {
+				// Skip if doesn't match filter
+				if len(filter_str) > 0 &&
+				   !strings.contains(
+						   strings.to_lower(object.name, context.temp_allocator),
+						   filter_str,
+					   ) {
+					continue
+				}
+
 				is_selected := selected_object^ == i
 
-				if imgui.Selectable(
-					strings.clone_to_cstring(object.name, context.temp_allocator),
-					is_selected,
-				) {
+				if imgui.Selectable(temp_cstring(object.name), is_selected) {
 					selected_object^ = i
 				}
 
@@ -272,29 +359,105 @@ render_object_properties :: proc(renderer: ^Renderer) {
 
 			imgui.EndListBox()
 		}
+
+		imgui.Separator()
+
+		// ============= OBJECT EDITING SECTION =============
 		if selected_object^ >= 0 && selected_object^ < len(scene.objects) {
-			object := &scene.objects[selected_object^]
-
-			imgui.Separator()
-			imgui.Text("Transform")
-
-			new_position := object.transform.position
-			if imgui.DragFloat3("Position", &new_position, 0.01) {
-				scene_update_object_position(scene, selected_object^, new_position)
-			}
-
-			imgui.Separator()
-			// Addding one to the material so it appears nicer to the user
-			new_material := i32(object.material_index + 1)
-			if imgui.InputInt("Material", &new_material, 1) {
-				scene_update_object_material(
-					renderer.scene,
-					selected_object^,
-					int(new_material - 1),
-				)
-			}
+			render_object_editor(&renderer.ui_ctx, scene, selected_object^)
 		}
 	}
+}
+
+@(private = "file")
+render_object_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	imgui.Text("Editing: %s", temp_cstring(object.name))
+	imgui.Spacing()
+
+	if imgui.BeginTabBar("ObjectProperties") {
+		if imgui.BeginTabItem("Transform") {
+			render_transform_editor(ui_ctx, scene, obj_index)
+			imgui.EndTabItem()
+		}
+
+		if imgui.BeginTabItem("Appearance") {
+			render_appearance_editor(ui_ctx, scene, obj_index)
+			imgui.EndTabItem()
+		}
+
+		imgui.EndTabBar()
+	}
+
+	imgui.Spacing()
+	imgui.Separator()
+	imgui.Spacing()
+
+	render_object_actions(ui_ctx, scene, obj_index)
+}
+
+render_transform_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	// Position
+	new_position := object.transform.position
+	if imgui.DragFloat3("Position", &new_position, 0.01) {
+		scene_update_object_position(scene, obj_index, new_position)
+	}
+}
+
+render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	// Material selection dropdown with preview color
+	if imgui.BeginCombo(
+		"Material",
+		temp_cstring(scene_get_material_name(scene^, object.material_index)),
+	) {
+		for material, i in scene.materials {
+			is_selected := object.material_index == i
+
+			// Show material color preview
+			imgui.ColorButton(
+				"##mat_preview",
+				{material.albedo.x, material.albedo.y, material.albedo.z, 1.0},
+				{.NoTooltip},
+				{20, 10},
+			)
+
+			imgui.SameLine()
+
+			if imgui.Selectable(temp_cstring(material.name), is_selected) {
+				scene_update_object_material(scene, obj_index, i)
+			}
+
+			if is_selected {
+				imgui.SetItemDefaultFocus()
+			}
+		}
+		imgui.EndCombo()
+	}
+
+	// Mesh selection dropdown
+	if imgui.BeginCombo("Mesh", temp_cstring(scene_get_mesh_name(scene, object.mesh_index))) {
+		for mesh, i in scene.meshes {
+			is_selected := object.mesh_index == i
+			if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
+				// TODO
+				// scene_update_object_mesh(scene, obj_index, i)
+			}
+
+			if is_selected {
+				imgui.SetItemDefaultFocus()
+			}
+		}
+		imgui.EndCombo()
+	}
+}
+
+render_object_actions :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+
 }
 
 @(private = "file")
@@ -330,18 +493,12 @@ render_material_list :: proc(scene: ^Scene, filter_str: string, selected_materia
 	for material, i in scene.materials {
 		// Skip if doesn't match filter
 		if len(filter_str) > 0 &&
-		   !strings.contains_any(
-				   strings.to_lower(material.name, context.temp_allocator),
-				   filter_str,
-			   ) {
+		   !strings.contains(strings.to_lower(material.name, context.temp_allocator), filter_str) {
 			continue
 		}
 		is_selected := selected_material^ == i
 
-		if imgui.Selectable(
-			strings.clone_to_cstring(material.name, context.temp_allocator),
-			is_selected,
-		) {
+		if imgui.Selectable(temp_cstring(material.name), is_selected) {
 			selected_material^ = i
 		}
 
@@ -364,7 +521,7 @@ render_material_list :: proc(scene: ^Scene, filter_str: string, selected_materia
 render_material_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, mat_index: int) {
 	material := &scene.materials[mat_index]
 
-	imgui.Text("Editing: %s", strings.clone_to_cstring(material.name, context.temp_allocator))
+	imgui.Text("Editing: %s", temp_cstring(material.name))
 	imgui.Spacing()
 
 	update_material := false
@@ -478,10 +635,7 @@ render_delete_material_popup :: proc(
 	}
 	defer imgui.EndPopup()
 
-	imgui.Text(
-		"Are you sure you want to delete '%s'?",
-		strings.clone_to_cstring(material.name, context.temp_allocator),
-	)
+	imgui.Text("Are you sure you want to delete '%s'?", temp_cstring(material.name))
 
 	if material_in_use {
 		imgui.TextColored(
@@ -523,8 +677,13 @@ help_marker :: proc(desc: string) {
 	if imgui.IsItemHovered() {
 		imgui.BeginTooltip()
 		imgui.PushTextWrapPos(imgui.GetFontSize() * 35.0)
-		imgui.TextUnformatted(strings.clone_to_cstring(desc, context.temp_allocator))
+		imgui.TextUnformatted(temp_cstring(desc))
 		imgui.PopTextWrapPos()
 		imgui.EndTooltip()
 	}
+}
+
+@(private = "file")
+temp_cstring :: proc(value: string) -> cstring {
+	return strings.clone_to_cstring(value, context.temp_allocator)
 }

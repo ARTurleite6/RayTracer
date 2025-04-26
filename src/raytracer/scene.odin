@@ -89,6 +89,10 @@ scene_add_material :: proc(scene: ^Scene, material: Material) {
 	append(&scene.changes, Scene_Change{type = .Material_Added, index = len(scene.materials) - 1})
 }
 
+scene_get_material_name :: proc(scene: Scene, material_id: int) -> string {
+	return scene.materials[material_id].name
+}
+
 scene_delete_material :: proc(scene: ^Scene, material_index: int) {
 	material := scene.materials[material_index]
 	delete(material.name)
@@ -116,6 +120,10 @@ scene_update_object_material :: proc(scene: ^Scene, object_idx: int, new_materia
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
 	append(&scene.meshes, mesh)
 	return len(scene.meshes) - 1
+}
+
+scene_get_mesh_name :: proc(scene: ^Scene, mesh_id: int) -> string {
+	return scene.meshes[mesh_id].name
 }
 
 scene_update_object_position :: proc(scene: ^Scene, object_index: int, new_position: Vec3) {
