@@ -128,8 +128,8 @@ swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	vkb.destroy_swapchain(manager.handle)
 
 	vk.DestroySurfaceKHR(manager.device.instance.ptr, manager.surface, nil)
-	delete(manager.images)
-	delete(manager.image_views)
+	// delete(manager.images)
+	// delete(manager.image_views)
 
 	manager^ = {}
 }

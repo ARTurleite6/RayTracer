@@ -20,13 +20,12 @@ Cursor_Mode :: enum {
 }
 
 Window :: struct {
-	handle:              glfw.WindowHandle,
-	surface:             vk.SurfaceKHR,
-	framebuffer_resized: bool,
-	width, height:       c.int,
-	event_handler:       Event_Handler,
+	handle:        glfw.WindowHandle,
+	surface:       vk.SurfaceKHR,
+	width, height: c.int,
+	event_handler: Event_Handler,
 	// TODO: probably this does not make sense, and should go with a better approach
-	logger:              log.Logger,
+	logger:        log.Logger,
 }
 
 Event_Handler :: struct {
@@ -52,6 +51,13 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 
 	window.logger = context.logger
 
+	glfw.SetWindowCloseCallback(window.handle, proc "c" (handle: glfw.WindowHandle) {
+		context = runtime.default_context()
+		window := cast(^Window)glfw.GetWindowUserPointer(handle)
+
+		window.event_handler->on_event(Window_Close_Event{})
+	})
+
 	glfw.SetFramebufferSizeCallback(window.handle, framebuffer_resize)
 	glfw.SetKeyCallback(window.handle, key_callback)
 	glfw.SetCursorPosCallback(window.handle, cursor_position_callback)
@@ -66,6 +72,10 @@ window_destroy :: proc(window: ^Window) {
 	window^ = {}
 }
 
+window_get_native :: proc(window: ^Window) -> rawptr {
+	return window.handle
+}
+
 window_set_window_user_pointer :: proc(window: ^Window, pointer: rawptr) {
 	glfw.SetWindowUserPointer(window.handle, pointer)
 }
@@ -76,12 +86,6 @@ window_set_event_handler :: proc(window: ^Window, handler: Event_Handler) {
 
 window_should_close :: proc(window: Window) -> b32 {
 	return glfw.WindowShouldClose(window.handle)
-}
-
-window_resize :: proc(window: ^Window, width, height: i32) {
-	window.framebuffer_resized = true
-	window.width = width
-	window.height = height
 }
 
 window_set_should_close :: proc(window: ^Window) {
@@ -109,10 +113,6 @@ window_get_surface :: proc(
 	return window.surface, .SUCCESS
 }
 
-window_set_input_mode :: proc(window: ^Window, mode: Cursor_Mode) {
-	glfw.SetInputMode(window.handle, glfw.CURSOR, glfw.CURSOR_NORMAL + cast(i32)mode)
-}
-
 @(require_results)
 window_get_extent :: proc(window: Window) -> vk.Extent2D {
 	return {width = u32(window.width), height = u32(window.height)}
@@ -127,7 +127,9 @@ framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height:
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
 	context.logger = window.logger
 
-	window.event_handler->on_event(Resize_Event{width = width, height = height})
+	window.width = width
+	window.height = height
+	window.event_handler->on_event(Resize_Event{width = window.width, height = window.height})
 }
 
 @(private = "file")

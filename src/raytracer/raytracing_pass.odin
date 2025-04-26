@@ -13,6 +13,7 @@ Shader_Binding_Table :: struct {
 Stage_Indices :: enum {
 	Raygen = 0,
 	Miss,
+	Shadow_Miss,
 	Closest_Hit,
 }
 
@@ -48,8 +49,8 @@ Raytracing_Pass :: struct {
 	image_view:                  vk.ImageView,
 
 	// TODO: this will change in the future with descriptor caching
-	image_descriptor_set_layout: vk.DescriptorSetLayout,
-	image_descriptor_set:        vk.DescriptorSet,
+	image_descriptor_set_layout: Descriptor_Set_Layout,
+	image_descriptor_set:        Descriptor_Set,
 	ctx:                         ^Vulkan_Context,
 	rt_props:                    vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 	sbt:                         Shader_Binding_Table,
@@ -66,42 +67,23 @@ raytracing_pass_init :: proc(
 
 	device := vulkan_get_device_handle(ctx)
 	{ 	// create image descriptor set layout
-		bindings := [?]vk.DescriptorSetLayoutBinding {
+		rt.image_descriptor_set_layout = create_descriptor_set_layout(
+			ctx,
 			{
 				binding = 0,
 				descriptorCount = 1,
 				descriptorType = .STORAGE_IMAGE,
 				stageFlags = {.RAYGEN_KHR},
 			},
-		}
-
-		create_info := vk.DescriptorSetLayoutCreateInfo {
-			sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			bindingCount = u32(len(bindings)),
-			pBindings    = raw_data(bindings[:]),
-		}
-
-		vk.CreateDescriptorSetLayout(device, &create_info, nil, &rt.image_descriptor_set_layout)
-
-		alloc_info := vk.DescriptorSetAllocateInfo {
-			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-			descriptorPool     = rt.ctx.descriptor_pool,
-			descriptorSetCount = 1,
-			pSetLayouts        = &rt.image_descriptor_set_layout,
-		}
-
-		vk.AllocateDescriptorSets(
-			vulkan_get_device_handle(rt.ctx),
-			&alloc_info,
-			&rt.image_descriptor_set,
 		)
 
+		rt.image_descriptor_set = descriptor_set_allocate(&rt.image_descriptor_set_layout)
 		raytracing_pass_create_image(rt)
 	}
 
 	{ 	// create pipeline layout
 		layouts := [?]vk.DescriptorSetLayout {
-			rt.image_descriptor_set_layout,
+			rt.image_descriptor_set_layout.handle,
 			scene_descriptor_set_layout,
 			camera_descriptor_set_layout,
 		}
@@ -142,6 +124,14 @@ raytracing_pass_init :: proc(
 		},
 		{
 			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
+			type = .GENERAL,
+			generalShader = u32(Stage_Indices.Shadow_Miss),
+			closestHitShader = ~u32(0),
+			anyHitShader = ~u32(0),
+			intersectionShader = ~u32(0),
+		},
+		{
+			sType = .RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR,
 			type = .TRIANGLES_HIT_GROUP,
 			generalShader = ~u32(0),
 			closestHitShader = u32(Stage_Indices.Closest_Hit),
@@ -165,7 +155,7 @@ raytracing_pass_init :: proc(
 		pStages                      = raw_data(shader_stages),
 		groupCount                   = u32(len(groups)),
 		pGroups                      = raw_data(groups[:]),
-		maxPipelineRayRecursionDepth = 1,
+		maxPipelineRayRecursionDepth = 2,
 		layout                       = rt.pipeline.layout,
 	}
 
@@ -184,7 +174,7 @@ raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	image_destroy(&rt.image, rt.ctx^)
 	image_view_destroy(rt.image_view, rt.ctx^)
 
-	vk.DestroyDescriptorSetLayout(device, rt.image_descriptor_set_layout, nil)
+	descriptor_set_layout_destroy(&rt.image_descriptor_set_layout)
 	buffer_destroy(&rt.sbt.raygen_buffer)
 	buffer_destroy(&rt.sbt.hit_buffer)
 	buffer_destroy(&rt.sbt.miss_buffer)
@@ -218,22 +208,13 @@ raytracing_pass_create_image :: proc(rt: ^Raytracing_Pass) {
 		)
 	}
 
-	image_info := vk.DescriptorImageInfo {
-		imageView   = rt.image_view,
-		imageLayout = .GENERAL,
-	}
-
-	write_info := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = rt.image_descriptor_set,
-		dstBinding      = 0, // Assuming binding 0 is for storage image
-		descriptorType  = .STORAGE_IMAGE,
-		descriptorCount = 1,
-		pImageInfo      = &image_info,
-	}
-
-	// Update the descriptor set
-	vk.UpdateDescriptorSets(vulkan_get_device_handle(rt.ctx), 1, &write_info, 0, nil)
+	descriptor_set_update(
+		&rt.image_descriptor_set,
+		{
+			binding = 0,
+			write_info = vk.DescriptorImageInfo{imageView = rt.image_view, imageLayout = .GENERAL},
+		},
+	)
 }
 
 raytracing_pass_render :: proc(
@@ -243,7 +224,7 @@ raytracing_pass_render :: proc(
 	accumulation_frame, image_index: u32,
 ) {
 	descriptor_sets := [?]vk.DescriptorSet {
-		rt.image_descriptor_set,
+		rt.image_descriptor_set.handle,
 		scene_descriptor_set,
 		camera_descriptor_set,
 	}
@@ -284,16 +265,20 @@ raytracing_pass_render :: proc(
 		size          = vk.DeviceSize(handle_size_aligned),
 	}
 
-	miss_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
-		stride        = vk.DeviceSize(handle_size_aligned),
-		size          = vk.DeviceSize(handle_size_aligned),
+	miss_sbt_entry := [?]vk.StridedDeviceAddressRegionKHR {
+		{
+			deviceAddress = buffer_get_device_address(rt.sbt.miss_buffer),
+			stride = vk.DeviceSize(handle_size_aligned),
+			size = vk.DeviceSize(handle_size_aligned * 2),
+		},
 	}
 
-	hit_sbt_entry := vk.StridedDeviceAddressRegionKHR {
-		deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
-		stride        = vk.DeviceSize(handle_size_aligned),
-		size          = vk.DeviceSize(handle_size_aligned),
+	hit_sbt_entry := [?]vk.StridedDeviceAddressRegionKHR {
+		{
+			deviceAddress = buffer_get_device_address(rt.sbt.hit_buffer),
+			stride = vk.DeviceSize(handle_size_aligned),
+			size = vk.DeviceSize(handle_size_aligned),
+		},
 	}
 	callable_entry := vk.StridedDeviceAddressRegionKHR{}
 
@@ -301,8 +286,8 @@ raytracing_pass_render :: proc(
 	vk.CmdTraceRaysKHR(
 		cmd.buffer,
 		&raygen_sbt_entry,
-		&miss_sbt_entry,
-		&hit_sbt_entry,
+		raw_data(miss_sbt_entry[:]),
+		raw_data(hit_sbt_entry[:]),
 		&callable_entry,
 		extent.width,
 		extent.height,
@@ -383,7 +368,7 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	handle_alignment := rt.rt_props.shaderGroupHandleAlignment
 	handle_size_aligned := align_up(handle_size, handle_alignment)
 
-	group_count: u32 = 3
+	group_count: u32 = 4
 	sbt_size := group_count * handle_size_aligned
 
 	sbt_buffer_usage_flags: vk.BufferUsageFlags = {
@@ -404,7 +389,7 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 	buffer_init(
 		&rt.sbt.miss_buffer,
 		rt.ctx,
-		vk.DeviceSize(handle_size),
+		vk.DeviceSize(handle_size * 2),
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 	)
@@ -440,11 +425,16 @@ raytracing_pass_create_shader_binding_table :: proc(rt: ^Raytracing_Pass) {
 		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned)),
 		int(handle_size),
 	)
+	mem.copy(
+		rawptr(uintptr(data) + uintptr(handle_size_aligned)),
+		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
+		int(handle_size),
+	)
 
 	data, _ = buffer_map(&rt.sbt.hit_buffer)
 	mem.copy(
 		data,
-		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 2)),
+		rawptr(uintptr(raw_data(shader_handle_storage)) + uintptr(handle_size_aligned * 3)),
 		int(handle_size),
 	)
 

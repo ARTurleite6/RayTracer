@@ -5,19 +5,18 @@ import vk "vendor:vulkan"
 _ :: log
 
 GPU_Scene :: struct {
-	meshes_data:                      []Mesh_GPU_Data,
-	objects_buffer, materials_buffer: Buffer,
+	meshes_data:                                     []Mesh_GPU_Data,
+	objects_buffer, materials_buffer, lights_buffer: Buffer,
 
 	// descriptors
-	descriptor_set_layout:            vk.DescriptorSetLayout,
-	descriptor_set:                   vk.DescriptorSet,
-	vulkan_ctx:                       ^Vulkan_Context,
+	descriptor_set_layout:                           Descriptor_Set_Layout,
+	descriptor_set:                                  Descriptor_Set,
+	vulkan_ctx:                                      ^Vulkan_Context,
 }
 
 Material_Data :: struct {
-	albedo:         Vec3,
-	emission_color: Vec3,
-	emission_power: f32,
+	albedo, emission_color:                                 Vec3,
+	emission_power, roughness, metallic, transmission, ior: f32,
 }
 
 Object_GPU_Data :: struct {
@@ -25,6 +24,12 @@ Object_GPU_Data :: struct {
 	index_buffer_address:  vk.DeviceAddress,
 	material_index:        u32,
 	mesh_index:            u32,
+}
+
+Light_GPU_Data :: struct {
+	transform:     Mat4,
+	object_index:  u32,
+	num_triangles: u32,
 }
 
 // Change this in the future
@@ -35,12 +40,13 @@ Mesh_GPU_Data :: struct {
 gpu_scene_init :: proc(scene: ^GPU_Scene, ctx: ^Vulkan_Context) {
 	scene.vulkan_ctx = ctx
 
-	bindings := [?]vk.DescriptorSetLayoutBinding {
+	scene.descriptor_set_layout = create_descriptor_set_layout(
+		ctx,
 		{
 			binding = 0,
 			descriptorCount = 1,
 			descriptorType = .ACCELERATION_STRUCTURE_KHR,
-			stageFlags = {.RAYGEN_KHR},
+			stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
 		},
 		{
 			binding = 1,
@@ -54,41 +60,22 @@ gpu_scene_init :: proc(scene: ^GPU_Scene, ctx: ^Vulkan_Context) {
 			descriptorType = .STORAGE_BUFFER,
 			stageFlags = {.CLOSEST_HIT_KHR},
 		},
-	}
-
-	create_info := vk.DescriptorSetLayoutCreateInfo {
-		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = u32(len(bindings)),
-		pBindings    = raw_data(bindings[:]),
-	}
-
-	vk.CreateDescriptorSetLayout(
-		vulkan_get_device_handle(scene.vulkan_ctx),
-		&create_info,
-		nil,
-		&scene.descriptor_set_layout,
+		{
+			binding = 3,
+			descriptorCount = 1,
+			descriptorType = .STORAGE_BUFFER,
+			stageFlags = {.CLOSEST_HIT_KHR},
+		},
 	)
 
-	{
-		alloc_info := vk.DescriptorSetAllocateInfo {
-			sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-			descriptorPool     = scene.vulkan_ctx.descriptor_pool,
-			descriptorSetCount = 1,
-			pSetLayouts        = &scene.descriptor_set_layout,
-		}
-
-		vk.AllocateDescriptorSets(
-			vulkan_get_device_handle(scene.vulkan_ctx),
-			&alloc_info,
-			&scene.descriptor_set,
-		)
-	}
-
+	scene.descriptor_set = descriptor_set_allocate(&scene.descriptor_set_layout)
 }
 
 scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 	gpu_scene.meshes_data = make([]Mesh_GPU_Data, len(scene.meshes))
 	objects_data := make([]Object_GPU_Data, len(scene.objects), context.temp_allocator)
+	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
+
 	for mesh, i in scene.meshes {
 		gpu_mesh: Mesh_GPU_Data
 
@@ -125,6 +112,17 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		gpu_object.mesh_index = u32(object.mesh_index)
 
 		objects_data[i] = gpu_object
+
+		if scene.materials[object.material_index].emission_power > 0 {
+			append(
+				&lights_data,
+				Light_GPU_Data {
+					transform = object.transform.model_matrix,
+					object_index = u32(i),
+					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
+				},
+			)
+		}
 	}
 
 	buffer_init_with_staging_buffer(
@@ -136,30 +134,25 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
-	write_info: [1]vk.WriteDescriptorSet
-	{
-		buffer_info := vk.DescriptorBufferInfo {
-			buffer = gpu_scene.objects_buffer.handle,
-			offset = 0,
-			range  = gpu_scene.objects_buffer.size,
-		}
-		write_info[0] = {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			pBufferInfo     = &buffer_info,
-			dstSet          = gpu_scene.descriptor_set,
-			dstBinding      = 1,
-			descriptorType  = .STORAGE_BUFFER,
-			descriptorCount = 1,
-		}
-	}
+	buffer_init_with_staging_buffer(
+		&gpu_scene.lights_buffer,
+		gpu_scene.vulkan_ctx,
+		raw_data(lights_data),
+		size_of(Light_GPU_Data),
+		len(lights_data),
+		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
+	)
 
+	// descriptor_set_update(
+	// 	&gpu_scene.descriptor_set,
+	// 	{binding = 1, write_info = buffer_descriptor_info(gpu_scene.objects_buffer)},
+	// 	{binding = 3, write_info = buffer_descriptor_info(gpu_scene.lights_buffer)},
+	// )
 
-	vk.UpdateDescriptorSets(
-		vulkan_get_device_handle(gpu_scene.vulkan_ctx),
-		u32(len(write_info)),
-		raw_data(write_info[:]),
-		0,
-		nil,
+	descriptor_set_update(
+		&gpu_scene.descriptor_set,
+		{binding = 1, write_info = buffer_descriptor_info(gpu_scene.objects_buffer)},
+		{binding = 3, write_info = buffer_descriptor_info(gpu_scene.lights_buffer)},
 	)
 }
 
@@ -171,11 +164,7 @@ gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 	buffer_destroy(&scene.objects_buffer)
 	buffer_destroy(&scene.materials_buffer)
 
-	vk.DestroyDescriptorSetLayout(
-		vulkan_get_device_handle(scene.vulkan_ctx),
-		scene.descriptor_set_layout,
-		nil,
-	)
+	descriptor_set_layout_destroy(&scene.descriptor_set_layout)
 
 	delete(scene.meshes_data)
 }
@@ -185,8 +174,12 @@ gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 	for material, i in scene.materials {
 		materials_data[i] = {
 			albedo         = material.albedo,
-			emission_power = material.emission_power,
 			emission_color = material.emission_color,
+			emission_power = material.emission_power,
+			roughness      = material.roughness,
+			metallic       = material.metallic,
+			transmission   = material.transmission,
+			ior            = material.ior,
 		}
 	}
 	buffer_init_with_staging_buffer(
@@ -198,29 +191,10 @@ gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
-	{
-		buffer_info := vk.DescriptorBufferInfo {
-			buffer = gpu_scene.materials_buffer.handle,
-			offset = 0,
-			range  = gpu_scene.materials_buffer.size,
-		}
-		write_info := vk.WriteDescriptorSet {
-			sType           = .WRITE_DESCRIPTOR_SET,
-			pBufferInfo     = &buffer_info,
-			dstSet          = gpu_scene.descriptor_set,
-			dstBinding      = 2,
-			descriptorType  = .STORAGE_BUFFER,
-			descriptorCount = 1,
-		}
-
-		vk.UpdateDescriptorSets(
-			vulkan_get_device_handle(gpu_scene.vulkan_ctx),
-			1,
-			&write_info,
-			0,
-			nil,
-		)
-	}
+	descriptor_set_update(
+		&gpu_scene.descriptor_set,
+		{binding = 2, write_info = buffer_descriptor_info(gpu_scene.materials_buffer)},
+	)
 }
 
 gpu_scene_recreate_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
@@ -261,6 +235,10 @@ gpu_scene_update_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) 
 			albedo         = material.albedo,
 			emission_color = material.emission_color,
 			emission_power = material.emission_power,
+			roughness      = material.roughness,
+			metallic       = material.metallic,
+			transmission   = material.transmission,
+			ior            = material.ior,
 		}
 
 		offset := vk.DeviceSize(dirty_material * size_of(Material_Data))
