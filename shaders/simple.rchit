@@ -239,9 +239,6 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
         ObjectData lightObject = objects_data.objects[light.object_index];
         Material lightMaterial = materials_data.materials[lightObject.material_index];
 
-        if (lightMaterial.emission_power <= 0)
-            continue;
-
         // Access vertex and index buffers
         Vertices lightVerts = Vertices(lightObject.vertex_address);
         Indices lightIndices = Indices(lightObject.index_address);

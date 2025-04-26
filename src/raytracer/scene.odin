@@ -55,17 +55,6 @@ Material :: struct {
 }
 
 scene_init :: proc(scene: ^Scene) {
-	append(
-		&scene.materials,
-		Material{name = "green", albedo = {0.0, 1.0, 0.0}},
-		Material{name = "red", albedo = {1.0, 0.0, 0.0}},
-		Material {
-			name = "sun",
-			albedo = {0.1, 0.1, 0.1},
-			emission_color = {1, 1, 0},
-			emission_power = 5.0,
-		},
-	)
 }
 
 scene_destroy :: proc(scene: ^Scene) {
