@@ -13,15 +13,29 @@ Vertex :: struct {
 	color:  Vec3,
 }
 
+Scene_Change_Type :: enum {
+	Material_Changed,
+	Material_Added,
+	Material_Removed,
+	Object_Transform_Changed,
+	Object_Material_Changed,
+	Mesh_Changed,
+	Full_Rebuild,
+}
+
+Scene_Change :: struct {
+	type:  Scene_Change_Type,
+	index: int, // Often points to the changed object/material
+}
+
 Scene :: struct {
-	meshes:          [dynamic]Mesh,
-	objects:         [dynamic]Object,
-	materials:       [dynamic]Material,
+	meshes:    [dynamic]Mesh,
+	objects:   [dynamic]Object,
+	materials: [dynamic]Material,
 
 	// state tracking
 	// TODO: I need to see this better in the future
-	dirty_materials: map[int]bool,
-	dirty_objects:   map[int]bool,
+	changes:   [dynamic]Scene_Change,
 }
 
 Object :: struct {
@@ -54,7 +68,8 @@ Material :: struct {
 	emission_power, roughness, metallic, transmission, ior: f32,
 }
 
-scene_init :: proc(scene: ^Scene) {
+scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
+	scene.changes.allocator = allocator
 }
 
 scene_destroy :: proc(scene: ^Scene) {
@@ -65,11 +80,13 @@ scene_destroy :: proc(scene: ^Scene) {
 	delete(scene.meshes)
 	delete(scene.objects)
 	delete(scene.materials)
+	delete(scene.changes)
 	scene^ = {}
 }
 
 scene_add_material :: proc(scene: ^Scene, material: Material) {
 	append(&scene.materials, material)
+	append(&scene.changes, Scene_Change{type = .Material_Added, index = len(scene.materials) - 1})
 }
 
 scene_delete_material :: proc(scene: ^Scene, material_index: int) {
@@ -77,19 +94,23 @@ scene_delete_material :: proc(scene: ^Scene, material_index: int) {
 	delete(material.name)
 	unordered_remove(&scene.materials, material_index)
 
-	for _, i in scene.objects {
-		scene_update_object_material(scene, i, 0)
+	for object, i in scene.objects {
+		if object.material_index == material_index {
+			scene_update_object_material(scene, i, 0)
+		}
 	}
+
+	append(&scene.changes, Scene_Change{type = .Material_Removed, index = material_index})
 }
 
 scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Material) {
 	scene.materials[material_idx] = material
-	scene.dirty_materials[material_idx] = true
+	append(&scene.changes, Scene_Change{type = .Material_Changed, index = material_idx})
 }
 
 scene_update_object_material :: proc(scene: ^Scene, object_idx: int, new_material_idx: int) {
 	scene.objects[object_idx].material_index = new_material_idx
-	scene.dirty_objects[object_idx] = true
+	append(&scene.changes, Scene_Change{type = .Object_Material_Changed, index = object_idx})
 }
 
 scene_add_mesh :: proc(scene: ^Scene, mesh: Mesh) -> int {
@@ -101,7 +122,7 @@ scene_update_object_position :: proc(scene: ^Scene, object_index: int, new_posit
 	object := &scene.objects[object_index]
 	object_update_position(object, new_position)
 
-	scene.dirty_objects[object_index] = true
+	append(&scene.changes, Scene_Change{type = .Object_Transform_Changed, index = object_index})
 }
 
 scene_add_object :: proc(

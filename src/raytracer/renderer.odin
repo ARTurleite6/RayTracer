@@ -1,6 +1,5 @@
 package raytracer
 
-import "core:container/queue"
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
@@ -14,35 +13,9 @@ Render_Error :: union {
 	Swapchain_Error,
 }
 
-UI_Event :: union {
-	Update_Object_Material,
-	Update_Object_Transform,
-	Update_Material,
-	New_Material,
-	Delete_Material,
-}
-
-Update_Object_Material :: struct {
-	object_index: int,
-}
-
-Update_Object_Transform :: struct {
-	object_index: int,
-}
-
-New_Material :: struct {
-}
-
-Update_Material :: struct {
-}
-
-Delete_Material :: struct {
-}
-
 Renderer :: struct {
 	ctx:                          Vulkan_Context,
 	window:                       ^Window,
-	// TODO: remove the scene
 
 	// GPU representation of the scene for now
 	scene:                        ^Scene,
@@ -64,9 +37,6 @@ Renderer :: struct {
 
 	// time
 	accumulation_frame:           u32,
-
-	// events
-	ui_events:                    queue.Queue(UI_Event),
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
@@ -180,12 +150,63 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 	ctx_destroy(&renderer.ctx)
 
-	queue.destroy(&renderer.ui_events)
 	renderer^ = {}
 }
 
-renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
-	renderer.scene = scene
+renderer_begin_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
+	if renderer.scene != scene {
+		renderer.scene = scene
+		renderer_rebuild_scene(renderer)
+	}
+
+	scene_changes := renderer.scene.changes
+	if len(scene_changes) > 0 {
+		renderer_apply_scene_changes(renderer)
+	}
+}
+
+renderer_apply_scene_changes :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
+	needs_reset_accumulation := false
+
+	for change in pop_safe(&scene.changes) {
+		switch change.type {
+		case .Full_Rebuild, .Mesh_Changed:
+			renderer_rebuild_scene(renderer)
+			clear(&scene.changes)
+			needs_reset_accumulation = true
+			return
+		case .Material_Changed:
+			gpu_scene_update_material(renderer.gpu_scene, scene, change.index)
+			needs_reset_accumulation = true
+		case .Material_Added, .Material_Removed:
+			gpu_scene_recreate_materials_buffer(renderer.gpu_scene, scene^)
+			needs_reset_accumulation = true
+		case .Object_Transform_Changed:
+			object := &scene.objects[change.index]
+			renderer.scene_raytracing.tlas_infos[change.index].transform =
+				matrix_to_transform_matrix_khr(object.transform.model_matrix)
+
+			renderer_build_tlas(
+				renderer,
+				renderer.scene_raytracing.tlas_infos[:],
+				flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE},
+				update = true,
+			)
+			needs_reset_accumulation = true
+		case .Object_Material_Changed:
+			gpu_scene_update_object(renderer.gpu_scene, scene, change.index)
+			needs_reset_accumulation = true
+		}
+	}
+
+	if needs_reset_accumulation {
+		renderer.accumulation_frame = 0
+	}
+}
+
+renderer_rebuild_scene :: proc(renderer: ^Renderer) {
+	scene := renderer.scene
 	scene_compile(renderer.gpu_scene, scene^)
 
 	renderer_create_bottom_level_as(renderer)
@@ -207,42 +228,6 @@ renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
 }
 
 renderer_update :: proc(renderer: ^Renderer) {
-	did_update := false
-	if renderer.scene != nil {
-		for event in queue.pop_back_safe(&renderer.ui_events) {
-			switch v in event {
-			case Update_Object_Material:
-				gpu_scene_update_objects_buffer(renderer.gpu_scene, renderer.scene)
-				did_update = true
-			case Update_Material:
-				gpu_scene_update_materials_buffer(renderer.gpu_scene, renderer.scene)
-				did_update = true
-			case New_Material:
-				gpu_scene_recreate_materials_buffer(renderer.gpu_scene, renderer.scene^)
-				did_update = true
-			case Delete_Material:
-				gpu_scene_recreate_materials_buffer(renderer.gpu_scene, renderer.scene^)
-				did_update = true
-			case Update_Object_Transform:
-				object := &renderer.scene.objects[v.object_index]
-				renderer.scene_raytracing.tlas_infos[v.object_index].transform =
-					matrix_to_transform_matrix_khr(object.transform.model_matrix)
-
-				renderer_build_tlas(
-					renderer,
-					renderer.scene_raytracing.tlas_infos[:],
-					flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE},
-					update = true,
-				)
-
-				did_update = true
-			}
-		}
-	}
-
-	if did_update {
-		renderer.accumulation_frame = 0
-	}
 }
 
 renderer_begin_frame :: proc(renderer: ^Renderer) {

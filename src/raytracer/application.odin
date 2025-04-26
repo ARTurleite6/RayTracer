@@ -44,9 +44,6 @@ application_init :: proc(
 		renderer_init(&app.renderer, app.window)
 		// TODO: change this
 		app.scene = create_scene()
-
-		renderer_set_scene(&app.renderer, &app.scene)
-
 	}
 	return
 }
@@ -117,9 +114,9 @@ application_update :: proc(app: ^Application) {
 }
 
 application_render :: proc(app: ^Application) {
-	// renderer_begin_frame(&app.renderer)
 	renderer_begin_frame(&app.renderer)
 
+	renderer_begin_scene(&app.renderer, &app.scene)
 	renderer_render(&app.renderer, &app.camera)
 	renderer_render_ui(&app.renderer)
 
