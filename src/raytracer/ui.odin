@@ -115,14 +115,10 @@ ui_render :: proc(renderer: ^Renderer) {
 	imgui.NewFrame()
 
 	if imgui.BeginMainMenuBar() {
+		defer imgui.EndMainMenuBar()
 		if imgui.BeginMenu("File") {
-			if imgui.MenuItem("Exit", "Q") {
-				window_set_should_close(renderer.window)
-			}
 			imgui.EndMenu()
 		}
-
-		imgui.EndMainMenuBar()
 	}
 
 	render_statistics(scene^)
@@ -336,28 +332,15 @@ render_object_properties :: proc(renderer: ^Renderer) {
 		)
 
 		if imgui.BeginListBox("##ObjectList", {0, 150}) {
-			for object, i in scene.objects {
-				// Skip if doesn't match filter
-				if len(filter_str) > 0 &&
-				   !strings.contains(
-						   strings.to_lower(object.name, context.temp_allocator),
-						   filter_str,
-					   ) {
-					continue
-				}
+			defer imgui.EndListBox()
 
-				is_selected := selected_object^ == i
-
-				if imgui.Selectable(temp_cstring(object.name), is_selected) {
-					selected_object^ = i
-				}
-
-				if is_selected {
-					imgui.SetItemDefaultFocus()
-				}
-			}
-
-			imgui.EndListBox()
+			selectable_list(
+				scene.objects[:],
+				filter_str,
+				selected_object,
+				proc(obj: Object) -> string {return obj.name},
+				proc(_: Object) {},
+			)
 		}
 
 		imgui.Separator()
@@ -490,31 +473,13 @@ render_statistics :: proc(scene: Scene) {
 
 @(private = "file")
 render_material_list :: proc(scene: ^Scene, filter_str: string, selected_material: ^int) {
-	for material, i in scene.materials {
-		// Skip if doesn't match filter
-		if len(filter_str) > 0 &&
-		   !strings.contains(strings.to_lower(material.name, context.temp_allocator), filter_str) {
-			continue
-		}
-		is_selected := selected_material^ == i
-
-		if imgui.Selectable(temp_cstring(material.name), is_selected) {
-			selected_material^ = i
-		}
-
-		if is_selected {
-			imgui.SetItemDefaultFocus()
-		}
-
-		// Show preview color indicator
-		imgui.SameLine(imgui.GetWindowWidth() - 30)
-		imgui.ColorButton(
-			"##preview",
-			{material.albedo.x, material.albedo.y, material.albedo.z, 1.0},
-			{.NoTooltip},
-			{20, 10},
-		)
-	}
+	selectable_list(
+		scene.materials[:],
+		filter_str,
+		selected_material,
+		proc(mat: Material) -> string {return mat.name},
+		proc(_: Material) {},
+	)
 }
 
 @(private = "file")
@@ -669,6 +634,34 @@ get_material_usage :: proc(scene: ^Scene, mat_index: int) -> (in_use: bool, coun
 		}
 	}
 	return
+}
+
+@(private = "file")
+selectable_list :: proc(
+	resources: []$T,
+	filter_str: string,
+	selected_resource: ^int,
+	key_proc: proc(_: T) -> string,
+	render_proc: proc(_: T), // this parameter can be used to render additional info
+) {
+	for resource, i in resources {
+		name := key_proc(resource)
+		// Skip if doesn't match filter
+		if !strings.contains(strings.to_lower(name, context.temp_allocator), filter_str) {
+			continue
+		}
+
+		is_selected := selected_resource^ == i
+		if imgui.Selectable(temp_cstring(name), is_selected) {
+			selected_resource^ = i
+		}
+
+		if is_selected {
+			imgui.SetItemDefaultFocus()
+		}
+
+		render_proc(resource)
+	}
 }
 
 @(private = "file")

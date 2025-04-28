@@ -6,6 +6,7 @@
 
 #include "ray_common.glsl"
 #include "random.glsl"
+#include "math.glsl"
 
 hitAttributeEXT vec2 attribs;
 
@@ -38,49 +39,14 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
-#define M_PI 3.14159265359
-
-mat3 createBasis(vec3 normal) {
-    // Find a perpendicular vector to the normal
-    vec3 nt = normalize(abs(normal.x) > 0.1 ? vec3(0, 1, 0) : vec3(1, 0, 0));
-    vec3 tangent = normalize(cross(nt, normal));
-    vec3 bitangent = cross(normal, tangent);
-
-    return mat3(tangent, bitangent, normal);
-}
-
-// Transform a world-space direction to local space where normal is (0,0,1)
-vec3 worldToLocal(vec3 v, mat3 basis) {
-    return vec3(
-        dot(v, basis[0]),
-        dot(v, basis[1]),
-        dot(v, basis[2])
-    );
-}
-
-// Transform a local-space direction to world space
-vec3 localToWorld(vec3 v, mat3 basis) {
-    return basis[0] * v.x + basis[1] * v.y + basis[2] * v.z;
-}
-
-float cosTheta(vec3 w) {
-    return w.z;
-}
-
-float absCosTheta(vec3 w) {
-    return abs(w.z);
-}
-
 struct SurfaceInteractionResult {
     vec3 brdf;
     float pdf;
     vec3 scatteredDirection;
     bool isSpecular;
+    float diffusePdf;
+    float specularPdf;
 };
-
-float max3(vec3 v) {
-    return max(v.x, max(v.y, v.z));
-}
 
 float D_GGX(float NoH, float roughness) {
     float alpha = roughness * roughness;
@@ -191,18 +157,27 @@ SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2
 
         if (cosTheta(wiLocal) <= 0.0) {
             vec3 diffuseLocal = generateCosineWeightedDirection(random);
+            float diffusePdf = cosTheta(diffuseLocal) / M_PI;
+            float specularPdf = 0;
             return SurfaceInteractionResult(
                 material.albedo / M_PI,
-                cosTheta(diffuseLocal) / M_PI,
+                diffusePdf,
                 localToWorld(diffuseLocal, basis),
-                false
+                false,
+                diffusePdf,
+                specularPdf
             );
         } else {
+            float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
+            float diffusePdf = max(cosTheta(wiLocal), 0.0) / M_PI;
+
             return SurfaceInteractionResult(
                 microfacetF(woLocal, wiLocal, hLocal, material),
-                microfacetPDF(woLocal, hLocal, material.roughness),
+                specularPdf,
                 localToWorld(wiLocal, basis),
-                true
+                true,
+                diffusePdf,
+                specularPdf
             );
         }
     } else {
@@ -212,11 +187,16 @@ SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2
         // For non-metals only, the diffuse component is weighted by (1 - metallic)
         float nonMetalWeight = 1.0 - material.metallic;
 
+        vec3 hLocal = normalize(woLocal + diffuseLocal);
+        float diffusePdf = cosTheta(diffuseLocal) / M_PI;
+        float specularPdf = cosTheta(diffuseLocal) > 0.0 ? microfacetPDF(woLocal, hLocal, material.roughness) : 0.0;
+
         return SurfaceInteractionResult(
-            material.albedo * nonMetalWeight / M_PI,
-            cosTheta(diffuseLocal) / M_PI,
+            material.albedo * nonMetalWeight / M_PI, diffusePdf,
             localToWorld(diffuseLocal, basis),
-            false
+            false,
+            diffusePdf,
+            specularPdf
         );
     }
 
@@ -335,6 +315,33 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
     return directIllumination;
 }
 
+float evaluatePDF(vec3 wo, vec3 wi, Material material, mat3 basis) {
+    vec3 woLocal = worldToLocal(wo, basis);
+    vec3 wiLocal = worldToLocal(wi, basis);
+
+    if (cosTheta(wiLocal) <= 0.0)
+        return 0.0;
+
+    // Calculate the half-vector for specular PDF
+    vec3 hLocal = normalize(woLocal + wiLocal);
+
+    // Calculate specular PDF
+    float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
+
+    // Calculate diffuse PDF
+    float diffusePdf = cosTheta(wiLocal) / M_PI;
+
+    // Calculate probability of selecting specular or diffuse
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    float specularProbability = max3(F0);
+    if (material.metallic > 0.0) {
+        specularProbability = mix(specularProbability, 1.0, material.metallic * 0.5);
+    }
+
+    // Combined PDF based on the selection probability
+    return specularProbability * specularPdf + (1.0 - specularProbability) * diffusePdf;
+}
+
 void main() {
     uint seed = payload.seed;
     ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
@@ -393,7 +400,18 @@ void main() {
         vec3 L = result.scatteredDirection;
         float NoL = max(dot(worldNrm, L), 0.001);
 
-        payload.throughput *= result.brdf * NoL / result.pdf;
+        float misPdf = evaluatePDF(-incomingRayDir, L, mat, createBasis(worldNrm));
+        float weight = 1.0;
+
+        if (result.diffusePdf > 0 || result.specularPdf > 0) {
+            float samplePdf = result.pdf;
+
+            if (!result.isSpecular) {
+                weight = powerHeuristic(samplePdf, misPdf);
+            }
+        }
+
+        payload.throughput *= result.brdf * NoL * weight / result.pdf;
         payload.nextDirection = L;
         payload.isSpecular = result.isSpecular;
     }

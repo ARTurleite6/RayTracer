@@ -71,14 +71,13 @@ application_update :: proc(app: ^Application) {
 	app.delta_time = current_time - app.last_frame_time
 	app.last_frame_time = current_time
 
+	if io := imgui.GetIO(); !io.WantCaptureKeyboard && is_key_pressed(.Q) {
+		app.running = false
+	}
+
 	dt := f32(app.delta_time)
 
 	camera_controller_on_update(&app.camera_controller, dt)
-	io := imgui.GetIO()
-
-	if !io.WantCaptureKeyboard && is_key_pressed(.Q) {
-		app.running = false
-	}
 
 	renderer_update(&app.renderer)
 }

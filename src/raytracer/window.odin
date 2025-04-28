@@ -24,7 +24,6 @@ Window :: struct {
 	surface:       vk.SurfaceKHR,
 	width, height: c.int,
 	event_handler: Event_Handler,
-	// TODO: probably this does not make sense, and should go with a better approach
 	logger:        log.Logger,
 }
 
@@ -84,17 +83,9 @@ window_set_event_handler :: proc(window: ^Window, handler: Event_Handler) {
 	window.event_handler = handler
 }
 
-window_should_close :: proc(window: Window) -> b32 {
-	return glfw.WindowShouldClose(window.handle)
-}
-
-window_set_should_close :: proc(window: ^Window) {
-	glfw.SetWindowShouldClose(window.handle, true)
-}
-
-window_aspect_ratio :: proc(window: Window) -> f32 {
-	extent := window_get_extent(window)
-	return f32(extent.width) / f32(extent.height)
+@(require_results)
+window_aspect_ratio :: proc "contextless" (window: Window) -> f32 {
+	return f32(window.width) / f32(window.height)
 }
 
 @(require_results)
@@ -111,11 +102,6 @@ window_get_surface :: proc(
 	glfw.CreateWindowSurface(instance.ptr, window.handle, nil, &window.surface) or_return
 
 	return window.surface, .SUCCESS
-}
-
-@(require_results)
-window_get_extent :: proc(window: Window) -> vk.Extent2D {
-	return {width = u32(window.width), height = u32(window.height)}
 }
 
 window_wait_events :: proc(window: Window) {
