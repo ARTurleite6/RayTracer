@@ -39,6 +39,25 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
+struct BSDFSample {
+    vec3 direction;
+    vec3 value;
+    float pdf;
+    bool isSpecular;
+    float diffusePdf;
+    float specularPdf;
+};
+
+// Get selection probability for specular vs diffuse sampling
+float getSpecularProbability(Material material) {
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    float specularProbability = max3(F0);
+    if (material.metallic > 0.0) {
+        specularProbability = mix(specularProbability, 1.0, material.metallic * 0.5);
+    }
+    return specularProbability;
+}
+
 struct SurfaceInteractionResult {
     vec3 brdf;
     float pdf;
@@ -112,7 +131,7 @@ float microfacetPDF(vec3 wo, vec3 h, float roughness) {
     return D * NoH / (4.0 * VoH);
 }
 
-vec3 sampleGGX(vec2 random, float roughness, vec3 normal) {
+vec3 sampleGGX(vec2 random, float roughness) {
     float a = roughness * roughness;
 
     float phi = 2.0 * M_PI * random.x;
@@ -137,68 +156,96 @@ vec3 generateLambertianRay(vec3 normal, vec2 random) {
     return localToWorld(localDir, basis);
 }
 
-SurfaceInteractionResult surfaceInteraction(vec3 normal, Material material, vec2 random, vec3 incomingRayDir) {
-    SurfaceInteractionResult result;
+struct BRDFEval {
+    vec3 diffuse; // Diffuse component
+    vec3 specular; // Specular component
+    float diffusePdf;
+    float specularPdf;
+};
 
-    mat3 basis = createBasis(normal);
-    vec3 woLocal = worldToLocal(-incomingRayDir, basis);
+BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
+    BRDFEval result;
 
+    // Calculate necessary vectors and dot products
+    float NoL = cosTheta(wi);
+    float NoV = cosTheta(wo);
+
+    if (NoL <= 0.0 || NoV <= 0.0) {
+        // Below horizon - no contribution
+        result.diffuse = vec3(0.0);
+        result.specular = vec3(0.0);
+        result.diffusePdf = 0.0;
+        result.specularPdf = 0.0;
+        return result;
+    }
+
+    // Calculate half-vector
+    vec3 h = normalize(wo + wi);
+    float NoH = cosTheta(h);
+    float VoH = dot(wo, h);
+
+    // Calculate diffuse term (Lambert)
+    float nonMetalWeight = 1.0 - material.metallic;
+    result.diffuse = material.albedo * nonMetalWeight / M_PI;
+    result.diffusePdf = NoL / M_PI;
+
+    // Calculate specular microfacet term
+    // D term (normal distribution function)
+    float D = D_GGX(NoH, material.roughness);
+
+    // G term (geometric shadowing)
+    float G = G_Smith(NoV, NoL, material.roughness);
+
+    // Fresnel term
     vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    vec3 F = F_Schlick(F0, VoH);
 
-    float specularProbability = max3(F0);
-    if (material.metallic > 0.0) {
-        specularProbability = mix(specularProbability, 1.0, material.metallic * 0.5);
-    }
+    result.specular = D * G * F / (4.0 * NoV * NoL);
+    result.specularPdf = D * NoH / (4.0 * VoH);
 
-    if (rnd(payload.seed) < specularProbability) {
-        vec3 hLocal = sampleGGX(random, material.roughness, normal);
+    return result;
+}
 
-        vec3 wiLocal = reflect(-woLocal, hLocal);
+// Evaluate full BRDF (diffuse + specular)
+vec3 evaluateFullBRDF(vec3 wo, vec3 wi, Material material) {
+    BRDFEval eval = evaluateBRDFComponents(wo, wi, material);
+    return eval.diffuse + eval.specular;
+}
 
-        if (cosTheta(wiLocal) <= 0.0) {
-            vec3 diffuseLocal = generateCosineWeightedDirection(random);
-            float diffusePdf = cosTheta(diffuseLocal) / M_PI;
-            float specularPdf = 0;
-            return SurfaceInteractionResult(
-                material.albedo / M_PI,
-                diffusePdf,
-                localToWorld(diffuseLocal, basis),
-                false,
-                diffusePdf,
-                specularPdf
-            );
-        } else {
-            float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
-            float diffusePdf = max(cosTheta(wiLocal), 0.0) / M_PI;
+BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
+    BSDFSample result;
 
-            return SurfaceInteractionResult(
-                microfacetF(woLocal, wiLocal, hLocal, material),
-                specularPdf,
-                localToWorld(wiLocal, basis),
-                true,
-                diffusePdf,
-                specularPdf
-            );
-        }
+    float specularWeight = getSpecularProbability(material);
+    float diffuseWeight = 1 - specularWeight;
+
+    bool useSpecularSampling = (rnd(payload.seed) < specularWeight);
+    vec3 wiLocal; // direction in local space
+
+    if (useSpecularSampling) {
+        vec3 h = sampleGGX(random, material.roughness);
+        wiLocal = reflect(-wo, h);
     } else {
-        // Diffuse sampling
-        vec3 diffuseLocal = generateCosineWeightedDirection(random);
-
-        // For non-metals only, the diffuse component is weighted by (1 - metallic)
-        float nonMetalWeight = 1.0 - material.metallic;
-
-        vec3 hLocal = normalize(woLocal + diffuseLocal);
-        float diffusePdf = cosTheta(diffuseLocal) / M_PI;
-        float specularPdf = cosTheta(diffuseLocal) > 0.0 ? microfacetPDF(woLocal, hLocal, material.roughness) : 0.0;
-
-        return SurfaceInteractionResult(
-            material.albedo * nonMetalWeight / M_PI, diffusePdf,
-            localToWorld(diffuseLocal, basis),
-            false,
-            diffusePdf,
-            specularPdf
-        );
+        wiLocal = generateCosineWeightedDirection(random);
     }
+
+    float pdfSpecular = 0.0;
+    float pdfDiffuse = 0.0;
+    // Calculate diffuse PDF
+    pdfDiffuse = cosTheta(wiLocal) / M_PI;
+
+    // Calculate specular PDF
+    vec3 h = normalize(wo + wiLocal);
+    pdfSpecular = microfacetPDF(wo, h, material.roughness);
+
+    float pdf = specularWeight * pdfSpecular + diffuseWeight * pdfDiffuse;
+
+    BRDFEval eval = evaluateBRDFComponents(wo, wiLocal, material);
+    result.direction = localToWorld(wiLocal, basis);
+    result.pdf = max(pdf, 0.0001);
+    result.diffusePdf = pdfDiffuse;
+    result.specularPdf = pdfSpecular;
+    result.isSpecular = useSpecularSampling;
+    result.value = eval.diffuse + eval.specular;
 
     return result;
 }
@@ -315,6 +362,14 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
     return directIllumination;
 }
 
+// Calculate full PDF for a given direction
+float calculatePDF(vec3 wo, vec3 wi, Material material) {
+    BRDFEval eval = evaluateBRDFComponents(wo, wi, material);
+    float specularProbability = getSpecularProbability(material);
+
+    return specularProbability * eval.specularPdf + (1.0 - specularProbability) * eval.diffusePdf;
+}
+
 float evaluatePDF(vec3 wo, vec3 wi, Material material, mat3 basis) {
     vec3 woLocal = worldToLocal(wo, basis);
     vec3 wiLocal = worldToLocal(wi, basis);
@@ -390,30 +445,16 @@ void main() {
 
         payload.color += payload.throughput * directLight;
 
+        mat3 basis = createBasis(worldNrm);
+        vec3 woLocal = worldToLocal(-incomingRayDir, basis);
+
         vec2 random = vec2(rnd(seed), rnd(seed));
+        BSDFSample brdfSample = sampleBRDF(woLocal, mat, random, basis);
 
-        // TODO: change this to convert incomingRayDir to local space and then use this on the other functions
-        // Sample the BRDF to get the next ray direction
-        SurfaceInteractionResult result = surfaceInteraction(worldNrm, mat, random, incomingRayDir);
-
-        // Apply the BRDF
-        vec3 L = result.scatteredDirection;
-        float NoL = max(dot(worldNrm, L), 0.001);
-
-        float misPdf = evaluatePDF(-incomingRayDir, L, mat, createBasis(worldNrm));
-        float weight = 1.0;
-
-        if (result.diffusePdf > 0 || result.specularPdf > 0) {
-            float samplePdf = result.pdf;
-
-            if (!result.isSpecular) {
-                weight = powerHeuristic(samplePdf, misPdf);
-            }
-        }
-
-        payload.throughput *= result.brdf * NoL * weight / result.pdf;
-        payload.nextDirection = L;
-        payload.isSpecular = result.isSpecular;
+        float cosTheta = max(dot(worldNrm, brdfSample.direction), 0.001);
+        payload.throughput *= brdfSample.value * cosTheta / brdfSample.pdf;
+        payload.nextDirection = brdfSample.direction;
+        payload.isSpecular = brdfSample.isSpecular;
     }
 
     payload.firstBounce = false;
