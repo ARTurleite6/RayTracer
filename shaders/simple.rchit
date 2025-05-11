@@ -253,20 +253,52 @@ BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
 vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, uint seed) {
     vec3 directIllumination = vec3(0.0);
 
+    int numLights = lights_data.lights.length();
+    if(numLights == 0) return directIllumination;
+
     const float ORIGIN_OFFSET = 0.001;
     vec3 offsetHitPos = hitPos + normal * ORIGIN_OFFSET;
 
     mat3 basis = createBasis(normal);
     vec3 woLocal = worldToLocal(-viewDir, basis);
 
-    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    float totalWeight = 0.0;
+    float weights[16];
 
-    for (int i = 0; i < lights_data.lights.length(); i++) {
+    for(int i = 0; i < min(numLights, 16); i++) {
         LightData light = lights_data.lights[i];
         ObjectData lightObject = objects_data.objects[light.object_index];
         Material lightMaterial = materials_data.materials[lightObject.material_index];
 
-        // Access vertex and index buffers
+        vec3 lightCenter = vec3(light.transform[3]);
+        float distSq = max(0.01, dot(lightCenter - hitPos, lightCenter - hitPos));
+        float power = lightMaterial.emission_power;
+        float weight = power / distSq;
+        weights[i] = weight;
+        totalWeight += weight;
+    }
+
+    float r = rnd(seed) * totalWeight;
+    float accum = 0.0;
+    int chosenLightIdx = 0;
+
+    for(int i = 0; i < min(numLights, 16); i++) {
+        accum += weights[i];
+        if(r <= accum) {
+            chosenLightIdx = i;
+            break;
+        }
+    }
+
+    LightData light = lights_data.lights[chosenLightIdx];
+    ObjectData lightObject = objects_data.objects[light.object_index];
+    Material lightMaterial = materials_data.materials[lightObject.material_index];
+
+    // Calculate selection probability
+    float selectionPdf = totalWeight > 0.0 ? weights[chosenLightIdx] / totalWeight : 1.0;
+
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+
         Vertices lightVerts = Vertices(lightObject.vertex_address);
         Indices lightIndices = Indices(lightObject.index_address);
 
@@ -311,11 +343,11 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
 
         // Check if light direction is in the hemisphere of the surface normal
         float NdotL = dot(normal, lightDir);
-        if (NdotL <= 0.0) continue; // Light is behind the surface
+        if (NdotL <= 0.0) return vec3(0.0); // Light is behind the surface
 
         // Check if surface is visible from the light's perspective
         float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
-        if (LdotN <= 0.001) continue; // Surface is behind the light
+        if (LdotN <= 0.001) return vec3(0.0); // Surface is behind the light
 
         // Cast shadow ray to check visibility
         isShadowed = true;
@@ -339,7 +371,7 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
         if (!isShadowed) {
             vec3 wiLocal = worldToLocal(lightDir, basis);
 
-            if (cosTheta(wiLocal) <= 0) continue;
+            if (cosTheta(wiLocal) <= 0) return vec3(0.0);
 
             vec3 hLocal = normalize(woLocal + wiLocal);
             float nonMetalWeight = 1.0 - material.metallic;
@@ -354,12 +386,15 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
             float NdotL = cosTheta(wiLocal);
             float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
 
-            vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
-            directIllumination += emission * brdf * NdotL * LdotN * attenuation;
-        }
-    }
 
-    return directIllumination;
+            float triangleSelectionPdf = 1.0;
+            float lightContribPdf = selectionPdf * triangleSelectionPdf;
+
+            vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
+            directIllumination = emission * brdf * NdotL * LdotN / triangleSelectionPdf;
+        }
+
+        return directIllumination;
 }
 
 // Calculate full PDF for a given direction

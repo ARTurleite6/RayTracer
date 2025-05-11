@@ -1,5 +1,6 @@
 package raytracer
 
+import "base:intrinsics"
 import "core:log"
 import vk "vendor:vulkan"
 _ :: log
@@ -27,7 +28,7 @@ Object_GPU_Data :: struct {
 }
 
 Light_GPU_Data :: struct {
-	transform:     Mat4,
+	transform:     [16]f32,
 	object_index:  u32,
 	num_triangles: u32,
 }
@@ -117,7 +118,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			append(
 				&lights_data,
 				Light_GPU_Data {
-					transform = object.transform.model_matrix,
+					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
 					object_index = u32(i),
 					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
 				},
@@ -133,6 +134,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		len(objects_data),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
+
 
 	buffer_init_with_staging_buffer(
 		&gpu_scene.lights_buffer,

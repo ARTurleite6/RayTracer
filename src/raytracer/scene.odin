@@ -458,10 +458,37 @@ create_cornell_box :: proc() -> (scene: Scene) {
 	light_size: f32 = 1.0
 	scene_add_object(
 		&scene,
-		"Light",
+		"Light Center",
 		cube_mesh_idx,
 		light_material_idx,
-		position = {0, room_size / 2 - wall_thickness, 0},
+		position = {-(room_size / 2 - wall_thickness - 1), room_size / 2 - wall_thickness, room_size / 2 - wall_thickness - 1},
+		scale = {light_size, wall_thickness / 2, light_size},
+	)
+
+	scene_add_object(
+		&scene,
+		"Light 2",
+		cube_mesh_idx,
+		light_material_idx,
+		position = {room_size / 2 - wall_thickness - 1, room_size / 2 - wall_thickness, room_size / 2 - wall_thickness - 1},
+		scale = {light_size, wall_thickness / 2, light_size},
+	)
+
+	scene_add_object(
+		&scene,
+		"Light 2",
+		cube_mesh_idx,
+		light_material_idx,
+		position = {room_size / 2 - wall_thickness - 1, room_size / 2 - wall_thickness, -(room_size / 2 - wall_thickness - 1)},
+		scale = {light_size, wall_thickness / 2, light_size},
+	)
+
+	scene_add_object(
+		&scene,
+		"Light 2",
+		cube_mesh_idx,
+		light_material_idx,
+		position = {-(room_size / 2 - wall_thickness - 1), room_size / 2 - wall_thickness, -(room_size / 2 - wall_thickness - 1)},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 
