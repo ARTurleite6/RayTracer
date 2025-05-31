@@ -1,2 +1,5 @@
-raytracer.exe
-raytracer.pdb
+imgui.ini
+*.exe
+*.pdb
+
+raytracer

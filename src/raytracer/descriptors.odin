@@ -1,10 +1,8 @@
 package raytracer
 
 import "base:runtime"
-import "core:fmt"
 import "core:log"
 import vk "vendor:vulkan"
-_ :: fmt
 
 Descriptor_Set_Layout :: struct {
 	handle:   vk.DescriptorSetLayout,

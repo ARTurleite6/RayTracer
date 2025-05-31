@@ -73,39 +73,12 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	}
 
 	{
+		device := vulkan_get_device_handle(&renderer.ctx)
 		shaders: [4]Shader
-		shader_init(
-			&shaders[0],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rgen.spv",
-			{.RAYGEN_KHR},
-		)
-		shader_init(
-			&shaders[1],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rmiss.spv",
-			{.MISS_KHR},
-		)
-		shader_init(
-			&shaders[2],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/shadow.spv",
-			{.MISS_KHR},
-		)
-		shader_init(
-			&shaders[3],
-			renderer.ctx.device,
-			"main",
-			"main",
-			"shaders/rchit.spv",
-			{.CLOSEST_HIT_KHR},
-		)
+		shader_init(&shaders[0], device, "main", "main", "shaders/rgen.spv", {.RAYGEN_KHR})
+		shader_init(&shaders[1], device, "main", "main", "shaders/rmiss.spv", {.MISS_KHR})
+		shader_init(&shaders[2], device, "main", "main", "shaders/shadow.spv", {.MISS_KHR})
+		shader_init(&shaders[3], device, "main", "main", "shaders/rchit.spv", {.CLOSEST_HIT_KHR})
 
 		defer for &s in shaders {
 			shader_destroy(&s)

@@ -14,12 +14,12 @@ Shader :: struct {
 	entry_point: string,
 	type:        vk.ShaderStageFlags,
 	module:      vk.ShaderModule,
-	device:      ^Device,
+	device:      vk.Device,
 }
 
 shader_init :: proc(
 	shader: ^Shader,
-	device: ^Device,
+	device: vk.Device,
 	name: string,
 	entry_point: string,
 	path: string,
@@ -46,7 +46,7 @@ shader_init :: proc(
 	}
 
 	if vk_check(
-		   vk.CreateShaderModule(device.logical_device.ptr, &create_info, nil, &shader.module),
+		   vk.CreateShaderModule(device, &create_info, nil, &shader.module),
 		   "Failed to create shader module",
 	   ) !=
 	   .SUCCESS {
@@ -57,6 +57,6 @@ shader_init :: proc(
 }
 
 shader_destroy :: proc(shader: ^Shader) {
-	vk.DestroyShaderModule(shader.device.logical_device.ptr, shader.module, nil)
+	vk.DestroyShaderModule(shader.device, shader.module, nil)
 	shader.module = 0
 }
