@@ -1,5 +1,6 @@
 package raytracer
 
+import "base:intrinsics"
 import "core:log"
 import vk "vendor:vulkan"
 _ :: log
@@ -27,7 +28,7 @@ Object_GPU_Data :: struct {
 }
 
 Light_GPU_Data :: struct {
-	transform:     Mat4,
+	transform:     [16]f32,
 	object_index:  u32,
 	num_triangles: u32,
 }
@@ -117,7 +118,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			append(
 				&lights_data,
 				Light_GPU_Data {
-					transform = object.transform.model_matrix,
+					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
 					object_index = u32(i),
 					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
 				},
@@ -134,6 +135,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
+
 	buffer_init_with_staging_buffer(
 		&gpu_scene.lights_buffer,
 		gpu_scene.vulkan_ctx,
@@ -142,12 +144,6 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		len(lights_data),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
-
-	// descriptor_set_update(
-	// 	&gpu_scene.descriptor_set,
-	// 	{binding = 1, write_info = buffer_descriptor_info(gpu_scene.objects_buffer)},
-	// 	{binding = 3, write_info = buffer_descriptor_info(gpu_scene.lights_buffer)},
-	// )
 
 	descriptor_set_update(
 		&gpu_scene.descriptor_set,
@@ -202,54 +198,41 @@ gpu_scene_recreate_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene)
 	gpu_scene_create_materials_buffer(gpu_scene, scene)
 }
 
-gpu_scene_update_objects_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) {
-	for dirty_object in scene.dirty_objects {
-		object := &scene.objects[dirty_object]
-		mesh := &gpu_scene.meshes_data[object.mesh_index]
+gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, object_index: int) {
+	object := &scene.objects[object_index]
+	mesh := &gpu_scene.meshes_data[object.mesh_index]
 
-		object_data := Object_GPU_Data {
-			vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
-			index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
-			material_index        = u32(object.material_index),
-			mesh_index            = u32(object.mesh_index),
-		}
-
-		offset := vk.DeviceSize(dirty_object * size_of(Object_GPU_Data))
-
-		buffer_update_region(
-			&gpu_scene.objects_buffer,
-			&object_data,
-			size_of(Object_GPU_Data),
-			offset,
-		)
+	object_data := Object_GPU_Data {
+		vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
+		index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
+		material_index        = u32(object.material_index),
+		mesh_index            = u32(object.mesh_index),
 	}
 
-	clear(&scene.dirty_objects)
+	offset := vk.DeviceSize(object_index * size_of(Object_GPU_Data))
+
+	buffer_update_region(&gpu_scene.objects_buffer, &object_data, size_of(Object_GPU_Data), offset)
 }
 
-gpu_scene_update_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene) {
-	for dirty_material in scene.dirty_materials {
-		material := &scene.materials[dirty_material]
+gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, material_index: int) {
+	material := &scene.materials[material_index]
 
-		material_data := Material_Data {
-			albedo         = material.albedo,
-			emission_color = material.emission_color,
-			emission_power = material.emission_power,
-			roughness      = material.roughness,
-			metallic       = material.metallic,
-			transmission   = material.transmission,
-			ior            = material.ior,
-		}
-
-		offset := vk.DeviceSize(dirty_material * size_of(Material_Data))
-
-		buffer_update_region(
-			&gpu_scene.materials_buffer,
-			&material_data,
-			size_of(Material_Data),
-			offset,
-		)
+	material_data := Material_Data {
+		albedo         = material.albedo,
+		emission_color = material.emission_color,
+		emission_power = material.emission_power,
+		roughness      = material.roughness,
+		metallic       = material.metallic,
+		transmission   = material.transmission,
+		ior            = material.ior,
 	}
 
-	clear(&scene.dirty_materials)
+	offset := vk.DeviceSize(material_index * size_of(Material_Data))
+
+	buffer_update_region(
+		&gpu_scene.materials_buffer,
+		&material_data,
+		size_of(Material_Data),
+		offset,
+	)
 }

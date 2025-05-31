@@ -1,7 +1,6 @@
 package raytracer
 
 import "core:mem"
-import "core:mem/tlsf"
 import "core:strings"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
@@ -38,7 +37,7 @@ Raytracing_Push_Constant :: struct {
 }
 
 align_up :: proc(x, align: u32) -> u32 {
-	return u32(tlsf.align_up(uint(x), uint(align)))
+	return u32(mem.align_forward_uint(uint(x), uint(align)))
 }
 
 Raytracing_Pass :: struct {

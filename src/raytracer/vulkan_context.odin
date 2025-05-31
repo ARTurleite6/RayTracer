@@ -54,7 +54,10 @@ vulkan_context_init :: proc(
 		&ctx.swapchain_manager,
 		ctx.device,
 		surface,
-		{extent = window_get_extent(window^), preferred_mode = .MAILBOX},
+		{
+			extent = {width = u32(window.width), height = u32(window.height)},
+			preferred_mode = .MAILBOX,
+		},
 	) or_return
 
 	frames_data_init(ctx) or_return

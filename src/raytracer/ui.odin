@@ -1,12 +1,15 @@
 package raytracer
 
-import "core:container/queue"
+import "base:runtime"
+import "core:fmt"
+import "core:log"
 import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
 import imgui_glfw "external:odin-imgui/imgui_impl_glfw"
 import imgui_vulkan "external:odin-imgui/imgui_impl_vulkan"
 import vk "vendor:vulkan"
+_ :: log
 
 UI_Context :: struct {
 	pool:              vk.DescriptorPool,
@@ -88,6 +91,8 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 }
 
 ui_render :: proc(renderer: ^Renderer) {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+
 	scene := renderer.scene
 	cmd := &renderer.current_cmd
 	ctx := &renderer.ctx
@@ -110,14 +115,10 @@ ui_render :: proc(renderer: ^Renderer) {
 	imgui.NewFrame()
 
 	if imgui.BeginMainMenuBar() {
+		defer imgui.EndMainMenuBar()
 		if imgui.BeginMenu("File") {
-			if imgui.MenuItem("Exit", "Q") {
-				window_set_should_close(renderer.window)
-			}
 			imgui.EndMenu()
 		}
-
-		imgui.EndMainMenuBar()
 	}
 
 	render_statistics(scene^)
@@ -159,92 +160,88 @@ render_scene_properties :: proc(renderer: ^Renderer, device: ^Device) {
 @(private = "file")
 render_material_properties :: proc(renderer: ^Renderer) {
 	scene := renderer.scene
-	if imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
-		imgui.Text("New material")
+	if !imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
+		return
+	}
+
+	// ============= MATERIAL CREATION SECTION =============
+	imgui.PushID("Creation")
+	{
+		imgui.Text("Create New Material")
+
 		new_material_name := renderer.ui_ctx.new_material_name[:]
 		imgui.InputText(
-			"Material name",
+			"Material Name",
 			strings.unsafe_string_to_cstring(string(new_material_name)),
 			len(renderer.ui_ctx.new_material_name),
 		)
-		if imgui.Button("Submit", {100, 0}) {
+
+		name_valid := len(strings.trim_space(string(new_material_name))) > 0
+		if !name_valid {
+			imgui.BeginDisabled()
+		}
+
+		if imgui.Button("Create Material", {150, 0}) {
 			material := Material {
-				name = strings.clone(string(new_material_name)),
+				name      = strings.clone(string(new_material_name)),
+				albedo    = {0.8, 0.8, 0.8},
+				roughness = 0.5,
+				metallic  = 0.0,
 			}
-
 			scene_add_material(scene, material)
-			queue.push_back(&renderer.ui_events, New_Material{})
-
 			slice.zero(new_material_name)
+			renderer.ui_ctx.selected_material = len(scene.materials) - 1
+		}
+
+		if !name_valid {
+			imgui.EndDisabled()
+			if imgui.IsItemHovered() {
+				imgui.SetTooltip("Material name cannot be empty")
+			}
 		}
 
 		imgui.Separator()
+	}
+	imgui.PopID()
 
+	// ============= MATERIAL SELECTION SECTION =============
+	imgui.PushID("Selection")
+	{
+		imgui.Text("Material List")
 		selected_material := &renderer.ui_ctx.selected_material
-		if imgui.BeginListBox("##MaterialList", {0, 100}) {
-			for material, i in scene.materials {
-				is_selected := selected_material^ == i
 
-				if imgui.Selectable(
-					strings.clone_to_cstring(material.name, context.temp_allocator),
-					is_selected,
-				) {
-					selected_material^ = i
-				}
+		// Material filtering
+		@(static) filter: [128]byte
+		imgui.InputTextWithHint(
+			"##FilterMaterials",
+			"Filter materials...",
+			strings.unsafe_string_to_cstring(string(filter[:])),
+			len(filter),
+		)
+		filter_str := strings.to_lower(
+			strings.truncate_to_byte(string(filter[:]), 0),
+			context.temp_allocator,
+		)
 
-				if is_selected {
-					imgui.SetItemDefaultFocus()
-				}
-			}
-
+		if imgui.BeginListBox("##MaterialList", {0, 150}) {
+			render_material_list(scene, filter_str, selected_material)
 			imgui.EndListBox()
 		}
-		if selected_material^ >= 0 && selected_material^ < len(scene.materials) {
-			material := &scene.materials[selected_material^]
 
-			imgui.Separator()
-
-			update_material := false
-			new_albedo := material.albedo
-			if imgui.ColorPicker3("Albedo", &new_albedo, {}) {
-				material.albedo = new_albedo
-				update_material = true
-			}
-
-			new_roughness := material.roughness
-			if imgui.DragFloat("Roughness", &new_roughness, v_speed = 0.1, v_max = 1.0) {
-				material.roughness = new_roughness
-				update_material = true
-			}
-
-			new_metallic := material.metallic
-			if imgui.DragFloat("Metallic", &new_metallic, v_speed = 0.1, v_max = 1.0) {
-				material.metallic = new_metallic
-				update_material = true
-			}
-
-			new_emission_color := material.emission_color
-			if imgui.ColorPicker3("Emission Color", &new_emission_color) {
-				material.emission_color = new_emission_color
-				update_material = true
-			}
-
-			new_emission_power := material.emission_power
-			if imgui.DragFloat("Emission Power", &new_emission_power) {
-				material.emission_power = new_emission_power
-				update_material = true
-			}
-
-			if imgui.Button("Delete Material", {100, 0}) {
-				queue.push_back(&renderer.ui_events, Update_Material{})
-				scene_delete_material(scene, selected_material^)
-			}
-
-			if update_material {
-				scene_update_material(scene, selected_material^, material^)
-				queue.push_back(&renderer.ui_events, Update_Material{})
-			}
+		if len(scene.materials) == 0 {
+			imgui.TextColored({1, 0.5, 0, 1}, "No materials available. Create one above.")
 		}
+
+		imgui.Separator()
+	}
+	imgui.PopID()
+
+	// ============= MATERIAL EDITING SECTION =============
+	selected_material := renderer.ui_ctx.selected_material
+	if selected_material >= 0 && selected_material < len(scene.materials) {
+		imgui.PushID("Editing")
+		render_material_editor(&renderer.ui_ctx, scene, selected_material)
+		imgui.PopID()
 	}
 }
 
@@ -252,56 +249,198 @@ render_material_properties :: proc(renderer: ^Renderer) {
 render_object_properties :: proc(renderer: ^Renderer) {
 	scene := renderer.scene
 	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
-		selected_object := &renderer.ui_ctx.selected_object
-		if imgui.BeginListBox("##ObjectList", {0, 100}) {
-			for object, i in scene.objects {
-				is_selected := selected_object^ == i
+		// =================== OBJECT CREATION SECTION =======================
+		imgui.PushID("ObjectCreation")
+		{
+			defer imgui.PopID()
 
-				if imgui.Selectable(
-					strings.clone_to_cstring(object.name, context.temp_allocator),
-					is_selected,
-				) {
-					selected_object^ = i
-				}
+			imgui.Text("Create New Object")
 
-				if is_selected {
-					imgui.SetItemDefaultFocus()
+			@(static) selected_mesh_idx: int = 0
+			if imgui.BeginCombo(
+				"Mesh",
+				temp_cstring(scene_get_mesh_name(scene, selected_mesh_idx)),
+			) {
+				defer imgui.EndCombo()
+				for mesh, i in scene.meshes {
+					is_selected := selected_mesh_idx == i
+					if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
+						selected_mesh_idx = i
+					}
 				}
 			}
 
-			imgui.EndListBox()
+			@(static) selected_mat_idx: int = 0
+			if imgui.BeginCombo(
+				"Material",
+				temp_cstring(scene_get_material_name(scene^, selected_mat_idx)),
+			) {
+				defer imgui.EndCombo()
+				for material, i in scene.materials {
+					is_selected := selected_mat_idx == i
+					if imgui.Selectable(temp_cstring(material.name), is_selected) {
+						selected_mat_idx = i
+					}
+				}
+			}
+
+			@(static) new_obj_name: [128]byte
+			imgui.InputText(
+				"Object Name",
+				strings.unsafe_string_to_cstring(string(new_obj_name[:])),
+				len(new_obj_name),
+			)
+
+			if imgui.Button("Create Object", {150, 0}) {
+				name_str := strings.truncate_to_byte(string(new_obj_name[:]), 0)
+				name: string
+				if len(name_str) == 0 {
+					name = fmt.aprintf("Object_%d", len(scene.objects))
+				} else {
+					name = strings.clone(name_str)
+				}
+
+				scene_add_object(
+					scene,
+					name,
+					selected_mesh_idx,
+					selected_mat_idx,
+					position = {0, 0, 0},
+				)
+
+				renderer.ui_ctx.selected_object = len(scene.objects) - 1
+				slice.zero(new_obj_name[:])
+			}
+
+			imgui.Separator()
 		}
+
+		// ============= OBJECT SELECTION SECTION =============
+		selected_object := &renderer.ui_ctx.selected_object
+
+		// Object filtering
+		@(static) obj_filter: [128]byte
+		imgui.InputTextWithHint(
+			"##FilterObjects",
+			"Filter objects...",
+			strings.unsafe_string_to_cstring(string(obj_filter[:])),
+			len(obj_filter),
+		)
+		filter_str := strings.to_lower(
+			strings.truncate_to_byte(string(obj_filter[:]), 0),
+			context.temp_allocator,
+		)
+
+		if imgui.BeginListBox("##ObjectList", {0, 150}) {
+			defer imgui.EndListBox()
+
+			selectable_list(
+				scene.objects[:],
+				filter_str,
+				selected_object,
+				proc(obj: Object) -> string {return obj.name},
+				proc(_: Object) {},
+			)
+		}
+
+		imgui.Separator()
+
+		// ============= OBJECT EDITING SECTION =============
 		if selected_object^ >= 0 && selected_object^ < len(scene.objects) {
-			object := &scene.objects[selected_object^]
-
-			imgui.Separator()
-			imgui.Text("Transform")
-
-			new_position := object.transform.position
-			if imgui.DragFloat3("Position", &new_position, 0.01) {
-				scene_update_object_position(scene, selected_object^, new_position)
-				queue.push_back(
-					&renderer.ui_events,
-					Update_Object_Transform{object_index = selected_object^},
-				)
-			}
-
-			imgui.Separator()
-			// Addding one to the material so it appears nicer to the user
-			new_material := i32(object.material_index + 1)
-			if imgui.InputInt("Material", &new_material, 1) {
-				scene_update_object_material(
-					renderer.scene,
-					selected_object^,
-					int(new_material - 1),
-				)
-				queue.push(
-					&renderer.ui_events,
-					Update_Object_Material{object_index = selected_object^},
-				)
-			}
+			render_object_editor(&renderer.ui_ctx, scene, selected_object^)
 		}
 	}
+}
+
+@(private = "file")
+render_object_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	imgui.Text("Editing: %s", temp_cstring(object.name))
+	imgui.Spacing()
+
+	if imgui.BeginTabBar("ObjectProperties") {
+		if imgui.BeginTabItem("Transform") {
+			render_transform_editor(ui_ctx, scene, obj_index)
+			imgui.EndTabItem()
+		}
+
+		if imgui.BeginTabItem("Appearance") {
+			render_appearance_editor(ui_ctx, scene, obj_index)
+			imgui.EndTabItem()
+		}
+
+		imgui.EndTabBar()
+	}
+
+	imgui.Spacing()
+	imgui.Separator()
+	imgui.Spacing()
+
+	render_object_actions(ui_ctx, scene, obj_index)
+}
+
+render_transform_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	// Position
+	new_position := object.transform.position
+	if imgui.DragFloat3("Position", &new_position, 0.01) {
+		scene_update_object_position(scene, obj_index, new_position)
+	}
+}
+
+render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+	object := &scene.objects[obj_index]
+
+	// Material selection dropdown with preview color
+	if imgui.BeginCombo(
+		"Material",
+		temp_cstring(scene_get_material_name(scene^, object.material_index)),
+	) {
+		for material, i in scene.materials {
+			is_selected := object.material_index == i
+
+			// Show material color preview
+			imgui.ColorButton(
+				"##mat_preview",
+				{material.albedo.x, material.albedo.y, material.albedo.z, 1.0},
+				{.NoTooltip},
+				{20, 10},
+			)
+
+			imgui.SameLine()
+
+			if imgui.Selectable(temp_cstring(material.name), is_selected) {
+				scene_update_object_material(scene, obj_index, i)
+			}
+
+			if is_selected {
+				imgui.SetItemDefaultFocus()
+			}
+		}
+		imgui.EndCombo()
+	}
+
+	// Mesh selection dropdown
+	if imgui.BeginCombo("Mesh", temp_cstring(scene_get_mesh_name(scene, object.mesh_index))) {
+		for mesh, i in scene.meshes {
+			is_selected := object.mesh_index == i
+			if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
+				// TODO
+				// scene_update_object_mesh(scene, obj_index, i)
+			}
+
+			if is_selected {
+				imgui.SetItemDefaultFocus()
+			}
+		}
+		imgui.EndCombo()
+	}
+}
+
+render_object_actions :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
+
 }
 
 @(private = "file")
@@ -330,4 +469,214 @@ render_statistics :: proc(scene: Scene) {
 		}
 	}
 	imgui.End()
+}
+
+@(private = "file")
+render_material_list :: proc(scene: ^Scene, filter_str: string, selected_material: ^int) {
+	selectable_list(
+		scene.materials[:],
+		filter_str,
+		selected_material,
+		proc(mat: Material) -> string {return mat.name},
+		proc(_: Material) {},
+	)
+}
+
+@(private = "file")
+render_material_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, mat_index: int) {
+	material := &scene.materials[mat_index]
+
+	imgui.Text("Editing: %s", temp_cstring(material.name))
+	imgui.Spacing()
+
+	update_material := false
+
+	// ---- Properties Tabs ----
+	if imgui.BeginTabBar("MaterialProperties") {
+		update_material |= render_surface_properties_tab(material)
+		update_material |= render_emission_properties_tab(material)
+		imgui.EndTabBar()
+	}
+
+	imgui.Spacing()
+	imgui.Separator()
+	imgui.Spacing()
+
+	// ---- Actions ----
+	render_material_actions(ui_ctx, scene, mat_index, material)
+
+	if update_material {
+		scene_update_material(scene, mat_index, material^)
+	}
+}
+
+@(private = "file")
+render_surface_properties_tab :: proc(material: ^Material) -> bool {
+	if !imgui.BeginTabItem("Surface") {
+		return false
+	}
+	defer imgui.EndTabItem()
+
+	update := false
+
+	update |= imgui.ColorEdit3("Albedo", &material.albedo, {.Float, .PickerHueWheel})
+
+	update |= imgui.SliderFloat("Roughness", &material.roughness, 0.0, 1.0)
+	imgui.SameLine(0, 5)
+	help_marker("Controls the micro-surface roughness. 0 = perfectly smooth, 1 = very rough")
+
+	update |= imgui.SliderFloat("Metallic", &material.metallic, 0.0, 1.0)
+	imgui.SameLine(0, 5)
+	help_marker("Controls how metallic the material is. 0 = dielectric, 1 = metallic")
+
+	return update
+}
+
+@(private = "file")
+render_emission_properties_tab :: proc(material: ^Material) -> bool {
+	if !imgui.BeginTabItem("Emission") {
+		return false
+	}
+	defer imgui.EndTabItem()
+
+	update := false
+
+	update |= imgui.ColorEdit3(
+		"Emission Color",
+		&material.emission_color,
+		{.Float, .PickerHueWheel},
+	)
+
+	update |= imgui.SliderFloat("Emission Power", &material.emission_power, 0.0, 20.0)
+	imgui.SameLine(0, 5)
+	help_marker("Controls the intensity of light emitted by this material")
+
+	return update
+}
+
+@(private = "file")
+render_material_actions :: proc(
+	ui_ctx: ^UI_Context,
+	scene: ^Scene,
+	mat_index: int,
+	material: ^Material,
+) {
+	// Delete Button
+	if imgui.Button("Delete Material", {150, 0}) {
+		imgui.OpenPopup("Delete Material?")
+	}
+
+	// Material usage info
+	material_in_use, usage_count := get_material_usage(scene, mat_index)
+	if material_in_use {
+		imgui.SameLine()
+		imgui.TextColored({1, 0.5, 0, 1}, "Used by %d object(s)", usage_count)
+	}
+
+	// Confirmation Popup
+	render_delete_material_popup(ui_ctx, scene, mat_index, material, material_in_use, usage_count)
+
+	// Duplicate Button
+	imgui.SameLine()
+	if imgui.Button("Duplicate", {120, 0}) {
+		new_material := material^
+		new_material.name = fmt.aprintf("%s (Copy)", material.name)
+		scene_add_material(scene, new_material)
+		ui_ctx.selected_material = len(scene.materials) - 1
+	}
+}
+
+@(private = "file")
+render_delete_material_popup :: proc(
+	ui_ctx: ^UI_Context,
+	scene: ^Scene,
+	mat_index: int,
+	material: ^Material,
+	material_in_use: bool,
+	usage_count: int,
+) {
+	if !imgui.BeginPopupModal("Delete Material?", nil, {.AlwaysAutoResize}) {
+		return
+	}
+	defer imgui.EndPopup()
+
+	imgui.Text("Are you sure you want to delete '%s'?", temp_cstring(material.name))
+
+	if material_in_use {
+		imgui.TextColored(
+			{1, 0.5, 0, 1},
+			"Warning: This material is used by %d object(s).",
+			usage_count,
+		)
+	}
+
+	imgui.Text("This operation cannot be undone.")
+	imgui.Separator()
+
+	if imgui.Button("Yes, Delete It", {140, 0}) {
+		scene_delete_material(scene, mat_index)
+		ui_ctx.selected_material = -1
+		imgui.CloseCurrentPopup()
+	}
+
+	imgui.SameLine()
+	if imgui.Button("Cancel", {140, 0}) {
+		imgui.CloseCurrentPopup()
+	}
+}
+
+@(private = "file")
+get_material_usage :: proc(scene: ^Scene, mat_index: int) -> (in_use: bool, count: int) {
+	for object in scene.objects {
+		if object.material_index == mat_index {
+			in_use = true
+			count += 1
+		}
+	}
+	return
+}
+
+@(private = "file")
+selectable_list :: proc(
+	resources: []$T,
+	filter_str: string,
+	selected_resource: ^int,
+	key_proc: proc(_: T) -> string,
+	render_proc: proc(_: T), // this parameter can be used to render additional info
+) {
+	for resource, i in resources {
+		name := key_proc(resource)
+		// Skip if doesn't match filter
+		if !strings.contains(strings.to_lower(name, context.temp_allocator), filter_str) {
+			continue
+		}
+
+		is_selected := selected_resource^ == i
+		if imgui.Selectable(temp_cstring(name), is_selected) {
+			selected_resource^ = i
+		}
+
+		if is_selected {
+			imgui.SetItemDefaultFocus()
+		}
+
+		render_proc(resource)
+	}
+}
+
+@(private = "file")
+help_marker :: proc(desc: string) {
+	imgui.TextDisabled("(?)")
+	if imgui.IsItemHovered() {
+		imgui.BeginTooltip()
+		imgui.PushTextWrapPos(imgui.GetFontSize() * 35.0)
+		imgui.TextUnformatted(temp_cstring(desc))
+		imgui.PopTextWrapPos()
+		imgui.EndTooltip()
+	}
+}
+
+@(private = "file")
+temp_cstring :: proc(value: string) -> cstring {
+	return strings.clone_to_cstring(value, context.temp_allocator)
 }

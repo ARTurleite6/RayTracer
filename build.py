@@ -45,7 +45,7 @@ def get_build_command(build_mode):
     else:
         raise RuntimeError(f"Unsupported os #{os}")
 
-    command = "odin build src -vet -strict-style -collection:external=external -out:raytracer -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
+    command = f"odin build src -vet -strict-style -collection:external=external -out:{file} -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
     if build_mode == "debug":
         command += " -debug"
     else:

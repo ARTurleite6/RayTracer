@@ -8,6 +8,7 @@ _ :: mem
 _ :: fmt
 
 main :: proc() {
+	fmt.println("Mat alignment =", align_of(matrix[4, 4]f32), ", Mat size = ", size_of(raytracer.Mat4))
 	when ODIN_DEBUG {
 		context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 		defer log.destroy_console_logger(context.logger)
