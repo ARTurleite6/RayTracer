@@ -14,40 +14,17 @@ align_up :: proc(x, align: u32) -> u32 {
 }
 
 Raytracing_Pass :: struct {
-	rt_pipeline:                 Raytracing_Pipeline,
-
-	// output image
-	image:                       Image,
-	image_view:                  vk.ImageView,
-
-	// TODO: this will change in the future with descriptor caching
-	image_descriptor_set_layout: Descriptor_Set_Layout,
-	image_descriptor_set:        Descriptor_Set,
-	ctx:                         ^Vulkan_Context,
+	rt_pipeline: Raytracing_Pipeline,
+	ctx:         ^Vulkan_Context,
 }
 
 raytracing_pass_init :: proc(
 	rt: ^Raytracing_Pass,
 	ctx: ^Vulkan_Context,
 	shaders: []Shader,
-	scene_descriptor_set_layout, camera_descriptor_set_layout: vk.DescriptorSetLayout,
+	descriptor_set_layouts: []vk.DescriptorSetLayout,
 ) {
 	rt.ctx = ctx
-
-	{ 	// create image descriptor set layout
-		rt.image_descriptor_set_layout = create_descriptor_set_layout(
-			ctx,
-			{
-				binding = 0,
-				descriptorCount = 1,
-				descriptorType = .STORAGE_IMAGE,
-				stageFlags = {.RAYGEN_KHR},
-			},
-		)
-
-		rt.image_descriptor_set = descriptor_set_allocate(&rt.image_descriptor_set_layout)
-		raytracing_pass_create_image(rt)
-	}
 
 	{ 	// create raytracing pipeline
 		rt_pipeline_init(&rt.rt_pipeline, ctx)
@@ -55,9 +32,10 @@ raytracing_pass_init :: proc(
 		for shader, i in shaders {
 			rt_pipeline_add_shader(&rt.rt_pipeline, shader, i)
 		}
-		pipeline_add_descriptor_set_layout(&rt.rt_pipeline, rt.image_descriptor_set_layout.handle)
-		pipeline_add_descriptor_set_layout(&rt.rt_pipeline, scene_descriptor_set_layout)
-		pipeline_add_descriptor_set_layout(&rt.rt_pipeline, camera_descriptor_set_layout)
+
+		for layout in descriptor_set_layouts {
+			pipeline_add_descriptor_set_layout(&rt.rt_pipeline, layout)
+		}
 		pipeline_add_push_constant_range(
 			&rt.rt_pipeline,
 			{stageFlags = {.RAYGEN_KHR}, offset = 0, size = size_of(Raytracing_Push_Constant)},
@@ -69,68 +47,22 @@ raytracing_pass_init :: proc(
 raytracing_pass_destroy :: proc(rt: ^Raytracing_Pass) {
 	device := vulkan_get_device_handle(rt.ctx)
 	rt_pipeline_destroy(&rt.rt_pipeline, device)
-	image_destroy(&rt.image, rt.ctx^)
-	image_view_destroy(rt.image_view, rt.ctx^)
-
-	descriptor_set_layout_destroy(&rt.image_descriptor_set_layout)
 }
 
-raytracing_pass_resize_image :: proc(rt: ^Raytracing_Pass) {
-	image_destroy(&rt.image, rt.ctx^)
-	image_view_destroy(rt.image_view, rt.ctx^)
-
-	raytracing_pass_create_image(rt)
-}
-
-raytracing_pass_create_image :: proc(rt: ^Raytracing_Pass) {
-	ctx := rt.ctx
-
-	image_init(&rt.image, ctx, .R32G32B32A32_SFLOAT, ctx.swapchain_manager.extent)
-	image_view_init(&rt.image_view, rt.image, ctx)
-
-	{
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
-		image_transition_layout_stage_access(
-			cmd,
-			rt.image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
-	descriptor_set_update(
-		&rt.image_descriptor_set,
-		{
-			binding = 0,
-			write_info = vk.DescriptorImageInfo{imageView = rt.image_view, imageLayout = .GENERAL},
-		},
-	)
-}
-
-raytracing_pass_render :: proc(
+raytracing_pass_execute :: proc(
 	rt: ^Raytracing_Pass,
 	cmd: ^Command_Buffer,
-	scene_descriptor_set, camera_descriptor_set: vk.DescriptorSet,
+	descriptor_sets: []vk.DescriptorSet,
+	output_image: Image,
 	accumulation_frame, image_index: u32,
 ) {
-	descriptor_sets := [?]vk.DescriptorSet {
-		rt.image_descriptor_set.handle,
-		scene_descriptor_set,
-		camera_descriptor_set,
-	}
-
 	vk.CmdBindDescriptorSets(
 		cmd.buffer,
 		.RAY_TRACING_KHR,
 		rt.rt_pipeline.layout,
 		0,
 		u32(len(descriptor_sets)),
-		raw_data(descriptor_sets[:]),
+		raw_data(descriptor_sets),
 		0,
 		nil,
 	)
@@ -161,7 +93,7 @@ raytracing_pass_render :: proc(
 		1,
 	)
 
-	storage_image := rt.image.handle
+	storage_image := output_image.handle
 	swapchain_image := rt.ctx.swapchain_manager.images[image_index]
 	ctx_transition_swapchain_image(
 		rt.ctx^,

@@ -10,7 +10,6 @@ GPU_Scene :: struct {
 	objects_buffer, materials_buffer, lights_buffer: Buffer,
 
 	// descriptors
-	descriptor_set_layout:                           Descriptor_Set_Layout,
 	descriptor_set:                                  Descriptor_Set,
 	vulkan_ctx:                                      ^Vulkan_Context,
 }
@@ -38,38 +37,14 @@ Mesh_GPU_Data :: struct {
 	vertex_buffer, index_buffer: Buffer,
 }
 
-gpu_scene_init :: proc(scene: ^GPU_Scene, ctx: ^Vulkan_Context) {
+gpu_scene_init :: proc(
+	scene: ^GPU_Scene,
+	scene_descriptor_set_layout: ^Descriptor_Set_Layout,
+	ctx: ^Vulkan_Context,
+) {
 	scene.vulkan_ctx = ctx
 
-	scene.descriptor_set_layout = create_descriptor_set_layout(
-		ctx,
-		{
-			binding = 0,
-			descriptorCount = 1,
-			descriptorType = .ACCELERATION_STRUCTURE_KHR,
-			stageFlags = {.RAYGEN_KHR, .CLOSEST_HIT_KHR},
-		},
-		{
-			binding = 1,
-			descriptorCount = 1,
-			descriptorType = .STORAGE_BUFFER,
-			stageFlags = {.CLOSEST_HIT_KHR},
-		},
-		{
-			binding = 2,
-			descriptorCount = 1,
-			descriptorType = .STORAGE_BUFFER,
-			stageFlags = {.CLOSEST_HIT_KHR},
-		},
-		{
-			binding = 3,
-			descriptorCount = 1,
-			descriptorType = .STORAGE_BUFFER,
-			stageFlags = {.CLOSEST_HIT_KHR},
-		},
-	)
-
-	scene.descriptor_set = descriptor_set_allocate(&scene.descriptor_set_layout)
+	scene.descriptor_set = descriptor_set_allocate(scene_descriptor_set_layout)
 }
 
 scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
@@ -159,8 +134,6 @@ gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
 	}
 	buffer_destroy(&scene.objects_buffer)
 	buffer_destroy(&scene.materials_buffer)
-
-	descriptor_set_layout_destroy(&scene.descriptor_set_layout)
 
 	delete(scene.meshes_data)
 }

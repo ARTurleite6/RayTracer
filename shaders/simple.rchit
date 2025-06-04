@@ -13,7 +13,7 @@ hitAttributeEXT vec2 attribs;
 layout(location = 0) rayPayloadInEXT RayPayload payload;
 layout(location = 1) rayPayloadEXT bool isShadowed;
 
-layout(binding = 0, set = 1) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(buffer_reference, scalar) buffer Vertices {
     Vertex v[];
 };
@@ -22,15 +22,15 @@ layout(buffer_reference, scalar) buffer Indices {
     ivec3 indices[];
 };
 
-layout(set = 1, binding = 1, scalar) buffer ObjectsData {
+layout(set = 0, binding = 1, scalar) buffer ObjectsData {
     ObjectData objects[];
 } objects_data;
 
-layout(set = 1, binding = 2, scalar) buffer MaterialsBuffer {
+layout(set = 0, binding = 2, scalar) buffer MaterialsBuffer {
     Material materials[];
 } materials_data;
 
-layout(set = 1, binding = 3, scalar) buffer LightsBuffer {
+layout(set = 0, binding = 3, scalar) buffer LightsBuffer {
     LightData lights[];
 } lights_data;
 
@@ -254,7 +254,7 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
     vec3 directIllumination = vec3(0.0);
 
     int numLights = lights_data.lights.length();
-    if(numLights == 0) return directIllumination;
+    if (numLights == 0) return directIllumination;
 
     const float ORIGIN_OFFSET = 0.001;
     vec3 offsetHitPos = hitPos + normal * ORIGIN_OFFSET;
@@ -265,7 +265,7 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
     float totalWeight = 0.0;
     float weights[16];
 
-    for(int i = 0; i < min(numLights, 16); i++) {
+    for (int i = 0; i < min(numLights, 16); i++) {
         LightData light = lights_data.lights[i];
         ObjectData lightObject = objects_data.objects[light.object_index];
         Material lightMaterial = materials_data.materials[lightObject.material_index];
@@ -282,9 +282,9 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
     float accum = 0.0;
     int chosenLightIdx = 0;
 
-    for(int i = 0; i < min(numLights, 16); i++) {
+    for (int i = 0; i < min(numLights, 16); i++) {
         accum += weights[i];
-        if(r <= accum) {
+        if (r <= accum) {
             chosenLightIdx = i;
             break;
         }
@@ -299,102 +299,101 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
 
     vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
 
-        Vertices lightVerts = Vertices(lightObject.vertex_address);
-        Indices lightIndices = Indices(lightObject.index_address);
+    Vertices lightVerts = Vertices(lightObject.vertex_address);
+    Indices lightIndices = Indices(lightObject.index_address);
 
-        // Select a random triangle on the light
-        uint num_triangles = light.num_triangles;
-        uint triangleIdx = min(int(rnd(seed) * num_triangles), num_triangles - 1);
-        ivec3 ind = lightIndices.indices[triangleIdx];
+    // Select a random triangle on the light
+    uint num_triangles = light.num_triangles;
+    uint triangleIdx = min(int(rnd(seed) * num_triangles), num_triangles - 1);
+    ivec3 ind = lightIndices.indices[triangleIdx];
 
-        // Get vertices of the selected triangle
-        Vertex v0 = lightVerts.v[ind.x];
-        Vertex v1 = lightVerts.v[ind.y];
-        Vertex v2 = lightVerts.v[ind.z];
+    // Get vertices of the selected triangle
+    Vertex v0 = lightVerts.v[ind.x];
+    Vertex v1 = lightVerts.v[ind.y];
+    Vertex v2 = lightVerts.v[ind.z];
 
-        // Sample point on triangle with uniform area sampling
-        float r1 = rnd(seed);
-        float r2 = rnd(seed);
-        float sqrtR1 = sqrt(r1);
+    // Sample point on triangle with uniform area sampling
+    float r1 = rnd(seed);
+    float r2 = rnd(seed);
+    float sqrtR1 = sqrt(r1);
 
-        // Barycentric coordinates
-        float u = 1.0 - sqrtR1;
-        float v = sqrtR1 * (1.0 - r2);
-        float w = sqrtR1 * r2;
+    // Barycentric coordinates
+    float u = 1.0 - sqrtR1;
+    float v = sqrtR1 * (1.0 - r2);
+    float w = sqrtR1 * r2;
 
-        // Compute position on the light source (in local space)
-        vec3 localLightPos = u * v0.pos + v * v1.pos + w * v2.pos;
+    // Compute position on the light source (in local space)
+    vec3 localLightPos = u * v0.pos + v * v1.pos + w * v2.pos;
 
-        // Transform to world space using the light object's transform matrix
-        vec3 lightPos = vec3(light.transform * vec4(localLightPos, 1.0));
+    // Transform to world space using the light object's transform matrix
+    vec3 lightPos = vec3(light.transform * vec4(localLightPos, 1.0));
 
-        // Also get the normal at this point for area light calculation
-        vec3 localLightNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+    // Also get the normal at this point for area light calculation
+    vec3 localLightNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
 
-        // TODO: Transform normal to world space (we use transpose of inverse for normals)
-        mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
-        vec3 worldLightNormal = normalize(normalMatrix * localLightNormal);
+    // TODO: Transform normal to world space (we use transpose of inverse for normals)
+    mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
+    vec3 worldLightNormal = normalize(normalMatrix * localLightNormal);
 
-        // Calculate light direction and distance
-        vec3 toLight = lightPos - hitPos;
-        float lightDistSq = dot(toLight, toLight);
-        float lightDist = sqrt(lightDistSq);
-        vec3 lightDir = toLight / lightDist; // Normalized direction
+    // Calculate light direction and distance
+    vec3 toLight = lightPos - hitPos;
+    float lightDistSq = dot(toLight, toLight);
+    float lightDist = sqrt(lightDistSq);
+    vec3 lightDir = toLight / lightDist; // Normalized direction
 
-        // Check if light direction is in the hemisphere of the surface normal
-        float NdotL = dot(normal, lightDir);
-        if (NdotL <= 0.0) return vec3(0.0); // Light is behind the surface
+    // Check if light direction is in the hemisphere of the surface normal
+    float NdotL = dot(normal, lightDir);
+    if (NdotL <= 0.0) return vec3(0.0); // Light is behind the surface
 
-        // Check if surface is visible from the light's perspective
+    // Check if surface is visible from the light's perspective
+    float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
+    if (LdotN <= 0.001) return vec3(0.0); // Surface is behind the light
+
+    // Cast shadow ray to check visibility
+    isShadowed = true;
+    const float tMin = 0.001;
+    const float tMax = lightDist * 0.999;
+
+    traceRayEXT(
+        topLevelAS,
+        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+        0xFF,
+        0,
+        0,
+        1,
+        offsetHitPos,
+        tMin,
+        lightDir,
+        tMax,
+        1 // Payload location
+    );
+
+    if (!isShadowed) {
+        vec3 wiLocal = worldToLocal(lightDir, basis);
+
+        if (cosTheta(wiLocal) <= 0) return vec3(0.0);
+
+        vec3 hLocal = normalize(woLocal + wiLocal);
+        float nonMetalWeight = 1.0 - material.metallic;
+
+        vec3 specular = microfacetF(woLocal, wiLocal, hLocal, material);
+
+        vec3 diffuse = material.albedo * nonMetalWeight / M_PI;
+
+        vec3 brdf = diffuse + specular;
+
+        float attenuation = 1.0;
+        float NdotL = cosTheta(wiLocal);
         float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
-        if (LdotN <= 0.001) return vec3(0.0); // Surface is behind the light
 
-        // Cast shadow ray to check visibility
-        isShadowed = true;
-        const float tMin = 0.001;
-        const float tMax = lightDist * 0.999;
+        float triangleSelectionPdf = 1.0;
+        float lightContribPdf = selectionPdf * triangleSelectionPdf;
 
-        traceRayEXT(
-            topLevelAS,
-            gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
-            0xFF,
-            0,
-            0,
-            1,
-            offsetHitPos,
-            tMin,
-            lightDir,
-            tMax,
-            1 // Payload location
-        );
+        vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
+        directIllumination = emission * brdf * NdotL * LdotN / triangleSelectionPdf;
+    }
 
-        if (!isShadowed) {
-            vec3 wiLocal = worldToLocal(lightDir, basis);
-
-            if (cosTheta(wiLocal) <= 0) return vec3(0.0);
-
-            vec3 hLocal = normalize(woLocal + wiLocal);
-            float nonMetalWeight = 1.0 - material.metallic;
-
-            vec3 specular = microfacetF(woLocal, wiLocal, hLocal, material);
-
-            vec3 diffuse = material.albedo * nonMetalWeight / M_PI;
-
-            vec3 brdf = diffuse + specular;
-
-            float attenuation = 1.0;
-            float NdotL = cosTheta(wiLocal);
-            float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
-
-
-            float triangleSelectionPdf = 1.0;
-            float lightContribPdf = selectionPdf * triangleSelectionPdf;
-
-            vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
-            directIllumination = emission * brdf * NdotL * LdotN / triangleSelectionPdf;
-        }
-
-        return directIllumination;
+    return directIllumination;
 }
 
 // Calculate full PDF for a given direction

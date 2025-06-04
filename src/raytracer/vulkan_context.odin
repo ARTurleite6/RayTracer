@@ -27,12 +27,12 @@ Vulkan_Context :: struct {
 	swapchain_manager: Swapchain_Manager,
 	descriptor_pool:   vk.DescriptorPool,
 	//frames
-	frames:            [MAX_FRAMES_IN_FLIGHT]Frame_Data,
+	frames:            [MAX_FRAMES_IN_FLIGHT]Internal_Frame_Data,
 	current_frame:     int,
 	current_image:     u32,
 }
 
-Frame_Data :: struct {
+Internal_Frame_Data :: struct {
 	command_pool:    Command_Pool,
 	render_finished: vk.Semaphore,
 	image_available: vk.Semaphore,

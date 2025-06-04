@@ -5,9 +5,9 @@
 #include "random.glsl"
 #include "ray_common.glsl"
 
-layout(binding = 0, set = 0, rgba32f) uniform image2D image;
-layout(binding = 0, set = 1) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 0, set = 2) uniform CameraProperties {
+layout(binding = 0, set = 2, rgba32f) uniform image2D image;
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 0, set = 1) uniform CameraProperties {
     mat4 proj;
     mat4 view;
     mat4 inverse_view;
