@@ -1,5 +1,4 @@
 imgui.ini
 *.exe
 *.pdb
-
-raytracer
+*.obj

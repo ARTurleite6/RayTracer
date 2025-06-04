@@ -24,7 +24,6 @@ Raytracing_Pass :: struct {
 	image_descriptor_set_layout: Descriptor_Set_Layout,
 	image_descriptor_set:        Descriptor_Set,
 	ctx:                         ^Vulkan_Context,
-	rt_props:                    vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 }
 
 raytracing_pass_init :: proc(
@@ -34,7 +33,6 @@ raytracing_pass_init :: proc(
 	scene_descriptor_set_layout, camera_descriptor_set_layout: vk.DescriptorSetLayout,
 ) {
 	rt.ctx = ctx
-	rt.rt_props = vulkan_get_raytracing_pipeline_propertis(rt.ctx)
 
 	{ 	// create image descriptor set layout
 		rt.image_descriptor_set_layout = create_descriptor_set_layout(

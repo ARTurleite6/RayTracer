@@ -461,7 +461,11 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Light Center",
 		cube_mesh_idx,
 		light_material_idx,
-		position = {-(room_size / 2 - wall_thickness - 1), room_size / 2 - wall_thickness, room_size / 2 - wall_thickness - 1},
+		position = {
+			-(room_size / 2 - wall_thickness - 1),
+			room_size / 2 - wall_thickness,
+			room_size / 2 - wall_thickness - 1,
+		},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 
@@ -470,7 +474,11 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Light 2",
 		cube_mesh_idx,
 		light_material_idx,
-		position = {room_size / 2 - wall_thickness - 1, room_size / 2 - wall_thickness, room_size / 2 - wall_thickness - 1},
+		position = {
+			room_size / 2 - wall_thickness - 1,
+			room_size / 2 - wall_thickness,
+			room_size / 2 - wall_thickness - 1,
+		},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 
@@ -479,7 +487,11 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Light 2",
 		cube_mesh_idx,
 		light_material_idx,
-		position = {room_size / 2 - wall_thickness - 1, room_size / 2 - wall_thickness, -(room_size / 2 - wall_thickness - 1)},
+		position = {
+			room_size / 2 - wall_thickness - 1,
+			room_size / 2 - wall_thickness,
+			-(room_size / 2 - wall_thickness - 1),
+		},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 
@@ -488,7 +500,11 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Light 2",
 		cube_mesh_idx,
 		light_material_idx,
-		position = {-(room_size / 2 - wall_thickness - 1), room_size / 2 - wall_thickness, -(room_size / 2 - wall_thickness - 1)},
+		position = {
+			-(room_size / 2 - wall_thickness - 1),
+			room_size / 2 - wall_thickness,
+			-(room_size / 2 - wall_thickness - 1),
+		},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 

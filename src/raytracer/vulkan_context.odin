@@ -87,7 +87,7 @@ vulkan_get_device_handle :: proc(ctx: ^Vulkan_Context) -> vk.Device {
 }
 
 @(require_results)
-vulkan_get_raytracing_pipeline_propertis :: proc(
+vulkan_get_raytracing_pipeline_properties :: proc(
 	ctx: ^Vulkan_Context,
 ) -> (
 	props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
