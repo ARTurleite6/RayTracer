@@ -30,6 +30,7 @@ Vulkan_Context :: struct {
 	frames:            [MAX_FRAMES_IN_FLIGHT]Internal_Frame_Data,
 	current_frame:     int,
 	current_image:     u32,
+	cache:             Resource_Cache,
 }
 
 Internal_Frame_Data :: struct {

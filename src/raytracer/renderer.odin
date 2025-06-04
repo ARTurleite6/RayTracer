@@ -28,7 +28,7 @@ Renderer :: struct {
 	raytracing_pass:        Raytracing_Pass,
 	scene_raytracing:       Raytracing_Builder,
 	gpu_scene:              ^GPU_Scene,
-	descriptor_set_layouts: [Descriptor_Set_Type]Descriptor_Set_Layout,
+	descriptor_set_layouts: [Descriptor_Set_Type]^Descriptor_Set_Layout,
 
 	// frame data
 	per_frame_data:         Frame_Data,
@@ -46,13 +46,19 @@ Renderer :: struct {
 
 Frame_Data :: struct {
 	// raytracing image
-	image:                    Image,
-	image_view:               vk.ImageView,
-	per_pass_descriptor_set:  Descriptor_Set,
+	image:                      Image,
+	image_view:                 vk.ImageView,
+	per_pass_descriptor_set:    Descriptor_Set,
+
+	// gbuffer restir
+	position_gbuffer:           Image,
+	normal_gbuffer:             Image,
+	albedo_gbuffer:             Image,
+	roughness_metallic_gbuffer: Image,
 
 	// camera stuff
-	per_frame_uniform_buffer: Buffer,
-	per_frame_descriptor_set: Descriptor_Set,
+	per_frame_uniform_buffer:   Buffer,
+	per_frame_descriptor_set:   Descriptor_Set,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
@@ -64,7 +70,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	init_per_frame_resources(renderer)
 
 	renderer.gpu_scene = new(GPU_Scene)
-	gpu_scene_init(renderer.gpu_scene, &renderer.descriptor_set_layouts[.Global], &renderer.ctx)
+	gpu_scene_init(renderer.gpu_scene, renderer.descriptor_set_layouts[.Global], &renderer.ctx)
 
 	{
 		device := vulkan_get_device_handle(&renderer.ctx)
@@ -99,7 +105,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	buffer_destroy(&renderer.per_frame_data.per_frame_uniform_buffer)
 
 	for &layout in renderer.descriptor_set_layouts {
-		descriptor_set_layout_destroy(&layout)
+		descriptor_set_layout_destroy(layout)
 	}
 
 	if renderer.gpu_scene != nil {
@@ -474,7 +480,7 @@ renderer_build_blas :: proc(
 }
 
 init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
-	renderer.descriptor_set_layouts[.Global] = create_descriptor_set_layout(
+	renderer.descriptor_set_layouts[.Global] = vulkan_get_descriptor_set_layout(
 		&renderer.ctx,
 		{
 			binding = 0,
@@ -502,7 +508,7 @@ init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
 		},
 	)
 
-	renderer.descriptor_set_layouts[.Per_Frame] = create_descriptor_set_layout(
+	renderer.descriptor_set_layouts[.Per_Frame] = vulkan_get_descriptor_set_layout(
 		&renderer.ctx,
 		{
 			binding = 0,
@@ -512,10 +518,34 @@ init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
 		},
 	)
 
-	renderer.descriptor_set_layouts[.Per_Pass] = create_descriptor_set_layout(
+	renderer.descriptor_set_layouts[.Per_Pass] = vulkan_get_descriptor_set_layout(
 		&renderer.ctx,
 		{
 			binding = 0,
+			descriptorCount = 1,
+			descriptorType = .STORAGE_IMAGE,
+			stageFlags = {.RAYGEN_KHR},
+		},
+		{
+			binding = 1,
+			descriptorCount = 1,
+			descriptorType = .STORAGE_IMAGE,
+			stageFlags = {.RAYGEN_KHR},
+		},
+		{
+			binding = 2,
+			descriptorCount = 1,
+			descriptorType = .STORAGE_IMAGE,
+			stageFlags = {.RAYGEN_KHR},
+		},
+		{
+			binding = 3,
+			descriptorCount = 1,
+			descriptorType = .STORAGE_IMAGE,
+			stageFlags = {.RAYGEN_KHR},
+		},
+		{
+			binding = 4,
 			descriptorCount = 1,
 			descriptorType = .STORAGE_IMAGE,
 			stageFlags = {.RAYGEN_KHR},
@@ -535,7 +565,7 @@ init_per_frame_resources :: proc(renderer: ^Renderer) {
 	buffer_map(&renderer.per_frame_data.per_frame_uniform_buffer)
 
 	renderer.per_frame_data.per_frame_descriptor_set = descriptor_set_allocate(
-		&renderer.descriptor_set_layouts[.Per_Frame],
+		renderer.descriptor_set_layouts[.Per_Frame],
 	)
 	descriptor_set_update(
 		&renderer.per_frame_data.per_frame_descriptor_set,
@@ -546,7 +576,7 @@ init_per_frame_resources :: proc(renderer: ^Renderer) {
 	)
 
 	renderer.per_frame_data.per_pass_descriptor_set = descriptor_set_allocate(
-		&renderer.descriptor_set_layouts[.Per_Pass],
+		renderer.descriptor_set_layouts[.Per_Pass],
 	)
 
 

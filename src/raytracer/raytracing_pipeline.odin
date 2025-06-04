@@ -29,26 +29,18 @@ rt_pipeline_build :: proc(
 ) -> (
 	result: vk.Result,
 ) {
-	device := vulkan_get_device_handle(ctx)
-	pipeline_build_layout(self, device)
-	if result != .SUCCESS {
-		return result
-	}
+	self.layout = vulkan_get_pipeline_layout(
+		ctx,
+		self.descriptor_set_layouts[:],
+		self.push_constant_ranges[:],
+	)
 
-	create_info := vk.RayTracingPipelineCreateInfoKHR {
-		sType                        = .RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-		stageCount                   = u32(len(self.shaders)),
-		pStages                      = raw_data(self.shaders),
-		groupCount                   = u32(len(self.shader_binding_table.groups[:])),
-		pGroups                      = raw_data(self.shader_binding_table.groups),
-		// TODO: make this configurable
-		maxPipelineRayRecursionDepth = max_pipeline_recursion,
-		layout                       = self.layout,
-	}
-
-	_ = vk_check(
-		vk.CreateRayTracingPipelinesKHR(device, 0, 0, 1, &create_info, nil, &self.handle),
-		"Failed to create Raytracing Pipeline",
+	self.handle = vulkan_get_raytracing_pipeline(
+		ctx,
+		self.shaders[:],
+		self.shader_binding_table.groups[:],
+		max_pipeline_recursion,
+		self.layout,
 	)
 
 	shader_binding_table_build(&self.shader_binding_table, ctx, self, self.raytracing_props)
