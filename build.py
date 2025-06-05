@@ -11,6 +11,14 @@ os = platform.system()
 
 shaders = [
     {
+        "src": "shaders/simple.vert",
+        "out": "shaders/vert.spv",
+    },
+    {
+        "src": "shaders/simple.frag",
+        "out": "shaders/frag.spv",
+    },
+    {
         "src": "shaders/simple.rgen",
         "out": "shaders/rgen.spv",
     },
@@ -25,23 +33,23 @@ shaders = [
     {
         "src": "shaders/shadow.rmiss",
         "out": "shaders/shadow.spv",
-    },
-    {
-        "src": "shaders/restir.rgen",
-        "out": "shaders/restir_rgen.spv",
-    },
-    {
-        "src": "shaders/restir.rmiss",
-        "out": "shaders/restir_rmiss.spv",
-    },
-    {
-        "src": "shaders/restir.rchit",
-        "out": "shaders/restir_rchit.spv",
-    },
-    {
-        "src": "shaders/restir_shadow.rmiss",
-        "out": "shaders/restir_shadow.spv",
     }
+    # {
+    #     "src": "shaders/restir.rgen",
+    #     "out": "shaders/restir_rgen.spv",
+    # },
+    # {
+    #     "src": "shaders/restir.rmiss",
+    #     "out": "shaders/restir_rmiss.spv",
+    # },
+    # {
+    #     "src": "shaders/restir.rchit",
+    #     "out": "shaders/restir_rchit.spv",
+    # },
+    # {
+    #     "src": "shaders/restir_shadow.rmiss",
+    #     "out": "shaders/restir_shadow.spv",
+    # }
 ]
 
 def print_command_result(result: subprocess.CompletedProcess[str]):

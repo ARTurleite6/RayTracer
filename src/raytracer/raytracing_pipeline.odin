@@ -1,5 +1,7 @@
 package raytracer
 
+import "core:fmt"
+_ :: fmt
 
 import vk "vendor:vulkan"
 

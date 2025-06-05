@@ -28,7 +28,7 @@ Renderer :: struct {
 	raytracing_pass:        Raytracing_Pass,
 	scene_raytracing:       Raytracing_Builder,
 	gpu_scene:              ^GPU_Scene,
-	descriptor_set_layouts: [Descriptor_Set_Type]^Descriptor_Set_Layout,
+	descriptor_set_layouts: [Descriptor_Set_Type]Descriptor_Set_Layout,
 
 	// frame data
 	per_frame_data:         Frame_Data,
@@ -65,24 +65,20 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	renderer.window = window
 	vulkan_context_init(&renderer.ctx, window, allocator)
 
-
 	init_descriptor_set_layouts(renderer)
 	init_per_frame_resources(renderer)
 
 	renderer.gpu_scene = new(GPU_Scene)
-	gpu_scene_init(renderer.gpu_scene, renderer.descriptor_set_layouts[.Global], &renderer.ctx)
+	gpu_scene_init(renderer.gpu_scene, &renderer.descriptor_set_layouts[.Global], &renderer.ctx)
 
 	{
-		device := vulkan_get_device_handle(&renderer.ctx)
+		// device := vulkan_get_device_handle(&renderer.ctx)
 		shaders: [4]Shader
-		shader_init(&shaders[0], device, "main", "main", "shaders/rgen.spv", {.RAYGEN_KHR})
-		shader_init(&shaders[1], device, "main", "main", "shaders/rmiss.spv", {.MISS_KHR})
-		shader_init(&shaders[2], device, "main", "main", "shaders/shadow.spv", {.MISS_KHR})
-		shader_init(&shaders[3], device, "main", "main", "shaders/rchit.spv", {.CLOSEST_HIT_KHR})
+		shaders[0] = vulkan_get_shader(&renderer.ctx, "shaders/rgen.spv")
+		shaders[1] = vulkan_get_shader(&renderer.ctx, "shaders/rmiss.spv")
+		shaders[2] = vulkan_get_shader(&renderer.ctx, "shaders/shadow.spv")
+		shaders[3] = vulkan_get_shader(&renderer.ctx, "shaders/rchit.spv")
 
-		defer for &s in shaders {
-			shader_destroy(&s)
-		}
 		raytracing_pass_init(
 			&renderer.raytracing_pass,
 			&renderer.ctx,
@@ -105,7 +101,7 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	buffer_destroy(&renderer.per_frame_data.per_frame_uniform_buffer)
 
 	for &layout in renderer.descriptor_set_layouts {
-		descriptor_set_layout_destroy(layout)
+		descriptor_set_layout_destroy(&layout)
 	}
 
 	if renderer.gpu_scene != nil {
@@ -565,7 +561,7 @@ init_per_frame_resources :: proc(renderer: ^Renderer) {
 	buffer_map(&renderer.per_frame_data.per_frame_uniform_buffer)
 
 	renderer.per_frame_data.per_frame_descriptor_set = descriptor_set_allocate(
-		renderer.descriptor_set_layouts[.Per_Frame],
+		&renderer.descriptor_set_layouts[.Per_Frame],
 	)
 	descriptor_set_update(
 		&renderer.per_frame_data.per_frame_descriptor_set,
@@ -576,7 +572,7 @@ init_per_frame_resources :: proc(renderer: ^Renderer) {
 	)
 
 	renderer.per_frame_data.per_pass_descriptor_set = descriptor_set_allocate(
-		renderer.descriptor_set_layouts[.Per_Pass],
+		&renderer.descriptor_set_layouts[.Per_Pass],
 	)
 
 

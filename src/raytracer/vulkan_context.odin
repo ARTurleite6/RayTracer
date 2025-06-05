@@ -69,10 +69,14 @@ vulkan_context_init :: proc(
 		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
 		1000,
 	)
+
+	resource_cache_init(ctx, allocator)
 	return nil
 }
 
-ctx_destroy :: proc(ctx: ^Vulkan_Context) {
+ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
+	resource_cache_destroy(ctx, allocator)
+
 	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 	frames_data_destroy(ctx)
 

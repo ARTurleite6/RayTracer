@@ -9,12 +9,37 @@ Resource_Cache :: struct {
 	descriptor_set_layots: map[u32]Descriptor_Set_Layout,
 	pipeline_layouts:      map[u32]vk.PipelineLayout,
 	raytracing_pipelines:  map[u32]vk.Pipeline,
+	shaders:               map[u32]Shader,
+}
+
+resource_cache_init :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
+	context.allocator = allocator
+	cache := &ctx.cache
+
+	cache.descriptor_set_layots = make(map[u32]Descriptor_Set_Layout)
+	cache.pipeline_layouts = make(map[u32]vk.PipelineLayout)
+	cache.raytracing_pipelines = make(map[u32]vk.Pipeline)
+	cache.shaders = make(map[u32]Shader)
+}
+
+resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
+	context.allocator = allocator
+	cache := &ctx.cache
+
+	delete(cache.descriptor_set_layots)
+	delete(cache.pipeline_layouts)
+	delete(cache.raytracing_pipelines)
+
+	for _, &shader in cache.shaders {
+		shader_destroy(&shader)
+	}
+	delete(cache.shaders)
 }
 
 vulkan_get_descriptor_set_layout :: proc(
 	ctx: ^Vulkan_Context,
 	bindings: ..vk.DescriptorSetLayoutBinding,
-) -> ^Descriptor_Set_Layout {
+) -> Descriptor_Set_Layout {
 	cache := &ctx.cache
 
 	context.allocator = context.temp_allocator
@@ -30,13 +55,13 @@ vulkan_get_descriptor_set_layout :: proc(
 
 	value := xxhash.XXH32_digest(hasher)
 
-	if value, found := &cache.descriptor_set_layots[value]; found {
+	if value, found := cache.descriptor_set_layots[value]; found {
 		return value
 	}
 
 	cache.descriptor_set_layots[value] = create_descriptor_set_layout(ctx, ..bindings)
 
-	return &cache.descriptor_set_layots[value]
+	return cache.descriptor_set_layots[value]
 }
 
 vulkan_get_pipeline_layout :: proc(
@@ -49,8 +74,9 @@ vulkan_get_pipeline_layout :: proc(
 	hasher, _ := xxhash.XXH32_create_state()
 	defer xxhash.XXH32_destroy_state(hasher)
 
-	for layout in descriptor_set_layouts {
+	for layout, set in descriptor_set_layouts {
 		xxhash.XXH32_update(hasher, mem.any_to_bytes(layout))
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(set))
 	}
 
 	for range in push_constant_ranges {
@@ -131,4 +157,20 @@ vulkan_get_raytracing_pipeline :: proc(
 
 	cache.raytracing_pipelines[value] = pipeline
 	return cache.raytracing_pipelines[value]
+}
+
+vulkan_get_shader :: proc(ctx: ^Vulkan_Context, path: string) -> Shader {
+	cache := &ctx.cache
+
+	hash := xxhash.XXH32(transmute([]u8)path)
+
+	if value, found := cache.shaders[hash]; found {
+		return value
+	}
+
+	shader: Shader
+	shader_init(&shader, vulkan_get_device_handle(ctx), path)
+
+	cache.shaders[hash] = shader
+	return cache.shaders[hash]
 }
