@@ -159,7 +159,11 @@ vulkan_get_raytracing_pipeline :: proc(
 	return cache.raytracing_pipelines[value]
 }
 
-vulkan_get_shader :: proc(ctx: ^Vulkan_Context, path: string) -> Shader {
+vulkan_get_shader :: proc(
+	ctx: ^Vulkan_Context,
+	path: string,
+	allocator := context.allocator,
+) -> Shader {
 	cache := &ctx.cache
 
 	hash := xxhash.XXH32(transmute([]u8)path)
@@ -169,7 +173,7 @@ vulkan_get_shader :: proc(ctx: ^Vulkan_Context, path: string) -> Shader {
 	}
 
 	shader: Shader
-	shader_init(&shader, vulkan_get_device_handle(ctx), path)
+	shader_init(&shader, vulkan_get_device_handle(ctx), path, allocator)
 
 	cache.shaders[hash] = shader
 	return cache.shaders[hash]

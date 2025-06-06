@@ -1,6 +1,10 @@
 package raytracer
 
+import "base:runtime"
+import "core:fmt"
+import "core:log"
 import "core:os"
+import "core:slice"
 import "core:strings"
 
 import spirv "external:odin-spirv-reflect"
@@ -33,6 +37,35 @@ Shader :: struct {
 	module:      vk.ShaderModule,
 	device:      vk.Device,
 	code:        []u8,
+}
+
+Program :: struct {
+	pipeline_layout: Pipeline_Layout,
+}
+
+program_init :: proc(
+	ctx: ^Vulkan_Context,
+	shaders: []string,
+	allocator := context.allocator,
+) -> Program {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+	shader_modules := make([]Shader, len(shaders), context.temp_allocator)
+
+	for shader_path, i in shaders {
+		shader_modules[i] = vulkan_get_shader(ctx, shader_path, context.temp_allocator)
+	}
+
+	layouts := make([]Resource_Layout, len(shaders), context.temp_allocator)
+	for shader, i in shader_modules {
+		layouts[i] = shader_get_resource_layout(shader)
+	}
+
+	fmt.println(layouts)
+	merged_layout := merge_resource_layouts(layouts, allocator)
+
+	fmt.println(merged_layout)
+
+	return {}
 }
 
 shader_init :: proc(
@@ -80,6 +113,55 @@ shader_init :: proc(
 	return .None
 }
 
+shader_get_resource_layout :: proc(
+	shader: Shader,
+	allocator := context.allocator,
+) -> (
+	layout: Resource_Layout,
+) {
+	module: spirv.ShaderModule
+	result := spirv.CreateShaderModule(len(shader.code), raw_data(shader.code), &module)
+	assert(result == .SUCCESS)
+	defer spirv.DestroyShaderModule(&module)
+
+	{
+		count: u32
+		spirv.EnumerateDescriptorSets(module, &count, nil)
+		descriptor_sets := make([]^spirv.DescriptorSet, count, context.temp_allocator)
+		spirv.EnumerateDescriptorSets(module, &count, raw_data(descriptor_sets))
+
+		for descriptor_set in descriptor_sets {
+			set_layout := Descriptor_Set_Layout_Info {
+				set = descriptor_set.set,
+			}
+			set_layout.bindings = make(
+				[dynamic]vk.DescriptorSetLayoutBinding,
+				0,
+				descriptor_set.binding_count,
+				allocator,
+			)
+
+			for binding in descriptor_set.bindings[:descriptor_set.binding_count] {
+				append(
+					&set_layout.bindings,
+					vk.DescriptorSetLayoutBinding {
+						binding = binding.binding,
+						descriptorType = binding.descriptor_type,
+						descriptorCount = binding.count,
+						stageFlags = module.shader_stage,
+					},
+				)
+			}
+
+			append(&layout.sets, set_layout)
+		}
+	}
+
+	fmt.println("Shader layout =", layout)
+
+	return layout
+}
+
 // TODO: create function to create shader program,
 // that using reflection it creates both the descriptor set layouts and the pipeline layout
 
@@ -89,4 +171,93 @@ shader_destroy :: proc(shader: ^Shader) {
 	delete(shader.name)
 	delete(shader.entry_point)
 	delete(shader.code)
+}
+
+merge_resource_layouts :: proc(
+	layouts: []Resource_Layout,
+	allocator := context.allocator,
+) -> (
+	merged_layout: Resource_Layout,
+) {
+
+	set_map := make(map[u32]Descriptor_Set_Layout_Info, context.temp_allocator)
+
+	for layout in layouts {
+		for set_info in layout.sets {
+			if existing_set, exists := &set_map[set_info.set]; exists {
+				merge_bindings_into_set(existing_set, set_info, allocator)
+			} else {
+				new_set := Descriptor_Set_Layout_Info {
+					set = set_info.set,
+				}
+
+				new_set.bindings = make(
+					[dynamic]vk.DescriptorSetLayoutBinding,
+					0,
+					len(set_info.bindings),
+					allocator,
+				)
+
+				// Copy all bindings from the current set
+				for binding in set_info.bindings {
+					append(&new_set.bindings, binding)
+				}
+
+				set_map[set_info.set] = new_set
+			}
+		}
+	}
+
+	for _, set in set_map {
+		append(&merged_layout.sets, set)
+	}
+
+	slice.sort_by_key(merged_layout.sets[:], proc(layout: Descriptor_Set_Layout_Info) -> u32 {
+		return layout.set
+	})
+
+	return merged_layout
+}
+
+merge_bindings_into_set :: proc(
+	target_set: ^Descriptor_Set_Layout_Info,
+	source_set: Descriptor_Set_Layout_Info,
+	allocator := context.allocator,
+) {
+	// Create a map of existing bindings by binding number
+	binding_map := make(map[u32]int, context.temp_allocator)
+
+	// Map existing bindings
+	for binding, i in target_set.bindings {
+		binding_map[binding.binding] = i
+	}
+
+	// Process source bindings
+	for source_binding in source_set.bindings {
+		if existing_index, exists := binding_map[source_binding.binding]; exists {
+			// Binding already exists, merge stage flags
+			target_set.bindings[existing_index].stageFlags |= source_binding.stageFlags
+
+			// Verify that descriptor type and count match
+			existing_binding := &target_set.bindings[existing_index]
+			if existing_binding.descriptorType != source_binding.descriptorType {
+				log.warnf(
+					"Warning: Binding %d in set %d has conflicting descriptor types\n",
+					source_binding.binding,
+					source_set.set,
+				)
+			}
+			if existing_binding.descriptorCount != source_binding.descriptorCount {
+				log.warnf(
+					"Warning: Binding %d in set %d has conflicting descriptor counts\n",
+					source_binding.binding,
+					source_set.set,
+				)
+			}
+		} else {
+			// New binding, add it
+			append(&target_set.bindings, source_binding)
+			binding_map[source_binding.binding] = len(target_set.bindings) - 1
+		}
+	}
 }
