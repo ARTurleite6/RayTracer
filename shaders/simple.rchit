@@ -34,11 +34,6 @@ layout(set = 0, binding = 3, scalar) buffer LightsBuffer {
     LightData lights[];
 } lights_data;
 
-layout(push_constant) uniform Push {
-    vec3 clear_color;
-    uint frame_number;
-} push;
-
 struct BSDFSample {
     vec3 direction;
     vec3 value;

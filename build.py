@@ -11,14 +11,6 @@ os = platform.system()
 
 shaders = [
     {
-        "src": "shaders/simple.vert",
-        "out": "shaders/vert.spv",
-    },
-    {
-        "src": "shaders/simple.frag",
-        "out": "shaders/frag.spv",
-    },
-    {
         "src": "shaders/simple.rgen",
         "out": "shaders/rgen.spv",
     },

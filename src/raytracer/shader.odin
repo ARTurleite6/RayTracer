@@ -1,7 +1,6 @@
 package raytracer
 
 import "base:runtime"
-import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:slice"
@@ -17,17 +16,13 @@ Shader_Error :: enum {
 }
 
 Resource_Layout :: struct {
-	sets: [dynamic]Descriptor_Set_Layout_Info,
+	sets:        [dynamic]Descriptor_Set_Layout_Info,
+	push_ranges: [dynamic]vk.PushConstantRange,
 }
 
 Descriptor_Set_Layout_Info :: struct {
 	set:      u32,
 	bindings: [dynamic]vk.DescriptorSetLayoutBinding,
-}
-
-Pipeline_Layout :: struct {
-	handle:                 vk.PipelineLayout,
-	descriptor_set_layouts: []Descriptor_Set_Layout,
 }
 
 Shader :: struct {
@@ -40,7 +35,7 @@ Shader :: struct {
 }
 
 Program :: struct {
-	pipeline_layout: Pipeline_Layout,
+	pipeline_layout: vk.PipelineLayout,
 }
 
 program_init :: proc(
@@ -60,12 +55,22 @@ program_init :: proc(
 		layouts[i] = shader_get_resource_layout(shader)
 	}
 
-	fmt.println(layouts)
 	merged_layout := merge_resource_layouts(layouts, allocator)
 
-	fmt.println(merged_layout)
+	layout_sets := make([]vk.DescriptorSetLayout, len(merged_layout.sets), context.temp_allocator)
 
-	return {}
+	for set_info in merged_layout.sets {
+		layout := vulkan_get_descriptor_set_layout(ctx, ..set_info.bindings[:])
+		layout_sets[set_info.set] = layout.handle
+	}
+
+	pipeline_layout := vulkan_get_pipeline_layout(
+		ctx,
+		layout_sets[:],
+		merged_layout.push_ranges[:],
+	)
+
+	return {pipeline_layout = pipeline_layout}
 }
 
 shader_init :: proc(
@@ -157,7 +162,25 @@ shader_get_resource_layout :: proc(
 		}
 	}
 
-	fmt.println("Shader layout =", layout)
+	{
+		count: u32
+		spirv.EnumeratePushConstantBlocks(module, &count, nil)
+		push_ranges := make([]^spirv.BlockVariable, count, context.temp_allocator)
+		spirv.EnumeratePushConstantBlocks(module, &count, raw_data(push_ranges))
+
+		layout.push_ranges = make([dynamic]vk.PushConstantRange, 0, count, allocator)
+
+		for push_range in push_ranges {
+			append(
+				&layout.push_ranges,
+				vk.PushConstantRange {
+					stageFlags = module.shader_stage,
+					offset = push_range.offset,
+					size = push_range.size,
+				},
+			)
+		}
+	}
 
 	return layout
 }
@@ -205,6 +228,12 @@ merge_resource_layouts :: proc(
 
 				set_map[set_info.set] = new_set
 			}
+		}
+	}
+
+	for layout in layouts {
+		for push_range in layout.push_ranges {
+			append(&merged_layout.push_ranges, push_range)
 		}
 	}
 

@@ -79,6 +79,12 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		shaders[2] = vulkan_get_shader(&renderer.ctx, "shaders/shadow.spv")
 		shaders[3] = vulkan_get_shader(&renderer.ctx, "shaders/rchit.spv")
 
+		program_init(
+			&renderer.ctx,
+			{"shaders/rgen.spv", "shaders/rmiss.spv", "shaders/shadow.spv", "shaders/rchit.spv"},
+			allocator,
+		)
+
 		raytracing_pass_init(
 			&renderer.raytracing_pass,
 			&renderer.ctx,
@@ -510,7 +516,7 @@ init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
 			binding = 0,
 			descriptorType = .UNIFORM_BUFFER,
 			descriptorCount = 1,
-			stageFlags = {.VERTEX, .FRAGMENT, .RAYGEN_KHR},
+			stageFlags = {.RAYGEN_KHR},
 		},
 	)
 

@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:hash/xxhash"
+import "core:log"
 import "core:mem"
 
 import vk "vendor:vulkan"
@@ -61,6 +62,8 @@ vulkan_get_descriptor_set_layout :: proc(
 
 	cache.descriptor_set_layots[value] = create_descriptor_set_layout(ctx, ..bindings)
 
+	log.debugf("Creating descriptor set layout with hash: %v, bindings: %v", value, bindings)
+
 	return cache.descriptor_set_layots[value]
 }
 
@@ -75,8 +78,8 @@ vulkan_get_pipeline_layout :: proc(
 	defer xxhash.XXH32_destroy_state(hasher)
 
 	for layout, set in descriptor_set_layouts {
-		xxhash.XXH32_update(hasher, mem.any_to_bytes(layout))
 		xxhash.XXH32_update(hasher, mem.any_to_bytes(set))
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(layout))
 	}
 
 	for range in push_constant_ranges {
@@ -91,6 +94,13 @@ vulkan_get_pipeline_layout :: proc(
 
 	cache.pipeline_layouts[value] = pipeline_layout_init(
 		ctx,
+		descriptor_set_layouts,
+		push_constant_ranges,
+	)
+
+	log.debugf(
+		"Creating pipeline layout with hash: %v, with descriptors: %v, and push constants = %v",
+		value,
 		descriptor_set_layouts,
 		push_constant_ranges,
 	)
