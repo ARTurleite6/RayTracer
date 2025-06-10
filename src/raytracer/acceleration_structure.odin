@@ -1,8 +1,8 @@
 package raytracer
 
-import "base:runtime"
 import "core:fmt"
 import glm "core:math/linalg"
+import "core:mem"
 import vk "vendor:vulkan"
 _ :: fmt
 
@@ -239,7 +239,7 @@ matrix_to_transform_matrix_khr :: proc(m: Mat4) -> vk.TransformMatrixKHR {
 	temp := glm.transpose(m)
 	out_matrix := vk.TransformMatrixKHR{}
 
-	runtime.mem_copy(&out_matrix, &temp, size_of(vk.TransformMatrixKHR))
+	mem.copy(&out_matrix, &temp, size_of(vk.TransformMatrixKHR))
 
 	return out_matrix
 }

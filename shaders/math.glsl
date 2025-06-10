@@ -7,12 +7,11 @@ float powerHeuristic(float pdfA, float pdfB) {
 }
 
 mat3 createBasis(vec3 normal) {
-    // Find a perpendicular vector to the normal
-    vec3 nt = normalize(abs(normal.x) > 0.1 ? vec3(0, 1, 0) : vec3(1, 0, 0));
-    vec3 tangent = normalize(cross(nt, normal));
-    vec3 bitangent = cross(normal, tangent);
-
-    return mat3(tangent, bitangent, normal);
+    vec3 axis2 = normalize(normal);
+    vec3 a = abs(axis2.x) > 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0);
+    vec3 axis1 = normalize(cross(axis2, a));
+    vec3 axis0 = cross(axis2, axis1);
+    return mat3(axis0, axis1, axis2);
 }
 
 // Transform a world-space direction to local space where normal is (0,0,1)

@@ -97,6 +97,11 @@ vec3 generateCosineWeightedDirection(vec2 random) {
 vec3 microfacetF(vec3 wo, vec3 wi, vec3 h, Material material) {
     float NoL = cosTheta(wi);
     float NoV = cosTheta(wo);
+
+    if (NoL <= 0.0 || NoV <= 0.0) {
+        return vec3(0.0); // Below horizon - no contribution
+    }
+
     float NoH = cosTheta(h);
     float VoH = dot(wo, h);
 
@@ -208,47 +213,26 @@ vec3 evaluateFullBRDF(vec3 wo, vec3 wi, Material material) {
 
 BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
     BSDFSample result;
-    result.direction = generateCosineWeightedDirection(random);
-    result.value = material.albedo / M_PI; // Diffuse component
-    result.pdf = cosTheta(result.direction) / M_PI; // Diffuse PDF
-    result.isSpecular = false;
-    return result;
+    float specularWeight = getSpecularProbability(material);
+    float diffuseWeight = 1.0 - specularWeight;
+    // Sample specular or diffuse based on the weights
+    if (rnd(payload.seed) < specularWeight) {
+        vec3 h = sampleGGX(random, material.roughness);
+        vec3 wiLocal = reflect(-wo, h);
+        result.isSpecular = true;
+        result.value = microfacetF(wo, wiLocal, h, material); // Specular value
+        result.direction = wiLocal;
+    } else {
+        result.direction = generateCosineWeightedDirection(random);
+        result.isSpecular = false;
+        result.value = material.albedo / M_PI;
+    }
 
-    // BSDFSample result;
-    //
-    // float specularWeight = getSpecularProbability(material);
-    // float diffuseWeight = 1 - specularWeight;
-    //
-    // bool useSpecularSampling = (rnd(payload.seed) < specularWeight);
-    // vec3 wiLocal; // direction in local space
-    //
-    // if (useSpecularSampling) {
-    //     vec3 h = sampleGGX(random, material.roughness);
-    //     wiLocal = reflect(-wo, h);
-    // } else {
-    //     wiLocal = generateCosineWeightedDirection(random);
-    // }
-    //
-    // float pdfSpecular = 0.0;
-    // float pdfDiffuse = 0.0;
-    // // Calculate diffuse PDF
-    // pdfDiffuse = cosTheta(wiLocal) / M_PI;
-    //
-    // // Calculate specular PDF
-    // vec3 h = normalize(wo + wiLocal);
-    // pdfSpecular = microfacetPDF(wo, h, material.roughness);
-    //
-    // float pdf = specularWeight * pdfSpecular + diffuseWeight * pdfDiffuse;
-    //
-    // BRDFEval eval = evaluateBRDFComponents(wo, wiLocal, material);
-    // result.direction = localToWorld(wiLocal, basis);
-    // result.pdf = max(pdf, 0.0001);
-    // result.diffusePdf = pdfDiffuse;
-    // result.specularPdf = pdfSpecular;
-    // result.isSpecular = useSpecularSampling;
-    // result.value = eval.diffuse + eval.specular;
-    //
-    // return result;
+    vec3 h = normalize(wo + result.direction);
+    float specularPdf = microfacetPDF(wo, h, material.roughness);
+    float diffusePdf = cosTheta(result.direction) / M_PI;
+    result.pdf = specularWeight * specularPdf + diffuseWeight * diffusePdf;
+    return result;
 }
 
 vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, uint seed) {
@@ -451,37 +435,35 @@ void main() {
     vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(pos, 1.0));
 
     const vec3 norm = normalize(v0.normal * barycentrics.x + v1.normal * barycentrics.y + v2.normal * barycentrics.z);
-    const vec3 worldNrm = normalize(transpose(inverse(mat3(gl_ObjectToWorldEXT))) * norm);
+    vec3 worldNrm = normalize(transpose(inverse(mat3(gl_ObjectToWorldEXT))) * norm);
 
     vec3 incomingRayDir = gl_WorldRayDirectionEXT;
+
+    bool frontFacing = dot(worldNrm, -incomingRayDir) > 0.0;
+
+    worldNrm = frontFacing ? worldNrm : -1.0 * worldNrm;
+
     bool isEmissive = (mat.emission_power > 0.0);
 
-    // if (isEmissive && (payload.firstBounce || payload.isSpecular)) {
-    if (isEmissive) {
+    if (isEmissive && (payload.firstBounce || payload.isSpecular)) {
         // If the material is emissive and this is the first bounce or a specular reflection,
         // we handle it differently to avoid double counting emission.
         payload.color += payload.throughput * mat.emission_color * mat.emission_power;
     }
 
-    // For non-emissive surfaces, continue with your regular BRDF calculations
-
-    // Sample direct lighting for non-specular components
-    // vec3 directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
-    //
-    // payload.color += payload.throughput * directLight;
+    vec3 directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
+    payload.color += payload.throughput * directLight;
 
     mat3 basis = createBasis(worldNrm);
     vec3 woLocal = worldToLocal(-incomingRayDir, basis);
 
-    vec2 random = vec2(rnd(seed), rnd(seed));
+    // Sample diffuse direction
+    vec2 random = vec2(rnd(payload.seed), rnd(payload.seed));
     BSDFSample brdfSample = sampleBRDF(woLocal, mat, random, basis);
 
-    // float cosTheta = max(dot(worldNrm, brdfSample.direction), 0.001);
     payload.throughput *= brdfSample.value * cosTheta(brdfSample.direction) / brdfSample.pdf;
     payload.nextDirection = localToWorld(brdfSample.direction, basis);
-    payload.isSpecular = brdfSample.isSpecular;
-
-    payload.firstBounce = false;
     payload.hitPosition = worldPos;
     payload.hit = true;
+    payload.isSpecular = brdfSample.isSpecular;
 }

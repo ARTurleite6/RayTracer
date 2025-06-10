@@ -18,7 +18,7 @@ Shader_Binding_Table :: struct {
 	buffer:       Buffer,
 	regions:      [Shader_Region]vk.StridedDeviceAddressRegionKHR,
 	groups:       [dynamic]vk.RayTracingShaderGroupCreateInfoKHR,
-	group_counts: [Shader_Region]u32,
+	group_counts: [Shader_Region]u64,
 }
 
 shader_binding_table_destroy :: proc(self: ^Shader_Binding_Table) {
@@ -42,12 +42,12 @@ shader_binding_table_build :: proc(
 
 	aligned_group_size := align_up(aligned_handle_size, base_alignment)
 
-	group_count: u32
+	group_count: u64
 	for group in self.group_counts {
 		group_count += group
 	}
 
-	sbt_size := group_count * aligned_group_size
+	sbt_size := group_count * u64(aligned_group_size)
 	buffer := &self.buffer
 
 	sbt_buffer_usage_flags: vk.BufferUsageFlags = {
@@ -72,7 +72,7 @@ shader_binding_table_build :: proc(
 			device,
 			pipeline.handle,
 			0,
-			group_count,
+			u32(group_count),
 			int(sbt_size),
 			raw_data(shader_handle_storage),
 		),
@@ -84,23 +84,23 @@ shader_binding_table_build :: proc(
 	defer buffer_unmap(buffer)
 
 	for i in 0 ..< group_count {
-		dst_offset := uintptr(aligned_group_size * i)
-		src_offset := uintptr(aligned_handle_size * i)
+		dst_offset := uintptr(u64(aligned_group_size) * i)
+		src_offset := uintptr(u64(aligned_handle_size) * i)
 		src := rawptr(uintptr(raw_data(shader_handle_storage)) + src_offset)
 		dest := rawptr(uintptr(data) + dst_offset)
 		mem.copy(dest, src, int(handle_size))
 	}
 
 	base_address := buffer_get_device_address(buffer^)
-	stride := aligned_group_size
+	stride := u64(aligned_group_size)
 
-	raygen_offset := base_address
-	miss_offset := vk.DeviceAddress(u32(raygen_offset) + self.group_counts[.Ray_Gen] * stride)
-	hit_offset := vk.DeviceAddress(u32(miss_offset) + self.group_counts[.Miss] * stride)
-	call_offset := vk.DeviceAddress(u32(hit_offset) + self.group_counts[.Hit] * stride)
+	raygen_offset := u64(base_address)
+	miss_offset := vk.DeviceAddress(raygen_offset + self.group_counts[.Ray_Gen] * stride)
+	hit_offset := vk.DeviceAddress(u64(miss_offset) + self.group_counts[.Miss] * stride)
+	call_offset := vk.DeviceAddress(u64(hit_offset) + self.group_counts[.Hit] * stride)
 
 	self.regions[.Ray_Gen] = {
-		deviceAddress = raygen_offset,
+		deviceAddress = vk.DeviceAddress(raygen_offset),
 		stride        = vk.DeviceSize(stride),
 		size          = vk.DeviceSize(stride * self.group_counts[.Ray_Gen]),
 	}
