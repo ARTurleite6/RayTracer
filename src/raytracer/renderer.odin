@@ -79,18 +79,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		shaders[2] = vulkan_get_shader(&renderer.ctx, "shaders/shadow.spv")
 		shaders[3] = vulkan_get_shader(&renderer.ctx, "shaders/rchit.spv")
 
-		fmt.println(
-			program_init(
-				&renderer.ctx,
-				{
-					"shaders/rgen.spv",
-					"shaders/rmiss.spv",
-					"shaders/shadow.spv",
-					"shaders/rchit.spv",
-				},
-			),
-		)
-
 		raytracing_pass_init(
 			&renderer.raytracing_pass,
 			&renderer.ctx,

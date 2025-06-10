@@ -462,51 +462,54 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		cube_mesh_idx,
 		light_material_idx,
 		position = {
-			-(room_size / 2 - wall_thickness - 1),
-			room_size / 2 - wall_thickness,
-			room_size / 2 - wall_thickness - 1,
+			0,
+			room_size / 2 - wall_thickness / 2,
+			0,
+			// -(room_size / 2 - wall_thickness - 1),
+			// room_size / 2 - wall_thickness,
+			// room_size / 2 - wall_thickness - 1,
 		},
 		scale = {light_size, wall_thickness / 2, light_size},
 	)
 
-	scene_add_object(
-		&scene,
-		"Light 2",
-		cube_mesh_idx,
-		light_material_idx,
-		position = {
-			room_size / 2 - wall_thickness - 1,
-			room_size / 2 - wall_thickness,
-			room_size / 2 - wall_thickness - 1,
-		},
-		scale = {light_size, wall_thickness / 2, light_size},
-	)
-
-	scene_add_object(
-		&scene,
-		"Light 2",
-		cube_mesh_idx,
-		light_material_idx,
-		position = {
-			room_size / 2 - wall_thickness - 1,
-			room_size / 2 - wall_thickness,
-			-(room_size / 2 - wall_thickness - 1),
-		},
-		scale = {light_size, wall_thickness / 2, light_size},
-	)
-
-	scene_add_object(
-		&scene,
-		"Light 2",
-		cube_mesh_idx,
-		light_material_idx,
-		position = {
-			-(room_size / 2 - wall_thickness - 1),
-			room_size / 2 - wall_thickness,
-			-(room_size / 2 - wall_thickness - 1),
-		},
-		scale = {light_size, wall_thickness / 2, light_size},
-	)
+	// scene_add_object(
+	// 	&scene,
+	// 	"Light 2",
+	// 	cube_mesh_idx,
+	// 	light_material_idx,
+	// 	position = {
+	// 		room_size / 2 - wall_thickness - 1,
+	// 		room_size / 2 - wall_thickness,
+	// 		room_size / 2 - wall_thickness - 1,
+	// 	},
+	// 	scale = {light_size, wall_thickness / 2, light_size},
+	// )
+	//
+	// scene_add_object(
+	// 	&scene,
+	// 	"Light 2",
+	// 	cube_mesh_idx,
+	// 	light_material_idx,
+	// 	position = {
+	// 		room_size / 2 - wall_thickness - 1,
+	// 		room_size / 2 - wall_thickness,
+	// 		-(room_size / 2 - wall_thickness - 1),
+	// 	},
+	// 	scale = {light_size, wall_thickness / 2, light_size},
+	// )
+	//
+	// scene_add_object(
+	// 	&scene,
+	// 	"Light 2",
+	// 	cube_mesh_idx,
+	// 	light_material_idx,
+	// 	position = {
+	// 		-(room_size / 2 - wall_thickness - 1),
+	// 		room_size / 2 - wall_thickness,
+	// 		-(room_size / 2 - wall_thickness - 1),
+	// 	},
+	// 	scale = {light_size, wall_thickness / 2, light_size},
+	// )
 
 	// Add some objects inside the box
 	sphere_mesh_idx := scene_add_mesh(&scene, create_sphere(stacks = 64, slices = 64))

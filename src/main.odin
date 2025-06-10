@@ -8,7 +8,12 @@ _ :: mem
 _ :: fmt
 
 main :: proc() {
-	fmt.println("Mat alignment =", align_of(matrix[4, 4]f32), ", Mat size = ", size_of(raytracer.Mat4))
+	fmt.println(
+		"Mat alignment =",
+		align_of(matrix[4, 4]f32),
+		", Mat size = ",
+		size_of(raytracer.Mat4),
+	)
 	when ODIN_DEBUG {
 		context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 		defer log.destroy_console_logger(context.logger)
@@ -27,7 +32,7 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&track)
 		}
 	}
-	app, err := raytracer.application_init(1920, 1080, "Raytracer")
+	app, err := raytracer.application_init(1280, 1020, "Raytracer")
 	if err != nil {
 		log.errorf("Application: Error launching application %v", err)
 		return
