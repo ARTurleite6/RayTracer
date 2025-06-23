@@ -197,14 +197,15 @@ device_copy_buffer :: proc(
 	device: ^Device,
 	src, dst: vk.Buffer,
 	size: vk.DeviceSize,
-	offset := vk.DeviceSize(0),
+	src_offset := vk.DeviceSize(0),
+	dst_offset := vk.DeviceSize(0),
 ) {
 	cmd := device_begin_single_time_commands(device, device.command_pool)
 	defer device_end_single_time_commands(device, device.command_pool, cmd)
 
 	copy_region := vk.BufferCopy {
-		srcOffset = 0,
-		dstOffset = offset,
+		srcOffset = src_offset,
+		dstOffset = dst_offset,
 		size      = size,
 	}
 

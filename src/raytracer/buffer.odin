@@ -53,7 +53,7 @@ buffer_init :: proc(
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
 		size        = size,
-		usage       = usage,
+		usage       = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS},
 		sharingMode = .EXCLUSIVE,
 	}
 
@@ -112,13 +112,8 @@ buffer_init_with_staging_buffer :: proc(
 	buffer_init(buffer, buffer.ctx, size, {.TRANSFER_DST} | usage, memory_usage) or_return
 
 	staging_buffer := vulkan_context_request_staging_buffer(ctx, size)
-	// staging_buffer: Buffer
-	// buffer_init(&staging_buffer, buffer.ctx, size, {.TRANSFER_SRC} | usage, .Cpu_To_Gpu) or_return
-	// defer buffer_destroy(&staging_buffer)
 
 	buffer_allocation_update(&staging_buffer, data, size)
-	// buffer_map(&staging_buffer) or_return
-	// buffer_write(&staging_buffer, data)
 
 	device_copy_buffer(device, staging_buffer.buffer.handle, buffer.handle, staging_buffer.size)
 	return nil
