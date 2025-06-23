@@ -33,7 +33,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 	vertex_address := buffer_get_device_address(mesh.vertex_buffer)
 	index_address := buffer_get_device_address(mesh.index_buffer)
 
-	max_primitives := u32(mesh.index_buffer.instance_count) / 3
+	max_primitives := u32(mesh.num_indices) / 3
 
 	triangles := vk.AccelerationStructureGeometryTrianglesDataKHR {
 		sType = .ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
@@ -42,7 +42,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 		vertexStride = size_of(Vertex),
 		indexType = .UINT32,
 		indexData = {deviceAddress = index_address},
-		maxVertex = u32(mesh.vertex_buffer.instance_count) - 1,
+		maxVertex = u32(mesh.num_vertices) - 1,
 	}
 
 	geom := vk.AccelerationStructureGeometryKHR {

@@ -9,6 +9,7 @@ import vk "vendor:vulkan"
 Resource_Cache :: struct {
 	descriptor_set_layots: map[u32]Descriptor_Set_Layout,
 	pipeline_layouts:      map[u32]vk.PipelineLayout,
+	descriptor_sets:       map[u32]vk.DescriptorSet,
 	raytracing_pipelines:  map[u32]vk.Pipeline,
 	shaders:               map[u32]Shader,
 }
@@ -65,6 +66,52 @@ vulkan_get_descriptor_set_layout :: proc(
 	log.debugf("Creating descriptor set layout with hash: %v, bindings: %v", value, bindings)
 
 	return cache.descriptor_set_layots[value]
+}
+
+vulkan_get_descriptor_set :: proc(
+	ctx: ^Vulkan_Context,
+	descriptor_set_layout: ^Descriptor_Set_Layout,
+	write_infos: ..Descriptor_Set_Write_Info,
+) -> vk.DescriptorSet {
+	cache := &ctx.cache
+	context.allocator = context.temp_allocator
+	hasher, _ := xxhash.XXH32_create_state()
+	defer xxhash.XXH32_destroy_state(hasher)
+
+	xxhash.XXH32_update(hasher, mem.any_to_bytes(descriptor_set_layout))
+
+	for w in write_infos {
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(w.binding))
+
+		switch v in w.write_info {
+		case vk.DescriptorBufferInfo:
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.buffer))
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.offset))
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.range))
+		case vk.DescriptorImageInfo:
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.sampler))
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.imageView))
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.imageLayout))
+		case vk.WriteDescriptorSetAccelerationStructureKHR:
+			xxhash.XXH32_update(hasher, mem.any_to_bytes(v.accelerationStructureCount))
+
+			for a in v.pAccelerationStructures[:v.accelerationStructureCount] {
+				xxhash.XXH32_update(hasher, mem.any_to_bytes(a))
+			}
+		}
+	}
+
+	value := xxhash.XXH32_digest(hasher)
+	if value, found := cache.descriptor_sets[value]; found {
+		return value
+	}
+
+	cache.descriptor_sets[value] = descriptor_set_allocate(descriptor_set_layout)
+	log.info("Allocating new descriptor set, with write_infos %v", write_infos)
+
+	descriptor_set_update(cache.descriptor_sets[value], ctx, descriptor_set_layout^, ..write_infos)
+
+	return cache.descriptor_sets[value]
 }
 
 vulkan_get_pipeline_layout :: proc(

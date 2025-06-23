@@ -10,7 +10,8 @@ GPU_Scene :: struct {
 	objects_buffer, materials_buffer, lights_buffer: Buffer,
 
 	// descriptors
-	descriptor_set:                                  Descriptor_Set,
+	descriptor_set:                                  vk.DescriptorSet,
+	descriptor_set_layout:                           ^Descriptor_Set_Layout,
 	vulkan_ctx:                                      ^Vulkan_Context,
 }
 
@@ -35,6 +36,7 @@ Light_GPU_Data :: struct {
 // Change this in the future
 Mesh_GPU_Data :: struct {
 	vertex_buffer, index_buffer: Buffer,
+	num_vertices, num_indices:   int,
 }
 
 gpu_scene_init :: proc(
@@ -45,6 +47,7 @@ gpu_scene_init :: proc(
 	scene.vulkan_ctx = ctx
 
 	scene.descriptor_set = descriptor_set_allocate(scene_descriptor_set_layout)
+	scene.descriptor_set_layout = scene_descriptor_set_layout
 }
 
 scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
@@ -54,13 +57,14 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 
 	for mesh, i in scene.meshes {
 		gpu_mesh: Mesh_GPU_Data
+		gpu_mesh.num_vertices = len(mesh.vertices)
+		gpu_mesh.num_indices = len(mesh.indices)
 
 		buffer_init_with_staging_buffer(
 			&gpu_mesh.vertex_buffer,
 			gpu_scene.vulkan_ctx,
 			raw_data(mesh.vertices),
-			size_of(Vertex),
-			len(mesh.vertices),
+			vk.DeviceSize(size_of(Vertex) * len(mesh.vertices)),
 			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 		)
 
@@ -68,8 +72,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			&gpu_mesh.index_buffer,
 			gpu_scene.vulkan_ctx,
 			raw_data(mesh.indices),
-			size_of(u32),
-			len(mesh.indices),
+			vk.DeviceSize(size_of(u32) * len(mesh.indices)),
 			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 		)
 
@@ -105,8 +108,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		&gpu_scene.objects_buffer,
 		gpu_scene.vulkan_ctx,
 		raw_data(objects_data),
-		size_of(Object_GPU_Data),
-		len(objects_data),
+		vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
@@ -115,13 +117,14 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		&gpu_scene.lights_buffer,
 		gpu_scene.vulkan_ctx,
 		raw_data(lights_data),
-		size_of(Light_GPU_Data),
-		len(lights_data),
+		vk.DeviceSize(size_of(Light_GPU_Data) * len(lights_data)),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
 	descriptor_set_update(
-		&gpu_scene.descriptor_set,
+		gpu_scene.descriptor_set,
+		gpu_scene.vulkan_ctx,
+		gpu_scene.descriptor_set_layout^,
 		{binding = 1, write_info = buffer_descriptor_info(gpu_scene.objects_buffer)},
 		{binding = 3, write_info = buffer_descriptor_info(gpu_scene.lights_buffer)},
 	)
@@ -155,13 +158,14 @@ gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 		&gpu_scene.materials_buffer,
 		gpu_scene.vulkan_ctx,
 		raw_data(materials_data),
-		size_of(Material_Data),
-		len(materials_data),
+		vk.DeviceSize(size_of(Material_Data) * len(materials_data)),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 	)
 
 	descriptor_set_update(
-		&gpu_scene.descriptor_set,
+		gpu_scene.descriptor_set,
+		gpu_scene.vulkan_ctx,
+		gpu_scene.descriptor_set_layout^,
 		{binding = 2, write_info = buffer_descriptor_info(gpu_scene.materials_buffer)},
 	)
 }

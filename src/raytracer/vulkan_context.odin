@@ -1,8 +1,12 @@
-package raytracer
+#+feature dynamic-literals
 
+package raytracer
 import "core:log"
-import vkb "external:odin-vk-bootstrap"
+
 import vk "vendor:vulkan"
+
+import vkb "external:odin-vk-bootstrap"
+import vma "external:odin-vma"
 _ :: log
 
 MAX_FRAMES_IN_FLIGHT :: 1
@@ -22,6 +26,28 @@ Frame_Error :: enum {
 	Sync_Creation_Failed,
 }
 
+BASE_BLOCK_SIZE :: 256
+
+SUPPORTED_USAGE_MAP := map[vk.BufferUsageFlags]int {
+	// Original usage types
+	{.UNIFORM_BUFFER} = 1, // Base size (e.g., 1MB)
+	{.STORAGE_BUFFER} = 2, // 2x base (e.g., 2MB)
+	{.VERTEX_BUFFER} = 1, // Base size
+	{.INDEX_BUFFER} = 1, // Base size
+
+	// Ray tracing specific combinations
+	{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS} = 4, // 4x base (e.g., 4MB)
+	{.VERTEX_BUFFER, .STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS} = 4, // RT vertex buffers
+	{.INDEX_BUFFER, .STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS} = 4, // RT index buffers
+
+	// Acceleration structure buffers (very large)
+	{.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR, .SHADER_DEVICE_ADDRESS} = 8, // 8x base
+
+	// Staging buffers
+	{.TRANSFER_SRC} = 8, // Large for texture uploads
+	{.TRANSFER_DST} = 2, // Medium for downloads
+}
+
 Vulkan_Context :: struct {
 	device:            ^Device,
 	swapchain_manager: Swapchain_Manager,
@@ -34,6 +60,7 @@ Vulkan_Context :: struct {
 }
 
 Internal_Frame_Data :: struct {
+	buffer_pools:    map[vk.BufferUsageFlags]Buffer_Pool,
 	command_pool:    Command_Pool,
 	render_finished: vk.Semaphore,
 	image_available: vk.Semaphore,
@@ -71,10 +98,32 @@ vulkan_context_init :: proc(
 	)
 
 	resource_cache_init(ctx, allocator)
+
+	// Initialize buffer pools
+	for &f in ctx.frames {
+		for key, size in SUPPORTED_USAGE_MAP {
+			buffer_pool: Buffer_Pool
+			memory_usage := vma.Memory_Usage.Gpu_Only
+			if .TRANSFER_SRC in key || .UNIFORM_BUFFER in key {
+				memory_usage = .Cpu_To_Gpu
+			} else if .TRANSFER_DST in key {
+				memory_usage = .Gpu_To_Cpu
+			}
+			buffer_pool_init(&buffer_pool, 1024 * BASE_BLOCK_SIZE * size, key, memory_usage)
+			f.buffer_pools[key] = buffer_pool
+		}
+	}
+
 	return nil
 }
 
 ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
+	for &f in ctx.frames {
+		for _, &p in f.buffer_pools {
+			buffer_pool_destroy(&p)
+		}
+	}
+
 	resource_cache_destroy(ctx, allocator)
 
 	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
@@ -84,6 +133,45 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
 
 	device_destroy(ctx.device)
 	free(ctx.device)
+}
+
+@(require_results)
+vulkan_context_request_buffer :: proc(
+	ctx: ^Vulkan_Context,
+	usage_flags: vk.BufferUsageFlags,
+	size: vk.DeviceSize,
+) -> Buffer_Allocation {
+	frame := &ctx.frames[ctx.current_frame]
+	pool, found := &frame.buffer_pools[usage_flags]
+	assert(found, "This usage flags are not available to cache")
+
+	// TODO: add error handling in this implementation
+	block := buffer_pool_request_buffer_block(pool, ctx, size)
+	return buffer_block_allocate(block, size)
+}
+
+@(require_results)
+vulkan_context_request_uniform_buffer :: proc(
+	ctx: ^Vulkan_Context,
+	size: vk.DeviceSize,
+) -> Buffer_Allocation {
+	frame := &ctx.frames[ctx.current_frame]
+
+	// TODO: add error handling in this implementation
+	block := buffer_pool_request_buffer_block(&frame.buffer_pools[{.UNIFORM_BUFFER}], ctx, size)
+	return buffer_block_allocate(block, size)
+}
+
+@(require_results)
+vulkan_context_request_staging_buffer :: proc(
+	ctx: ^Vulkan_Context,
+	size: vk.DeviceSize,
+) -> Buffer_Allocation {
+	frame := &ctx.frames[ctx.current_frame]
+
+	// TODO: add error handling in this implementation
+	block := buffer_pool_request_buffer_block(&frame.buffer_pools[{.TRANSFER_SRC}], ctx, size)
+	return buffer_block_allocate(block, size)
 }
 
 @(require_results)
@@ -105,6 +193,23 @@ vulkan_get_raytracing_pipeline_properties :: proc(
 	vk.GetPhysicalDeviceProperties2(ctx.device.physical_device.ptr, &properties)
 
 	return props
+}
+
+vulkan_copy_buffer_allocation_with_staging_buffer :: proc(
+	ctx: ^Vulkan_Context,
+	dst: ^Buffer_Allocation,
+	data: rawptr,
+	size: vk.DeviceSize,
+) {
+	staging_buffer := vulkan_context_request_staging_buffer(ctx, size)
+	buffer_allocation_update(&staging_buffer, data, size)
+	device_copy_buffer(
+		ctx.device,
+		staging_buffer.buffer.handle,
+		dst.buffer.handle,
+		staging_buffer.size,
+		dst.offset,
+	)
 }
 
 ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> (cmd: Command_Buffer) {
@@ -187,6 +292,9 @@ ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_
 		"Error reseting in_flight_fence",
 	)
 
+	for _, &p in frame.buffer_pools {
+		buffer_pool_reset(&p)
+	}
 	command_pool_begin(&frame.command_pool)
 
 	return result.image_index, nil
@@ -327,6 +435,7 @@ frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
 frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 	device := ctx.device.logical_device.ptr
 	for &f in ctx.frames {
+		// TODO: handle destroying buffers
 		command_pool_destroy(&f.command_pool)
 		vk.DestroyFence(device, f.in_flight_fence, nil)
 		vk.DestroySemaphore(device, f.image_available, nil)

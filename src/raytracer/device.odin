@@ -193,13 +193,18 @@ device_destroy :: proc(device: ^Device) {
 	vkb.destroy_instance(device.instance)
 }
 
-device_copy_buffer :: proc(device: ^Device, src, dst: vk.Buffer, size: vk.DeviceSize) {
+device_copy_buffer :: proc(
+	device: ^Device,
+	src, dst: vk.Buffer,
+	size: vk.DeviceSize,
+	offset := vk.DeviceSize(0),
+) {
 	cmd := device_begin_single_time_commands(device, device.command_pool)
 	defer device_end_single_time_commands(device, device.command_pool, cmd)
 
 	copy_region := vk.BufferCopy {
 		srcOffset = 0,
-		dstOffset = 0,
+		dstOffset = offset,
 		size      = size,
 	}
 

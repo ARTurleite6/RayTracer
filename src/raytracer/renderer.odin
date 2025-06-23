@@ -48,17 +48,13 @@ Frame_Data :: struct {
 	// raytracing image
 	image:                      Image,
 	image_view:                 vk.ImageView,
-	per_pass_descriptor_set:    Descriptor_Set,
+	per_pass_descriptor_set:    vk.DescriptorSet,
 
 	// gbuffer restir
 	position_gbuffer:           Image,
 	normal_gbuffer:             Image,
 	albedo_gbuffer:             Image,
 	roughness_metallic_gbuffer: Image,
-
-	// camera stuff
-	per_frame_uniform_buffer:   Buffer,
-	per_frame_descriptor_set:   Descriptor_Set,
 }
 
 renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context.allocator) {
@@ -103,8 +99,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 renderer_destroy :: proc(renderer: ^Renderer) {
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
-
-	buffer_destroy(&renderer.per_frame_data.per_frame_uniform_buffer)
 
 	for &layout in renderer.descriptor_set_layouts {
 		descriptor_set_layout_destroy(&layout)
@@ -194,7 +188,9 @@ renderer_rebuild_scene :: proc(renderer: ^Renderer) {
 	renderer_create_top_level_as(renderer, scene^)
 
 	descriptor_set_update(
-		&renderer.gpu_scene.descriptor_set,
+		renderer.gpu_scene.descriptor_set,
+		&renderer.ctx,
+		renderer.gpu_scene.descriptor_set_layout^,
 		{
 			binding = 0,
 			write_info = vk.WriteDescriptorSetAccelerationStructureKHR {
@@ -227,19 +223,20 @@ renderer_end_frame :: proc(renderer: ^Renderer) {
 }
 
 renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
+	ubo_data := Camera_UBO {
+			projection         = camera.proj,
+			view               = camera.view,
+			inverse_view       = camera.inverse_view,
+			inverse_projection = camera.inverse_proj,
+		}
+
+	data := &ubo_data
+	allocation := vulkan_context_request_uniform_buffer(&renderer.ctx, size_of(Camera_UBO))
+	buffer_map(&allocation.buffer)
+
+	buffer_allocation_update(&allocation, data, size_of(Camera_UBO))
+
 	if camera.dirty {
-		ubo_data := Camera_UBO {
-				projection         = camera.proj,
-				view               = camera.view,
-				inverse_view       = camera.inverse_view,
-				inverse_projection = camera.inverse_proj,
-			}
-
-		data := &ubo_data
-		buffer := &renderer.per_frame_data.per_frame_uniform_buffer
-		buffer_write(buffer, data)
-		buffer_flush(buffer)
-
 		camera.dirty = false
 		renderer.accumulation_frame = 0
 	}
@@ -248,9 +245,13 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 		&renderer.raytracing_pass,
 		&renderer.current_cmd,
 		{
-			renderer.gpu_scene.descriptor_set.handle,
-			renderer.per_frame_data.per_frame_descriptor_set.handle,
-			renderer.per_frame_data.per_pass_descriptor_set.handle,
+			renderer.gpu_scene.descriptor_set,
+			vulkan_get_descriptor_set(
+				&renderer.ctx,
+				&renderer.descriptor_set_layouts[.Per_Frame],
+				{binding = 0, write_info = buffer_allocation_descriptor_info(allocation)},
+			),
+			renderer.per_frame_data.per_pass_descriptor_set,
 		},
 		renderer.per_frame_data.image,
 		renderer.accumulation_frame,
@@ -329,8 +330,7 @@ renderer_build_tlas :: proc(
 		&instances_buffer,
 		&renderer.ctx,
 		raw_data(instances),
-		size_of(vk.AccelerationStructureInstanceKHR),
-		int(count_instance),
+		vk.DeviceSize(size_of(vk.AccelerationStructureInstanceKHR) * int(count_instance)),
 		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 	)
 	defer buffer_destroy(&instances_buffer)
@@ -557,29 +557,22 @@ init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
 
 @(private = "file")
 init_per_frame_resources :: proc(renderer: ^Renderer) {
-	buffer_init(
-		&renderer.per_frame_data.per_frame_uniform_buffer,
-		&renderer.ctx,
-		size_of(Camera_UBO),
-		{.UNIFORM_BUFFER},
-		.Gpu_To_Cpu,
-	)
-	buffer_map(&renderer.per_frame_data.per_frame_uniform_buffer)
+	// renderer.per_frame_data.per_frame_uniform_buffer = vulkan_context_request_uniform_buffer(
+	// 	&renderer.ctx,
+	// 	size_of(Camera_UBO),
+	// 	{.UNIFORM_BUFFER},
+	// 	.Gpu_To_Cpu,
+	// )
+	// buffer_map(renderer.per_frame_data.per_frame_uniform_buffer)
 
-	renderer.per_frame_data.per_frame_descriptor_set = descriptor_set_allocate(
-		&renderer.descriptor_set_layouts[.Per_Frame],
-	)
-	descriptor_set_update(
-		&renderer.per_frame_data.per_frame_descriptor_set,
-		{
-			binding = 0,
-			write_info = buffer_descriptor_info(renderer.per_frame_data.per_frame_uniform_buffer),
-		},
-	)
-
-	renderer.per_frame_data.per_pass_descriptor_set = descriptor_set_allocate(
-		&renderer.descriptor_set_layouts[.Per_Pass],
-	)
+	// renderer.per_frame_data.per_frame_descriptor_set = vulkan_get_descriptor_set(
+	// 	&renderer.ctx,
+	// 	&renderer.descriptor_set_layouts[.Per_Frame],
+	// 	{
+	// 		binding = 0,
+	// 		write_info = buffer_descriptor_info(renderer.per_frame_data.per_frame_uniform_buffer^),
+	// 	},
+	// )
 
 
 	image_init(
@@ -616,8 +609,9 @@ init_per_frame_resources :: proc(renderer: ^Renderer) {
 		)
 	}
 
-	descriptor_set_update(
-		&renderer.per_frame_data.per_pass_descriptor_set,
+	renderer.per_frame_data.per_pass_descriptor_set = vulkan_get_descriptor_set(
+		&renderer.ctx,
+		&renderer.descriptor_set_layouts[.Per_Pass],
 		{
 			binding = 0,
 			write_info = vk.DescriptorImageInfo {
