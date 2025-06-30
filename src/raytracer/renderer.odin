@@ -3,6 +3,7 @@ package raytracer
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg"
+import "core:os"
 import vk "vendor:vulkan"
 _ :: fmt
 _ :: glm
@@ -128,6 +129,11 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 	renderer^ = {}
 }
 
+renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
+	renderer.scene = scene
+	renderer_rebuild_scene(renderer)
+}
+
 renderer_begin_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
 	if renderer.scene != scene {
 		renderer.scene = scene
@@ -155,7 +161,7 @@ renderer_apply_scene_changes :: proc(renderer: ^Renderer) {
 			gpu_scene_update_material(renderer.gpu_scene, scene, change.index)
 			needs_reset_accumulation = true
 		case .Material_Added, .Material_Removed:
-			gpu_scene_recreate_materials_buffer(renderer.gpu_scene, scene^)
+			// gpu_scene_recreate_materials_buffer(renderer.gpu_scene, scene^)
 			needs_reset_accumulation = true
 		case .Object_Transform_Changed:
 			object := &scene.objects[change.index]
@@ -241,6 +247,10 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 		renderer.accumulation_frame = 0
 	}
 
+	if renderer.scene != nil {
+		scene_bake_storage_buffers(renderer.gpu_scene, renderer.scene^, renderer.current_cmd)
+	}
+
 	raytracing_pass_execute(
 		&renderer.raytracing_pass,
 		&renderer.current_cmd,
@@ -278,7 +288,8 @@ renderer_on_resize :: proc(
 vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
 	if result != .SUCCESS {
 		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
-		return result
+		os.exit(1)
+		// return result
 	}
 	return nil
 }

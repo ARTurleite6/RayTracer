@@ -2,22 +2,12 @@ package raytracer
 
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
 _ :: runtime
+_ :: log
 _ :: fmt
-
-// Most common usages
-UNIFORM_USAGE :: vk.BufferUsageFlags{.UNIFORM_BUFFER}
-STORAGE_USAGE :: vk.BufferUsageFlags{.STORAGE_BUFFER}
-VERTEX_USAGE :: vk.BufferUsageFlags{.VERTEX_BUFFER}
-INDEX_USAGE :: vk.BufferUsageFlags{.INDEX_BUFFER}
-STAGING_USAGE :: vk.BufferUsageFlags{.TRANSFER_SRC}
-DEVICE_ADDR_STORAGE_USAGE :: vk.BufferUsageFlags{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS}
-ACCELERATION_STRUCTURE_USAGE :: vk.BufferUsageFlags {
-	.SHADER_DEVICE_ADDRESS,
-	.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
-}
 
 Buffer :: struct {
 	handle:      vk.Buffer,
@@ -103,19 +93,34 @@ buffer_init_with_staging_buffer :: proc(
 	data: rawptr,
 	size: vk.DeviceSize,
 	usage: vk.BufferUsageFlags,
+	alignment := vk.DeviceSize(0),
 	memory_usage: vma.Memory_Usage = .Gpu_Only,
 ) -> (
 	err: Buffer_Error,
 ) {
 	buffer.ctx = ctx
 	device := buffer.ctx.device
-	buffer_init(buffer, buffer.ctx, size, {.TRANSFER_DST} | usage, memory_usage) or_return
+	buffer_init(
+		buffer,
+		buffer.ctx,
+		size,
+		{.TRANSFER_DST} | usage,
+		memory_usage,
+		alignment = alignment,
+	) or_return
 
 	staging_buffer := vulkan_context_request_staging_buffer(ctx, size)
 
 	buffer_allocation_update(&staging_buffer, data, size)
 
-	device_copy_buffer(device, staging_buffer.buffer.handle, buffer.handle, staging_buffer.size)
+	device_copy_buffer(
+		device,
+		staging_buffer.buffer.handle,
+		buffer.handle,
+		staging_buffer.size,
+		src_offset = staging_buffer.offset,
+		dst_offset = 0,
+	)
 	return nil
 }
 
@@ -149,61 +154,31 @@ buffer_unmap :: proc(buffer: ^Buffer) {
 	vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 }
 
-buffer_write :: proc(
-	buffer: ^Buffer,
-	data: rawptr,
-	offset: vk.DeviceSize = 0,
-	size := vk.DeviceSize(vk.WHOLE_SIZE),
-) {
-	if buffer.mapped_data == nil {
-		buffer_map(buffer)
-	}
+buffer_write :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {
+	assert(buffer.mapped_data != nil)
+	dst_ptr := rawptr(uintptr(buffer.mapped_data) + uintptr(offset))
 
 	if size == vk.DeviceSize(vk.WHOLE_SIZE) {
-		runtime.mem_copy(buffer.mapped_data, data, int(buffer.size))
+		runtime.mem_copy(dst_ptr, data, int(buffer.size - offset))
 	} else {
-		runtime.mem_copy(buffer.mapped_data, data, int(size))
+		runtime.mem_copy(dst_ptr, data, int(size))
 	}
 }
 
-buffer_update_region :: proc(
-	buffer: ^Buffer,
-	data: rawptr,
-	size: vk.DeviceSize,
-	offset: vk.DeviceSize = 0,
-) {
-
-	staging_buffer: Buffer
-	buffer_init(&staging_buffer, buffer.ctx, size, {.TRANSFER_SRC}, .Cpu_To_Gpu)
-	defer buffer_destroy(&staging_buffer)
-
-	// Map, copy data, and unmap
-	buffer_map(&staging_buffer)
-	buffer_write(&staging_buffer, data)
-
-	// Copy from staging buffer to destination buffer
-	device := buffer.ctx.device
-	cmd := device_begin_single_time_commands(device, device.command_pool)
-	defer device_end_single_time_commands(device, device.command_pool, cmd)
-
-	copy_region := vk.BufferCopy {
-		srcOffset = 0,
-		dstOffset = offset,
-		size      = size,
-	}
-
-	vk.CmdCopyBuffer(cmd, staging_buffer.handle, buffer.handle, 1, &copy_region)
-}
-
-buffer_flush :: proc(buffer: ^Buffer, size := vk.DeviceSize(vk.WHOLE_SIZE)) {
+buffer_flush :: proc(buffer: ^Buffer, offset, size: vk.DeviceSize) {
 	if size == vk.DeviceSize(vk.WHOLE_SIZE) {
 		_ = vk_check(
-			vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, 0, buffer.size),
+			vma.flush_allocation(
+				buffer.ctx.device.allocator,
+				buffer.allocation,
+				offset,
+				buffer.size - offset,
+			),
 			"Failed to upload data to uniform buffer",
 		)
 	} else {
 		_ = vk_check(
-			vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, 0, size),
+			vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, offset, size),
 			"Failed to upload data to uniform buffer",
 		)
 	}

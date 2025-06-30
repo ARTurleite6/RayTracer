@@ -12,11 +12,12 @@ Buffer_Pool :: struct {
 	block_size:   int,
 	usage:        vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
+	alignment:    vk.DeviceSize,
 }
 
 Buffer_Block :: struct {
-	buffer:            Buffer,
-	offset, alignment: vk.DeviceSize,
+	buffer: Buffer,
+	offset: vk.DeviceSize,
 }
 
 Buffer_Allocation :: struct {
@@ -35,7 +36,7 @@ buffer_allocation_update :: proc(alloc: ^Buffer_Allocation, data: rawptr, size: 
 	buffer_map(&alloc.buffer)
 	defer buffer_unmap(&alloc.buffer)
 	buffer_write(&alloc.buffer, data, alloc.offset, size)
-	buffer_flush(&alloc.buffer, size)
+	buffer_flush(&alloc.buffer, offset = alloc.offset, size = size)
 }
 
 buffer_pool_init :: proc(
@@ -43,8 +44,11 @@ buffer_pool_init :: proc(
 	block_size: int,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage = .Cpu_To_Gpu,
+	alignment: vk.DeviceSize = 0,
 	allocator := context.allocator,
 ) {
+	// TODO: make this computated based on the type of buffer
+	pool.alignment = alignment
 	pool.blocks = make([dynamic]^Buffer_Block, allocator)
 	pool.block_size = block_size
 	pool.usage = usage
@@ -78,7 +82,7 @@ buffer_pool_request_buffer_block :: proc(
 	block: ^Buffer_Block,
 ) {
 	for b in pool.blocks {
-		if buffer_block_can_allocate(b^, size) {
+		if buffer_block_can_allocate(b^, pool.alignment, size) {
 			block = b
 			break
 		}
@@ -94,6 +98,7 @@ buffer_pool_request_buffer_block :: proc(
 			vk.DeviceSize(max(int(size), pool.block_size)),
 			pool.usage,
 			pool.memory_usage,
+			alignment = pool.alignment,
 		)
 		append(&pool.blocks, block)
 	}
@@ -102,12 +107,15 @@ buffer_pool_request_buffer_block :: proc(
 }
 
 @(require_results)
-buffer_block_allocate :: proc(block: ^Buffer_Block, size: vk.DeviceSize) -> Buffer_Allocation {
-	assert(buffer_block_can_allocate(block^, size))
+buffer_block_allocate :: proc(
+	block: ^Buffer_Block,
+	alignment, size: vk.DeviceSize,
+) -> Buffer_Allocation {
+	assert(buffer_block_can_allocate(block^, alignment, size))
 
 	aligned := vk.DeviceSize(block.offset)
-	if block.alignment > 0 {
-		aligned = vk.DeviceSize(align_up(u32(block.offset), u32(block.alignment)))
+	if alignment > 0 {
+		aligned = vk.DeviceSize(align_up(u32(block.offset), u32(alignment)))
 	}
 	block.offset = vk.DeviceSize(aligned) + size
 
@@ -115,11 +123,16 @@ buffer_block_allocate :: proc(block: ^Buffer_Block, size: vk.DeviceSize) -> Buff
 }
 
 @(require_results)
-buffer_block_can_allocate :: proc(block: Buffer_Block, size: vk.DeviceSize) -> bool {
+buffer_block_can_allocate :: proc(block: Buffer_Block, alignment, size: vk.DeviceSize) -> bool {
 	assert(size > 0, "Allocation size must be greater than 0")
 	aligned := vk.DeviceSize(block.offset)
-	if block.alignment > 0 {
-		aligned = vk.DeviceSize(align_up(u32(block.offset), u32(block.alignment)))
+	if alignment > 0 {
+		aligned = vk.DeviceSize(align_up(u32(block.offset), u32(alignment)))
 	}
 	return aligned + size <= block.buffer.size
+}
+
+@(require_results)
+buffer_pool_descriptor_info :: proc(allocation: Buffer_Allocation) -> vk.DescriptorBufferInfo {
+	return {buffer = allocation.buffer.handle, range = allocation.size, offset = allocation.offset}
 }
