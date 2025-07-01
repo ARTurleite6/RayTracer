@@ -121,7 +121,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			&gpu_mesh.vertex_buffer,
 			gpu_scene.vulkan_ctx,
 			raw_data(mesh.vertices),
-			vk.DeviceSize(size_of(Vertex) * len(mesh.vertices)),
+			u64(size_of(Vertex) * len(mesh.vertices)),
 			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 		)
 
@@ -129,7 +129,7 @@ scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
 			&gpu_mesh.index_buffer,
 			gpu_scene.vulkan_ctx,
 			raw_data(mesh.indices),
-			vk.DeviceSize(size_of(u32) * len(mesh.indices)),
+			u64(size_of(u32) * len(mesh.indices)),
 			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 		)
 

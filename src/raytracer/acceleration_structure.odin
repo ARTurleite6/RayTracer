@@ -115,7 +115,7 @@ cmd_create_tlas :: proc(
 	buffer_init(
 		scratch_buffer,
 		ctx,
-		size_info.buildScratchSize,
+		u64(size_info.buildScratchSize),
 		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
@@ -216,7 +216,7 @@ create_acceleration :: proc(
 	buffer_init(
 		&as.buffer,
 		ctx,
-		create_info.size,
+		u64(create_info.size),
 		{.ACCELERATION_STRUCTURE_STORAGE_KHR, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 	)

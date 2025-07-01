@@ -30,6 +30,8 @@ Renderer :: struct {
 	scene_raytracing:       Raytracing_Builder,
 	gpu_scene:              ^GPU_Scene,
 	descriptor_set_layouts: [Descriptor_Set_Type]Descriptor_Set_Layout,
+	camera_ubo:             Uniform_Buffer_Set,
+	output_images:          Image_Set,
 
 	// frame data
 	per_frame_data:         Frame_Data,
@@ -47,8 +49,6 @@ Renderer :: struct {
 
 Frame_Data :: struct {
 	// raytracing image
-	image:                      Image,
-	image_view:                 vk.ImageView,
 	per_pass_descriptor_set:    vk.DescriptorSet,
 
 	// gbuffer restir
@@ -63,7 +63,6 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	vulkan_context_init(&renderer.ctx, window, allocator)
 
 	init_descriptor_set_layouts(renderer)
-	init_per_frame_resources(renderer)
 
 	renderer.gpu_scene = new(GPU_Scene)
 	gpu_scene_init(renderer.gpu_scene, &renderer.descriptor_set_layouts[.Global], &renderer.ctx)
@@ -95,6 +94,19 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	}
 
 	ui_context_init(&renderer.ui_ctx, renderer.ctx.device, renderer.window^)
+
+	renderer.camera_ubo = make_uniform_buffer_set(
+		&renderer.ctx,
+		size_of(Camera_UBO),
+		MAX_FRAMES_IN_FLIGHT,
+	)
+
+	renderer.output_images = make_image_set(
+		&renderer.ctx,
+		.R32G32B32A32_SFLOAT,
+		renderer.ctx.swapchain_manager.extent,
+		MAX_FRAMES_IN_FLIGHT,
+	)
 }
 
 renderer_destroy :: proc(renderer: ^Renderer) {
@@ -124,6 +136,9 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 
 	raytracing_pass_destroy(&renderer.raytracing_pass)
 
+	uniform_buffer_set_destroy(&renderer.ctx, &renderer.camera_ubo)
+	image_set_destroy(&renderer.ctx, &renderer.output_images)
+
 	ctx_destroy(&renderer.ctx)
 
 	renderer^ = {}
@@ -132,58 +147,6 @@ renderer_destroy :: proc(renderer: ^Renderer) {
 renderer_set_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
 	renderer.scene = scene
 	renderer_rebuild_scene(renderer)
-}
-
-renderer_begin_scene :: proc(renderer: ^Renderer, scene: ^Scene) {
-	if renderer.scene != scene {
-		renderer.scene = scene
-		renderer_rebuild_scene(renderer)
-	}
-
-	scene_changes := renderer.scene.changes
-	if len(scene_changes) > 0 {
-		renderer_apply_scene_changes(renderer)
-	}
-}
-
-renderer_apply_scene_changes :: proc(renderer: ^Renderer) {
-	scene := renderer.scene
-	needs_reset_accumulation := false
-
-	for change in pop_safe(&scene.changes) {
-		switch change.type {
-		case .Full_Rebuild, .Mesh_Changed:
-			renderer_rebuild_scene(renderer)
-			clear(&scene.changes)
-			needs_reset_accumulation = true
-			return
-		case .Material_Changed:
-			gpu_scene_update_material(renderer.gpu_scene, scene, change.index)
-			needs_reset_accumulation = true
-		case .Material_Added, .Material_Removed:
-			// gpu_scene_recreate_materials_buffer(renderer.gpu_scene, scene^)
-			needs_reset_accumulation = true
-		case .Object_Transform_Changed:
-			object := &scene.objects[change.index]
-			renderer.scene_raytracing.tlas_infos[change.index].transform =
-				matrix_to_transform_matrix_khr(object.transform.model_matrix)
-
-			renderer_build_tlas(
-				renderer,
-				renderer.scene_raytracing.tlas_infos[:],
-				flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE},
-				update = true,
-			)
-			needs_reset_accumulation = true
-		case .Object_Material_Changed:
-			gpu_scene_update_object(renderer.gpu_scene, scene, change.index)
-			needs_reset_accumulation = true
-		}
-	}
-
-	if needs_reset_accumulation {
-		renderer.accumulation_frame = 0
-	}
 }
 
 renderer_rebuild_scene :: proc(renderer: ^Renderer) {
@@ -230,17 +193,15 @@ renderer_end_frame :: proc(renderer: ^Renderer) {
 
 renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 	ubo_data := Camera_UBO {
-			projection         = camera.proj,
-			view               = camera.view,
-			inverse_view       = camera.inverse_view,
-			inverse_projection = camera.inverse_proj,
-		}
+		projection         = camera.proj,
+		view               = camera.view,
+		inverse_view       = camera.inverse_view,
+		inverse_projection = camera.inverse_proj,
+	}
 
-	data := &ubo_data
-	allocation := vulkan_context_request_uniform_buffer(&renderer.ctx, size_of(Camera_UBO))
-	buffer_map(&allocation.buffer)
-
-	buffer_allocation_update(&allocation, data, size_of(Camera_UBO))
+	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
+	buffer_map(ubo_buffer)
+	buffer_write(ubo_buffer, &ubo_data)
 
 	if camera.dirty {
 		camera.dirty = false
@@ -251,6 +212,20 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 		scene_bake_storage_buffers(renderer.gpu_scene, renderer.scene^, renderer.current_cmd)
 	}
 
+	output_image := image_set_get(&renderer.output_images, renderer.ctx.current_frame)
+
+	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+	renderer.per_frame_data.per_pass_descriptor_set = vulkan_get_descriptor_set(
+		&renderer.ctx,
+		&renderer.descriptor_set_layouts[.Per_Pass],
+		{
+			binding = 0,
+			write_info = vk.DescriptorImageInfo {
+				imageView = output_image_view,
+				imageLayout = .GENERAL,
+			},
+		},
+	)
 	raytracing_pass_execute(
 		&renderer.raytracing_pass,
 		&renderer.current_cmd,
@@ -259,11 +234,11 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 			vulkan_get_descriptor_set(
 				&renderer.ctx,
 				&renderer.descriptor_set_layouts[.Per_Frame],
-				{binding = 0, write_info = buffer_allocation_descriptor_info(allocation)},
+				{binding = 0, write_info = buffer_descriptor_info(ubo_buffer^)},
 			),
 			renderer.per_frame_data.per_pass_descriptor_set,
 		},
-		renderer.per_frame_data.image,
+		output_image^,
 		renderer.accumulation_frame,
 		renderer.current_image,
 	)
@@ -301,20 +276,18 @@ renderer_create_top_level_as :: proc(renderer: ^Renderer, scene: Scene) {
 	for obj, i in scene.objects {
 		model_matrix := obj.transform.model_matrix
 		ray_inst := vk.AccelerationStructureInstanceKHR {
-				transform                              = matrix_to_transform_matrix_khr(
-					model_matrix,
+			transform                              = matrix_to_transform_matrix_khr(model_matrix),
+			instanceCustomIndex                    = u32(i),
+			mask                                   = 0xFF,
+			instanceShaderBindingTableRecordOffset = 0,
+			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
+			accelerationStructureReference         = u64(
+				get_blas_device_address(
+					renderer.scene_raytracing.as[obj.mesh_index],
+					renderer.ctx.device.logical_device.ptr,
 				),
-				instanceCustomIndex                    = u32(i),
-				mask                                   = 0xFF,
-				instanceShaderBindingTableRecordOffset = 0,
-				flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
-				accelerationStructureReference         = u64(
-					get_blas_device_address(
-						renderer.scene_raytracing.as[obj.mesh_index],
-						renderer.ctx.device.logical_device.ptr,
-					),
-				),
-			}
+			),
+		}
 
 		append(tlas, ray_inst)
 	}
@@ -341,7 +314,7 @@ renderer_build_tlas :: proc(
 		&instances_buffer,
 		&renderer.ctx,
 		raw_data(instances),
-		vk.DeviceSize(size_of(vk.AccelerationStructureInstanceKHR) * int(count_instance)),
+		u64(size_of(vk.AccelerationStructureInstanceKHR) * int(count_instance)),
 		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
 	)
 	defer buffer_destroy(&instances_buffer)
@@ -426,7 +399,7 @@ renderer_build_blas :: proc(
 	buffer_init(
 		&scratch_buffer,
 		&renderer.ctx,
-		max_scratch_size,
+		u64(max_scratch_size),
 		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED IN THE FUTURE
@@ -562,73 +535,6 @@ init_descriptor_set_layouts :: proc(renderer: ^Renderer) {
 			descriptorCount = 1,
 			descriptorType = .STORAGE_IMAGE,
 			stageFlags = {.RAYGEN_KHR},
-		},
-	)
-}
-
-@(private = "file")
-init_per_frame_resources :: proc(renderer: ^Renderer) {
-	// renderer.per_frame_data.per_frame_uniform_buffer = vulkan_context_request_uniform_buffer(
-	// 	&renderer.ctx,
-	// 	size_of(Camera_UBO),
-	// 	{.UNIFORM_BUFFER},
-	// 	.Gpu_To_Cpu,
-	// )
-	// buffer_map(renderer.per_frame_data.per_frame_uniform_buffer)
-
-	// renderer.per_frame_data.per_frame_descriptor_set = vulkan_get_descriptor_set(
-	// 	&renderer.ctx,
-	// 	&renderer.descriptor_set_layouts[.Per_Frame],
-	// 	{
-	// 		binding = 0,
-	// 		write_info = buffer_descriptor_info(renderer.per_frame_data.per_frame_uniform_buffer^),
-	// 	},
-	// )
-
-
-	image_init(
-		&renderer.per_frame_data.image,
-		&renderer.ctx,
-		.R32G32B32A32_SFLOAT,
-		renderer.ctx.swapchain_manager.extent,
-	)
-	image_view_init(
-		&renderer.per_frame_data.image_view,
-		renderer.per_frame_data.image,
-		&renderer.ctx,
-	)
-
-	{
-		cmd := device_begin_single_time_commands(
-			renderer.ctx.device,
-			renderer.ctx.device.command_pool,
-		)
-		defer device_end_single_time_commands(
-			renderer.ctx.device,
-			renderer.ctx.device.command_pool,
-			cmd,
-		)
-		image_transition_layout_stage_access(
-			cmd,
-			renderer.per_frame_data.image.handle,
-			.UNDEFINED,
-			.GENERAL,
-			{.ALL_COMMANDS},
-			{.ALL_COMMANDS},
-			{},
-			{},
-		)
-	}
-
-	renderer.per_frame_data.per_pass_descriptor_set = vulkan_get_descriptor_set(
-		&renderer.ctx,
-		&renderer.descriptor_set_layouts[.Per_Pass],
-		{
-			binding = 0,
-			write_info = vk.DescriptorImageInfo {
-				imageView = renderer.per_frame_data.image_view,
-				imageLayout = .GENERAL,
-			},
 		},
 	)
 }

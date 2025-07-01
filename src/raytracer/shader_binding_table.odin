@@ -60,7 +60,7 @@ shader_binding_table_build :: proc(
 	buffer_init(
 		buffer,
 		ctx,
-		vk.DeviceSize(sbt_size),
+		sbt_size,
 		sbt_buffer_usage_flags,
 		sbt_memory_usage,
 		alignment = vk.DeviceSize(base_alignment),

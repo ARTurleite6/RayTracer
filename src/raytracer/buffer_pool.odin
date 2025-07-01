@@ -95,7 +95,7 @@ buffer_pool_request_buffer_block :: proc(
 		buffer_init(
 			&block.buffer,
 			ctx,
-			vk.DeviceSize(max(int(size), pool.block_size)),
+			u64(max(int(size), pool.block_size)),
 			pool.usage,
 			pool.memory_usage,
 			alignment = pool.alignment,

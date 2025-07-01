@@ -28,21 +28,21 @@ Buffer_Error :: enum {
 buffer_init :: proc(
 	buffer: ^Buffer,
 	ctx: ^Vulkan_Context,
-	size: vk.DeviceSize,
+	size: u64,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
 	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
 	assert(size > 0, "A buffer must have a size greater than 0")
 	buffer.ctx = ctx
-	buffer.size = size
+	buffer.size = vk.DeviceSize(size)
 	buffer.usage = usage
 
 	device := buffer.ctx.device
 
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
-		size        = size,
+		size        = vk.DeviceSize(size),
 		usage       = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS},
 		sharingMode = .EXCLUSIVE,
 	}
@@ -91,7 +91,7 @@ buffer_init_with_staging_buffer :: proc(
 	buffer: ^Buffer,
 	ctx: ^Vulkan_Context,
 	data: rawptr,
-	size: vk.DeviceSize,
+	size: u64,
 	usage: vk.BufferUsageFlags,
 	alignment := vk.DeviceSize(0),
 	memory_usage: vma.Memory_Usage = .Gpu_Only,
@@ -109,9 +109,9 @@ buffer_init_with_staging_buffer :: proc(
 		alignment = alignment,
 	) or_return
 
-	staging_buffer := vulkan_context_request_staging_buffer(ctx, size)
+	staging_buffer := vulkan_context_request_staging_buffer(ctx, vk.DeviceSize(size))
 
-	buffer_allocation_update(&staging_buffer, data, size)
+	buffer_allocation_update(&staging_buffer, data, vk.DeviceSize(size))
 
 	device_copy_buffer(
 		device,
@@ -154,7 +154,16 @@ buffer_unmap :: proc(buffer: ^Buffer) {
 	vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 }
 
-buffer_write :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {
+buffer_write :: proc {
+	buffer_write_poly,
+	buffer_write_rawptr,
+}
+
+buffer_write_poly :: proc(buffer: ^Buffer, data: ^$T) {
+	buffer_write_rawptr(buffer, data, 0, size_of(T))
+}
+
+buffer_write_rawptr :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {
 	assert(buffer.mapped_data != nil)
 	dst_ptr := rawptr(uintptr(buffer.mapped_data) + uintptr(offset))
 
