@@ -36,26 +36,30 @@ Shader :: struct {
 
 Program :: struct {
 	pipeline_layout: vk.PipelineLayout,
+	shaders:         []Shader,
 }
 
-program_init :: proc(
+@(require_results)
+make_program :: proc(
 	ctx: ^Vulkan_Context,
 	shaders: []string,
 	allocator := context.allocator,
-) -> Program {
-	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
-	shader_modules := make([]Shader, len(shaders), context.temp_allocator)
-
+) -> (
+	prog: Program,
+) {
+	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD(allocator == context.temp_allocator)
+	context.allocator = allocator
+	prog.shaders = make([]Shader, len(shaders))
 	for shader_path, i in shaders {
-		shader_modules[i] = vulkan_get_shader(ctx, shader_path, context.temp_allocator)
+		prog.shaders[i] = vulkan_get_shader(ctx, shader_path)
 	}
 
 	layouts := make([]Resource_Layout, len(shaders), context.temp_allocator)
-	for shader, i in shader_modules {
-		layouts[i] = shader_get_resource_layout(shader)
+	for shader, i in prog.shaders {
+		layouts[i] = shader_get_resource_layout(shader, context.temp_allocator)
 	}
 
-	merged_layout := merge_resource_layouts(layouts, allocator)
+	merged_layout := merge_resource_layouts(layouts, context.temp_allocator)
 
 	layout_sets := make([]vk.DescriptorSetLayout, len(merged_layout.sets), context.temp_allocator)
 
@@ -64,13 +68,17 @@ program_init :: proc(
 		layout_sets[set_info.set] = layout.handle
 	}
 
-	pipeline_layout := vulkan_get_pipeline_layout(
+	prog.pipeline_layout = vulkan_get_pipeline_layout(
 		ctx,
 		layout_sets[:],
 		merged_layout.push_ranges[:],
 	)
 
-	return {pipeline_layout = pipeline_layout}
+	return prog
+}
+
+program_destroy :: proc(prog: ^Program) {
+	delete(prog.shaders)
 }
 
 shader_init :: proc(
@@ -128,6 +136,8 @@ shader_get_resource_layout :: proc(
 	result := spirv.CreateShaderModule(len(shader.code), raw_data(shader.code), &module)
 	assert(result == .SUCCESS)
 	defer spirv.DestroyShaderModule(&module)
+
+	context.allocator = allocator
 
 	{
 		count: u32
@@ -202,7 +212,7 @@ merge_resource_layouts :: proc(
 ) -> (
 	merged_layout: Resource_Layout,
 ) {
-
+	context.allocator = allocator
 	set_map := make(map[u32]Descriptor_Set_Layout_Info, context.temp_allocator)
 
 	for layout in layouts {

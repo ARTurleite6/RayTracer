@@ -58,6 +58,7 @@ buffer_pool_init :: proc(
 buffer_pool_destroy :: proc(pool: ^Buffer_Pool) {
 	for b in pool.blocks {
 		buffer_destroy(&b.buffer)
+		free(b)
 	}
 	delete(pool.blocks)
 }

@@ -6,7 +6,7 @@ import vk "vendor:vulkan"
 when ODIN_OS == .Linux {
 	foreign import spirv "SPIRV-Reflect/build/libspirv-reflect-static.lib"
 } else when ODIN_OS == .Windows {
-	foreign import spirv "SPIRV-Reflect/build/Release/spirv-reflect-static.lib"
+	foreign import spirv "SPIRV-Reflect/build/spirv-reflect-static.lib"
 }
 
 
@@ -1236,10 +1236,9 @@ ShaderModule :: struct {
 foreign spirv {
 	CreateShaderModule :: proc(size: c.size_t, p_code: rawptr, p_module: ^ShaderModule) -> Result ---
 	DestroyShaderModule :: proc(p_module: ^ShaderModule) ---
-
-
 	EnumeratePushConstantBlocks :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_blocks: [^]^BlockVariable) -> Result ---
 	EnumerateDescriptorSets :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_sets: [^]^DescriptorSet) -> Result ---
-
-	EnumerateInputVariables :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_variables: [^]^InterfaceVariable) ---
+	EnumerateInputVariables :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_variables: [^]^InterfaceVariable) -> Result ---
+	EnumerateDescriptorBindings :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_bindings: [^]^DescriptorBinding) -> Result ---
+	EnumerateOutputVariables :: proc(#by_ptr p_module: ShaderModule, p_count: ^u32, pp_variables: [^]^InterfaceVariable) -> Result ---
 }

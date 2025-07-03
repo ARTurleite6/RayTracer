@@ -1,0 +1,17 @@
+#version 460
+
+#extension GL_EXT_ray_tracing : require
+
+// Output image
+layout(binding = 0, set = 0, rgba8) uniform image2D outputImage;
+
+void main() {
+    // Get current pixel coordinates
+    const ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+
+    // Simply output red color to every pixel
+    vec4 redColor = vec4(1.0, 0.0, 0.0, 1.0);
+
+    // Write to output image
+    imageStore(outputImage, pixel, redColor);
+}

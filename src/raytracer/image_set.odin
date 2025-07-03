@@ -41,17 +41,20 @@ make_image_set :: proc(
 	return is
 }
 
+image_set_destroy :: proc(ctx: ^Vulkan_Context, is: ^Image_Set, allocator := context.allocator) {
+	for &img, idx in is.images {
+		image_destroy(&img, ctx^)
+		image_view_destroy(is.image_views[idx], ctx^)
+	}
+
+	delete(is.images, allocator)
+	delete(is.image_views, allocator)
+}
+
 image_set_get :: proc(is: ^Image_Set, frame: int) -> ^Image {
 	return &is.images[frame]
 }
 
 image_set_get_view :: proc(is: Image_Set, frame: int) -> vk.ImageView {
 	return is.image_views[frame]
-}
-
-image_set_destroy :: proc(ctx: ^Vulkan_Context, is: ^Image_Set, allocator := context.allocator) {
-	for &img, idx in is.images {
-		image_destroy(&img, ctx^)
-		image_view_destroy(is.image_views[idx], ctx^)
-	}
 }

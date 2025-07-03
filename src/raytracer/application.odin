@@ -2,7 +2,7 @@ package raytracer
 
 import "core:c"
 import "core:log"
-import imgui "external:odin-imgui"
+// import imgui "external:odin-imgui"
 import "vendor:glfw"
 _ :: log
 
@@ -17,7 +17,7 @@ Application :: struct {
 	window:                      ^Window,
 	scene:                       Scene,
 	camera_controller:           Camera_Controller,
-	renderer:                    Renderer,
+	renderer:                    Raytracing_Renderer,
 	delta_time, last_frame_time: f64,
 	running:                     bool,
 
@@ -42,16 +42,16 @@ application_init :: proc(
 
 
 	{ 	// create rendering stuff
-		renderer_init(&app.renderer, app.window)
+		raytracing_renderer_init(&app.renderer, app.window)
 		// TODO: change this
 		app.scene = create_scene()
-		renderer_set_scene(&app.renderer, &app.scene)
+		// renderer_set_scene(&app.renderer, &app.scene)
 	}
 	return
 }
 
 application_destroy :: proc(app: ^Application) {
-	renderer_destroy(&app.renderer)
+	raytracing_renderer_destroy(&app.renderer)
 	window_destroy(app.window)
 	free(app.window)
 	scene_destroy(&app.scene)
@@ -72,24 +72,27 @@ application_update :: proc(app: ^Application) {
 	app.delta_time = current_time - app.last_frame_time
 	app.last_frame_time = current_time
 
-	if io := imgui.GetIO(); !io.WantCaptureKeyboard && is_key_pressed(.Q) {
-		app.running = false
-	}
+	// if io := imgui.GetIO(); !io.WantCaptureKeyboard && is_key_pressed(.Q) {
+	// 	app.running = false
+	// }
 
 	dt := f32(app.delta_time)
 
 	camera_controller_on_update(&app.camera_controller, dt)
 
-	renderer_update(&app.renderer)
+	// renderer_update(&app.renderer)
 }
 
 application_render :: proc(app: ^Application) {
-	renderer_begin_frame(&app.renderer)
-
-	renderer_render(&app.renderer, &app.camera_controller.camera)
-	renderer_render_ui(&app.renderer)
-
-	renderer_end_frame(&app.renderer)
+	// raytracing_renderer_begin_frame(&app.renderer)
+	// defer raytracing_renderer_end_frame(&app.renderer)
+	// raytracing_renderer_render_scene(&app.renderer)
+	// renderer_begin_frame(&app.renderer)
+	//
+	// renderer_render(&app.renderer, &app.camera_controller.camera)
+	// renderer_render_ui(&app.renderer)
+	//
+	// renderer_end_frame(&app.renderer)
 }
 
 application_run :: proc(app: ^Application) {
@@ -109,8 +112,8 @@ application_on_event :: proc(handler: ^Event_Handler, event: Event) {
 }
 
 application_on_resize :: proc(user_data: rawptr, event: Resize_Event) -> bool {
-	app := (^Application)(user_data)
-	renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
+	// app := (^Application)(user_data)
+	// renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
 	return true
 }
 

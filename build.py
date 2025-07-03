@@ -25,15 +25,15 @@ shaders = [
     {
         "src": "shaders/shadow.rmiss",
         "out": "shaders/shadow.spv",
+    },
+    {
+        "src": "shaders/restir.rgen",
+        "out": "shaders/restir_rgen.spv",
+    },
+    {
+        "src": "shaders/restir.rmiss",
+        "out": "shaders/restir_rmiss.spv",
     }
-    # {
-    #     "src": "shaders/restir.rgen",
-    #     "out": "shaders/restir_rgen.spv",
-    # },
-    # {
-    #     "src": "shaders/restir.rmiss",
-    #     "out": "shaders/restir_rmiss.spv",
-    # },
     # {
     #     "src": "shaders/restir.rchit",
     #     "out": "shaders/restir_rchit.spv",

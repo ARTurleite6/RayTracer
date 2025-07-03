@@ -2,6 +2,19 @@ package raytracer
 
 import vk "vendor:vulkan"
 
+Pipeline_Layout :: struct {
+	shader_modules:         []^Shader,
+	descriptor_set_layouts: []^Descriptor_Set_Layout,
+}
+
+// make_pipeline_layout :: proc(
+// 	ctx: ^Vulkan_Context,
+// 	shaders: []^Shader,
+// ) -> (
+// 	layout: Pipeline_Layout,
+// ) {
+// }
+
 pipeline_layout_init :: proc(
 	ctx: ^Vulkan_Context,
 	descriptor_set_layouts: []vk.DescriptorSetLayout,

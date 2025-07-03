@@ -68,14 +68,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 	gpu_scene_init(renderer.gpu_scene, &renderer.descriptor_set_layouts[.Global], &renderer.ctx)
 
 	{
-		// device := vulkan_get_device_handle(&renderer.ctx)
-		shaders: [4]Shader
-		shaders[0] = vulkan_get_shader(&renderer.ctx, "shaders/rgen.spv")
-		shaders[1] = vulkan_get_shader(&renderer.ctx, "shaders/rmiss.spv")
-		shaders[2] = vulkan_get_shader(&renderer.ctx, "shaders/shadow.spv")
-		shaders[3] = vulkan_get_shader(&renderer.ctx, "shaders/rchit.spv")
-
-		program_init(
+		program := make_program(
 			&renderer.ctx,
 			{"shaders/rgen.spv", "shaders/rmiss.spv", "shaders/shadow.spv", "shaders/rchit.spv"},
 			allocator,
@@ -84,7 +77,7 @@ renderer_init :: proc(renderer: ^Renderer, window: ^Window, allocator := context
 		raytracing_pass_init(
 			&renderer.raytracing_pass,
 			&renderer.ctx,
-			shaders[:],
+			program.shaders[:],
 			{
 				renderer.descriptor_set_layouts[.Global].handle,
 				renderer.descriptor_set_layouts[.Per_Frame].handle,
