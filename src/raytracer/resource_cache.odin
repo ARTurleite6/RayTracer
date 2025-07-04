@@ -37,6 +37,14 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 	}
 	delete(cache.shaders)
 }
+//
+// resource_cache_request_descriptor_set_layout :: proc(
+// 	resource_cache: ^Resource_Cache,
+// 	ctx: ^Vulkan_Context,
+// 	shader_resources: []Shader_Resource,
+// ) -> ^Descriptor_Set_Layout {
+//
+// }
 
 vulkan_get_descriptor_set_layout :: proc(
 	ctx: ^Vulkan_Context,

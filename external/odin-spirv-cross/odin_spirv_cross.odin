@@ -1075,8 +1075,8 @@ foreign spirv_cross {
 	compiler_get_active_interface_variables :: proc(compiler: compiler, set: ^set) -> result ---
 	compiler_set_enabled_interface_variables :: proc(compiler: compiler, set: set) -> result ---
 	compiler_create_shader_resources :: proc(compiler: compiler, resources: ^resources) -> result ---
-	resources_get_resource_list_for_type :: proc(compiler: resources, type: resource_type, resource_list: [^]^reflected_resource, size: ^c.size_t) -> result ---
-	resources_get_builtin_resource_list_for_type :: proc(resources: resources, type: resource_type, resource_list: [^]^reflected_builtin_resource, resource_size: ^c.size_t) -> result ---
+	resources_get_resource_list_for_type :: proc(resources: resources, type: resource_type, resource_list: ^[^]reflected_resource, size: ^c.size_t) -> result ---
+	resources_get_builtin_resource_list_for_type :: proc(resources: resources, type: resource_type, resource_list: ^[^]reflected_builtin_resource, resource_size: ^c.size_t) -> result ---
 
 	// Decorations
 

@@ -74,7 +74,7 @@ raytracing_renderer_init :: proc(
 
 	{
 		shader_module: Shader_Module
-		shader_module_init(&shader_module, {.RAYGEN_KHR}, "shaders/rgen.spv")
+		shader_module_init(&shader_module, {.RAYGEN_KHR}, "shaders/restir_rgen.spv")
 		program := make_program(
 			&renderer.ctx,
 			{"shaders/restir_rgen.spv", "shaders/restir_rmiss.spv"},

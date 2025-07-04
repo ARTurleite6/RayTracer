@@ -5,6 +5,11 @@
 // Output image
 layout(binding = 0, set = 0, rgba8) uniform image2D outputImage;
 
+layout(push_constant) uniform Push {
+    vec3 clear_color;
+    uint frame_number;
+} push;
+
 void main() {
     // Get current pixel coordinates
     const ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
