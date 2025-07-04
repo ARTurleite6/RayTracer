@@ -15,7 +15,7 @@ Raytracing_Renderer :: struct {
 
 	// resources
 	gbuffers:            GBuffers,
-	raytracing_pipeline: Raytracing_Pipeline,
+	raytracing_pipeline: Raytracing_Pipeline2,
 }
 
 GBuffers :: struct {
@@ -73,19 +73,17 @@ raytracing_renderer_init :: proc(
 	}
 
 	{
-		shader_module: Shader_Module
-		shader_module_init(&shader_module, {.RAYGEN_KHR}, "shaders/restir_rgen.spv")
-		program := make_program(
+		shaders: [2]Shader_Module
+		shader_module_init(&shaders[0], {.RAYGEN_KHR}, "shaders/restir_rgen.spv", "main")
+		shader_module_init(&shaders[1], {.MISS_KHR}, "shaders/restir_rmiss.spv", "main")
+		layout: Pipeline_Layout
+		pipeline_layout_init2(&layout, &renderer.ctx, {&shaders[0], &shaders[1]})
+
+		raytracing_pipeline_init(
+			&renderer.raytracing_pipeline,
 			&renderer.ctx,
-			{"shaders/restir_rgen.spv", "shaders/restir_rmiss.spv"},
+			{layout = &layout, max_ray_recursion = 1},
 		)
-
-		rt_pipeline_init(&renderer.raytracing_pipeline, &renderer.ctx)
-		for s, i in program.shaders {
-			rt_pipeline_add_shader(&renderer.raytracing_pipeline, s, i)
-		}
-
-		rt_pipeline_build(&renderer.raytracing_pipeline, &renderer.ctx, 1)
 	}
 }
 
@@ -140,7 +138,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
 	vk.CmdBindDescriptorSets(
 		cmd.buffer,
 		.RAY_TRACING_KHR,
-		renderer.raytracing_pipeline.layout,
+		renderer.raytracing_pipeline.state.layout.handle,
 		0,
 		1,
 		&set,
@@ -162,10 +160,10 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
 	extent := renderer.ctx.swapchain_manager.extent
 	vk.CmdTraceRaysKHR(
 		cmd.buffer,
-		&renderer.raytracing_pipeline.shader_binding_table.regions[.Ray_Gen],
-		&renderer.raytracing_pipeline.shader_binding_table.regions[.Miss],
-		&renderer.raytracing_pipeline.shader_binding_table.regions[.Hit],
-		&renderer.raytracing_pipeline.shader_binding_table.regions[.Callable],
+		&renderer.raytracing_pipeline.sbt.regions[.Ray_Gen],
+		&renderer.raytracing_pipeline.sbt.regions[.Miss],
+		&renderer.raytracing_pipeline.sbt.regions[.Hit],
+		&renderer.raytracing_pipeline.sbt.regions[.Callable],
 		extent.width,
 		extent.height,
 		1,

@@ -13,7 +13,6 @@ Shader_Region :: enum {
 	Callable,
 }
 
-
 Shader_Binding_Table :: struct {
 	buffer:       Buffer,
 	regions:      [Shader_Region]vk.StridedDeviceAddressRegionKHR,

@@ -22,6 +22,7 @@ descriptor_set_layout2_init :: proc(
 ) -> (
 	err: vk.Result,
 ) {
+
 	for res in resource_set {
 		if res.type == .Input ||
 		   res.type == .Output ||

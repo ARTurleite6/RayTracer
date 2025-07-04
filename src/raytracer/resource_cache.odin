@@ -7,11 +7,12 @@ import "core:mem"
 import vk "vendor:vulkan"
 
 Resource_Cache :: struct {
-	descriptor_set_layots: map[u32]Descriptor_Set_Layout,
-	pipeline_layouts:      map[u32]vk.PipelineLayout,
-	descriptor_sets:       map[u32]vk.DescriptorSet,
-	raytracing_pipelines:  map[u32]vk.Pipeline,
-	shaders:               map[u32]Shader,
+	descriptor_set_layouts2: map[u32]^Descriptor_Set_Layout2,
+	descriptor_set_layots:   map[u32]Descriptor_Set_Layout,
+	pipeline_layouts:        map[u32]vk.PipelineLayout,
+	descriptor_sets:         map[u32]vk.DescriptorSet,
+	raytracing_pipelines:    map[u32]vk.Pipeline,
+	shaders:                 map[u32]Shader,
 }
 
 resource_cache_init :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
@@ -37,14 +38,52 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 	}
 	delete(cache.shaders)
 }
-//
-// resource_cache_request_descriptor_set_layout :: proc(
-// 	resource_cache: ^Resource_Cache,
-// 	ctx: ^Vulkan_Context,
-// 	shader_resources: []Shader_Resource,
-// ) -> ^Descriptor_Set_Layout {
-//
-// }
+
+resource_cache_request_descriptor_set_layout :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	set_index: u32,
+	shaders: []^Shader_Module,
+	set_resources: []Shader_Resource,
+) -> (
+	layout: ^Descriptor_Set_Layout2,
+	err: vk.Result,
+) {
+	hasher, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(hasher, context.temp_allocator)
+
+	for &resource in set_resources {
+		if resource.type == .Input ||
+		   resource.type == .Output ||
+		   resource.type == .Push_Constant ||
+		   resource.type == .Specialization_Constant {
+			continue
+		}
+
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(resource.set))
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(resource.binding))
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(resource.type))
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(resource.mode))
+	}
+
+	for shader in shaders {
+		xxhash.XXH32_update(hasher, mem.any_to_bytes(shader.id))
+	}
+
+	xxhash.XXH32_update(hasher, mem.any_to_bytes(set_index))
+
+	hash := xxhash.XXH32_digest(hasher)
+
+	if value, ok := resource_cache.descriptor_set_layouts2[hash]; ok {
+		return value, nil
+	}
+
+	layout = new(Descriptor_Set_Layout2)
+	descriptor_set_layout2_init(layout, ctx, set_index, shaders, set_resources) or_return
+	resource_cache.descriptor_set_layouts2[hash] = layout
+
+	return layout, nil
+}
 
 vulkan_get_descriptor_set_layout :: proc(
 	ctx: ^Vulkan_Context,
@@ -70,8 +109,6 @@ vulkan_get_descriptor_set_layout :: proc(
 	}
 
 	cache.descriptor_set_layots[value] = create_descriptor_set_layout(ctx, ..bindings)
-
-	log.debugf("Creating descriptor set layout with hash: %v, bindings: %v", value, bindings)
 
 	return cache.descriptor_set_layots[value]
 }
@@ -149,13 +186,6 @@ vulkan_get_pipeline_layout :: proc(
 
 	cache.pipeline_layouts[value] = pipeline_layout_init(
 		ctx,
-		descriptor_set_layouts,
-		push_constant_ranges,
-	)
-
-	log.debugf(
-		"Creating pipeline layout with hash: %v, with descriptors: %v, and push constants = %v",
-		value,
 		descriptor_set_layouts,
 		push_constant_ranges,
 	)

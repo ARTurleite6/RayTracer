@@ -1,6 +1,7 @@
 package raytracer
 
-import "core:log"
+import "core:hash/xxhash"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -9,6 +10,7 @@ import spvc "external:odin-spirv-cross"
 import vk "vendor:vulkan"
 
 Shader_Module :: struct {
+	id:           u32,
 	stage:        vk.ShaderStageFlags,
 	entry_point:  string,
 	compiled_src: []u32,
@@ -65,15 +67,23 @@ shader_module_init :: proc(
 	module: ^Shader_Module,
 	stage: vk.ShaderStageFlags,
 	filename: string,
+	entry_point: string,
 	allocator := context.allocator,
 ) -> (
 	err: Shader_Module_Error,
 ) {
-	module.stage = stage
 	data := os.read_entire_file_or_err(filename, allocator) or_return
 	content := slice.reinterpret([]u32, data)
+
+	module.stage = stage
 	module.compiled_src = content
 	module.resources = reflect_shader_resources(module.compiled_src, stage, allocator) or_return
+	module.entry_point = entry_point
+
+	hasher, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(hasher, context.temp_allocator)
+	xxhash.XXH32_update(hasher, mem.any_to_bytes(content))
+	module.id = xxhash.XXH32_digest(hasher)
 	return nil
 }
 
@@ -159,7 +169,6 @@ parse_shader_resources :: proc(
 	read_sampler_shader_resources(compiler, shader_resources, stage, resources) or_return
 	read_uniform_buffers_shader_resources(compiler, shader_resources, stage, resources) or_return
 	read_buffer_storage_shader_resources(compiler, shader_resources, stage, resources) or_return
-	log.debugf("RESOURCES = %v", resources)
 
 	return nil
 }
