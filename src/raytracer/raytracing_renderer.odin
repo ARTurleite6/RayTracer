@@ -9,6 +9,7 @@ import vk "vendor:vulkan"
 Raytracing_Renderer :: struct {
 	ctx:                 Vulkan_Context,
 	scene:               ^Scene,
+	gpu_scene:           GPU_Scene2,
 	camera_ubo:          Uniform_Buffer_Set,
 	output_images:       Image_Set,
 	window:              ^Window,
@@ -20,6 +21,10 @@ Raytracing_Renderer :: struct {
 	// resources
 	gbuffers:            GBuffers,
 	raytracing_pipeline: Raytracing_Pipeline2,
+
+	// TODO: remove this in the future
+	shaders:             [4]Shader_Module,
+	pipeline_layout:     Pipeline_Layout,
 }
 
 GBuffers :: struct {
@@ -77,47 +82,26 @@ raytracing_renderer_init :: proc(
 	}
 
 	{
-		shaders: [4]Shader_Module
-		shader_module_init(&shaders[0], {.RAYGEN_KHR}, "shaders/rgen.spv", "main")
-		shader_module_init(&shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
-		shader_module_init(&shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
-		shader_module_init(&shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
-		layout: Pipeline_Layout
+		shader_module_init(&renderer.shaders[0], {.RAYGEN_KHR}, "shaders/rgen.spv", "main")
+		shader_module_init(&renderer.shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
+		shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
+		shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 		pipeline_layout_init2(
-			&layout,
+			&renderer.pipeline_layout,
 			&renderer.ctx,
-			{&shaders[0], &shaders[1], &shaders[2], &shaders[3]},
+			{
+				&renderer.shaders[0],
+				&renderer.shaders[1],
+				&renderer.shaders[2],
+				&renderer.shaders[3],
+			},
 		)
 
 		raytracing_pipeline_init(
 			&renderer.raytracing_pipeline,
 			&renderer.ctx,
-			{layout = &layout, max_ray_recursion = 2},
+			{layout = &renderer.pipeline_layout, max_ray_recursion = 2},
 		)
-
-		{ 	// test descriptor sets
-			descriptor_set, _ := resource_cache_request_descriptor_set2(
-				&renderer.ctx.cache,
-				&renderer.ctx,
-				layout.descriptor_set_layouts[2],
-				{inner = nil},
-				{
-					inner = {
-						0 = {
-							0 = vk.DescriptorImageInfo {
-								imageView = image_set_get_view(
-									renderer.output_images,
-									renderer.ctx.current_frame,
-								),
-								imageLayout = .GENERAL,
-							},
-						},
-					},
-				},
-			)
-			descriptor_set_update2(descriptor_set, &renderer.ctx)
-			descriptor_set_update2(descriptor_set, &renderer.ctx)
-		}
 	}
 }
 
@@ -140,9 +124,19 @@ raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 	renderer^ = {}
 }
 
+raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Scene) {
+	renderer.scene = scene
+	if renderer.scene != nil {
+		gpu_scene2_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+	}
+}
+
 raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 	renderer.current_image_index, _ = ctx_begin_frame(&renderer.ctx)
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
+
+	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+	command_buffer_bind_image(&renderer.current_cmd, output_image_view, 0, 2, 0, 0)
 }
 
 raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
@@ -272,7 +266,18 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
 }
 
 raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
+	ctx_transition_swapchain_image(
+		renderer.ctx,
+		renderer.current_cmd,
+		.UNDEFINED,
+		.PRESENT_SRC_KHR,
+		{.TRANSFER},
+		{.BOTTOM_OF_PIPE},
+		{.TRANSFER_WRITE},
+		{},
+	)
 	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
-	renderer.current_cmd = {}
+
+	command_buffer_destroy(&renderer.current_cmd)
 }

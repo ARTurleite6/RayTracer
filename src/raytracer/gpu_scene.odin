@@ -5,6 +5,138 @@ import "core:log"
 import vk "vendor:vulkan"
 _ :: log
 
+GPU_Scene2 :: struct {
+	meshes_data:                                     []Mesh_GPU_Data,
+	objects_buffer, lights_buffer, materials_buffer: Storage_Buffer_Set,
+}
+
+gpu_scene2_init :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene2_bake(gpu_scene, ctx, scene)
+}
+
+gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene.meshes_data = make([]Mesh_GPU_Data, len(scene.meshes))
+
+	for mesh, i in scene.meshes {
+		vertex_buffer, index_buffer: Buffer
+		buffer_init_with_staging_buffer(
+			&vertex_buffer,
+			ctx,
+			raw_data(mesh.vertices),
+			u64(size_of(Vertex) * len(mesh.vertices)),
+			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+		)
+
+		buffer_init_with_staging_buffer(
+			&index_buffer,
+			ctx,
+			raw_data(mesh.indices),
+			u64(size_of(u32) * len(mesh.indices)),
+			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+		)
+
+		gpu_scene.meshes_data[i] = Mesh_GPU_Data {
+			vertex_buffer = vertex_buffer,
+			index_buffer  = index_buffer,
+			num_vertices  = len(mesh.vertices),
+			num_indices   = len(mesh.indices),
+		}
+	}
+
+	gpu_scene2_compile_objects_data(gpu_scene, ctx, scene)
+	gpu_scene2_compile_materials(gpu_scene, ctx, scene)
+}
+
+gpu_scene2_compile_objects_data :: proc(
+	gpu_scene: ^GPU_Scene2,
+	ctx: ^Vulkan_Context,
+	scene: Scene,
+) {
+	objects_data := make([]Object_GPU_Data, len(scene.objects), context.temp_allocator)
+	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
+
+	for object, i in scene.objects {
+		mesh := gpu_scene.meshes_data[object.mesh_index]
+		objects_data[i] = Object_GPU_Data {
+			vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
+			index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
+			material_index        = u32(object.material_index),
+			mesh_index            = u32(object.mesh_index),
+		}
+
+		if scene.materials[object.material_index].emission_power > 0 {
+			append(
+				&lights_data,
+				Light_GPU_Data {
+					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
+					object_index = u32(i),
+					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
+				},
+			)
+		}
+	}
+
+	gpu_scene.objects_buffer = make_storage_buffer_set(
+		ctx,
+		u64(size_of(Object_GPU_Data) * len(objects_data)),
+		MAX_FRAMES_IN_FLIGHT,
+	)
+	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		buffer := storage_buffer_set_get(&gpu_scene.objects_buffer, f)
+		buffer_write_rawptr(
+			buffer,
+			raw_data(objects_data),
+			0,
+			vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
+		)
+	}
+
+	gpu_scene.lights_buffer = make_storage_buffer_set(
+		ctx,
+		u64(size_of(Light_GPU_Data) * len(lights_data)),
+		MAX_FRAMES_IN_FLIGHT,
+	)
+	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		buffer := storage_buffer_set_get(&gpu_scene.lights_buffer, f)
+		buffer_write_rawptr(
+			buffer,
+			raw_data(lights_data),
+			0,
+			vk.DeviceSize(size_of(Light_GPU_Data) * len(lights_data)),
+		)
+	}
+}
+
+gpu_scene2_compile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	materials_data := make([]Material_Data, len(scene.materials), context.temp_allocator)
+	for material, i in scene.materials {
+		materials_data[i] = {
+			albedo         = material.albedo,
+			emission_color = material.emission_color,
+			emission_power = material.emission_power,
+			roughness      = material.roughness,
+			metallic       = material.metallic,
+			transmission   = material.transmission,
+			ior            = material.ior,
+		}
+	}
+
+	gpu_scene.materials_buffer = make_storage_buffer_set(
+		ctx,
+		u64(size_of(Material_Data) * len(materials_data)),
+		MAX_FRAMES_IN_FLIGHT,
+	)
+	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		buffer := storage_buffer_set_get(&gpu_scene.materials_buffer, f)
+		buffer_write_rawptr(
+			buffer,
+			raw_data(materials_data),
+			0,
+			vk.DeviceSize(size_of(Material_Data) * len(materials_data)),
+		)
+	}
+}
+
 GPU_Scene :: struct {
 	meshes_data:                                     []Mesh_GPU_Data,
 	objects_buffer, lights_buffer, materials_buffer: Buffer_Allocation,
