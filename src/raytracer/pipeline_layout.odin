@@ -1,6 +1,10 @@
 package raytracer
 
+import "core:log"
+_ :: log
+
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 
 import vk "vendor:vulkan"
@@ -33,8 +37,7 @@ pipeline_layout_init2 :: proc(
 			} else {
 				key = resource.name
 			}
-
-			if res, ok := layout.shader_resources[key]; ok {
+			if res, ok := &layout.shader_resources[key]; ok {
 				res.stages |= resource.stages
 			} else {
 				layout.shader_resources[strings.clone(key, allocator)] = resource
@@ -43,18 +46,12 @@ pipeline_layout_init2 :: proc(
 	}
 
 	for _, res in layout.shader_resources {
-		if res.type == .Input ||
-		   res.type == .Output ||
-		   res.type == .Push_Constant ||
-		   res.type == .Specialization_Constant {
-			continue
-		}
 		_, value_ptr, _, _ := map_entry(&layout.shader_sets, res.set)
 		append(value_ptr, res)
 	}
 
 	for shader_set, set_resources in layout.shader_sets {
-		descriptor_set_layout, _ := resource_cache_request_descriptor_set_layout(
+		descriptor_set_layout, _ := resource_cache_request_descriptor_set_layout2(
 			&ctx.cache,
 			ctx,
 			shader_set,
@@ -64,6 +61,10 @@ pipeline_layout_init2 :: proc(
 
 		append_elem(&layout.descriptor_set_layouts, descriptor_set_layout)
 	}
+	// sort descriptor set layouts (I think odin's map foreach does not garantee order)
+	slice.sort_by_key(layout.descriptor_set_layouts[:], proc(l: ^Descriptor_Set_Layout2) -> u32 {
+		return l.set_index
+	})
 
 	descriptor_set_layout_handles := make(
 		[dynamic]vk.DescriptorSetLayout,
@@ -116,8 +117,8 @@ pipeline_layout_get_resources :: proc(
 ) -> []Shader_Resource {
 	result := make([dynamic]Shader_Resource, allocator = allocator)
 	for _, resource in layout.shader_resources {
-		if (resource.type == type || resource.type == .All) &&
-		   (resource.stages == stage || resource.stages == vk.ShaderStageFlags_ALL) {
+		if (resource.type == type || type == .All) &&
+		   (resource.stages == stage || stage == vk.ShaderStageFlags_ALL) {
 			append_elem(&result, resource)
 		}
 	}

@@ -1,13 +1,17 @@
 package raytracer
 
-import "core:hash/xxhash"
 import "core:log"
+_ :: log
+
+import "core:hash/xxhash"
 import "core:mem"
 
 import vk "vendor:vulkan"
 
 Resource_Cache :: struct {
 	descriptor_set_layouts2: map[u32]^Descriptor_Set_Layout2,
+	descriptor_pools:        map[u32]^Descriptor_Pool,
+	descriptor_sets2:        map[u32]^Descriptor_Set2,
 	descriptor_set_layots:   map[u32]Descriptor_Set_Layout,
 	pipeline_layouts:        map[u32]vk.PipelineLayout,
 	descriptor_sets:         map[u32]vk.DescriptorSet,
@@ -29,6 +33,11 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 	context.allocator = allocator
 	cache := &ctx.cache
 
+	for _, l in cache.descriptor_set_layouts2 {
+		descriptor_set_layout2_destroy(l, ctx)
+		free(l)
+	}
+
 	delete(cache.descriptor_set_layots)
 	delete(cache.pipeline_layouts)
 	delete(cache.raytracing_pipelines)
@@ -39,7 +48,8 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 	delete(cache.shaders)
 }
 
-resource_cache_request_descriptor_set_layout :: proc(
+@(require_results)
+resource_cache_request_descriptor_set_layout2 :: proc(
 	resource_cache: ^Resource_Cache,
 	ctx: ^Vulkan_Context,
 	set_index: u32,
@@ -83,6 +93,57 @@ resource_cache_request_descriptor_set_layout :: proc(
 	resource_cache.descriptor_set_layouts2[hash] = layout
 
 	return layout, nil
+}
+
+@(require_results)
+resource_cache_request_descriptor_pool :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	layout: ^Descriptor_Set_Layout2,
+) -> (
+	pool: ^Descriptor_Pool,
+) {
+	state, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(state, context.temp_allocator)
+	hash_param(state, layout^)
+	hash_value := xxhash.XXH32_digest(state)
+
+	_, value_ptr, just_inserted, _ := map_entry(&resource_cache.descriptor_pools, hash_value)
+	if just_inserted {
+		value_ptr^ = new(Descriptor_Pool)
+		descriptor_pool2_init(value_ptr^, layout)
+	}
+
+	return value_ptr^
+}
+
+@(require_results)
+resource_cache_request_descriptor_set2 :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	layout: ^Descriptor_Set_Layout2,
+	buffer_infos: Binding_Map(vk.DescriptorBufferInfo),
+	image_infos: Binding_Map(vk.DescriptorImageInfo),
+) -> (
+	set: ^Descriptor_Set2,
+	err: vk.Result,
+) {
+	state, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(state, context.temp_allocator)
+	hash_param(state, layout^)
+	hash_param(state, buffer_infos)
+	hash_param(state, image_infos)
+
+	hash_value := xxhash.XXH32_digest(state)
+	_, value_ptr, just_inserted, _ := map_entry(&resource_cache.descriptor_sets2, hash_value)
+
+	if just_inserted {
+		value_ptr^ = new(Descriptor_Set2)
+		pool := resource_cache_request_descriptor_pool(resource_cache, ctx, layout)
+		descriptor_set_init(value_ptr^, ctx, layout, pool, buffer_infos, image_infos)
+	}
+
+	return value_ptr^, nil
 }
 
 vulkan_get_descriptor_set_layout :: proc(

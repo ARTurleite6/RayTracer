@@ -1,5 +1,7 @@
 package raytracer
 
+import "core:slice"
+
 import vk "vendor:vulkan"
 
 Descriptor_Set_Layout2 :: struct {
@@ -19,9 +21,13 @@ descriptor_set_layout2_init :: proc(
 	set_index: u32,
 	shader_modules: []^Shader_Module,
 	resource_set: []Shader_Resource,
+	allocator := context.allocator,
 ) -> (
 	err: vk.Result,
 ) {
+	context.allocator = allocator
+	layout.set_index = set_index
+	layout.shader_modules = slice.clone(shader_modules)
 
 	for res in resource_set {
 		if res.type == .Input ||
@@ -77,6 +83,20 @@ descriptor_set_layout2_init :: proc(
 	)
 }
 
+descriptor_set_layout2_destroy :: proc(
+	layout: ^Descriptor_Set_Layout2,
+	ctx: ^Vulkan_Context,
+	allocator := context.allocator,
+) {
+	context.allocator = allocator
+	delete(layout.bindings)
+	delete(layout.binding_flags)
+	delete(layout.bindings_lookup)
+	delete(layout.binding_flags_lookup)
+	delete(layout.resources_lookup)
+	delete(layout.shader_modules)
+	vk.DestroyDescriptorSetLayout(vulkan_get_device_handle(ctx), layout.handle, nil)
+}
 
 @(private = "file")
 @(require_results)
@@ -104,6 +124,8 @@ find_descriptor_type :: proc(resource_type: Shader_Resource_Type, dyn: bool) -> 
 		} else {
 			return .STORAGE_BUFFER
 		}
+	case .Acceleration_Structure:
+		return .ACCELERATION_STRUCTURE_KHR
 	case:
 		panic("No possible conversion for resource type")
 	}

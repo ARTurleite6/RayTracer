@@ -1,4 +1,8 @@
+#+feature dynamic-literals
 package raytracer
+
+import "core:log"
+_ :: log
 
 import vk "vendor:vulkan"
 
@@ -73,17 +77,47 @@ raytracing_renderer_init :: proc(
 	}
 
 	{
-		shaders: [2]Shader_Module
-		shader_module_init(&shaders[0], {.RAYGEN_KHR}, "shaders/restir_rgen.spv", "main")
-		shader_module_init(&shaders[1], {.MISS_KHR}, "shaders/restir_rmiss.spv", "main")
+		shaders: [4]Shader_Module
+		shader_module_init(&shaders[0], {.RAYGEN_KHR}, "shaders/rgen.spv", "main")
+		shader_module_init(&shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
+		shader_module_init(&shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
+		shader_module_init(&shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 		layout: Pipeline_Layout
-		pipeline_layout_init2(&layout, &renderer.ctx, {&shaders[0], &shaders[1]})
+		pipeline_layout_init2(
+			&layout,
+			&renderer.ctx,
+			{&shaders[0], &shaders[1], &shaders[2], &shaders[3]},
+		)
 
 		raytracing_pipeline_init(
 			&renderer.raytracing_pipeline,
 			&renderer.ctx,
-			{layout = &layout, max_ray_recursion = 1},
+			{layout = &layout, max_ray_recursion = 2},
 		)
+
+		{ 	// test descriptor sets
+			descriptor_set, _ := resource_cache_request_descriptor_set2(
+				&renderer.ctx.cache,
+				&renderer.ctx,
+				layout.descriptor_set_layouts[2],
+				{inner = nil},
+				{
+					inner = {
+						0 = {
+							0 = vk.DescriptorImageInfo {
+								imageView = image_set_get_view(
+									renderer.output_images,
+									renderer.ctx.current_frame,
+								),
+								imageLayout = .GENERAL,
+							},
+						},
+					},
+				},
+			)
+			descriptor_set_update2(descriptor_set, &renderer.ctx)
+			descriptor_set_update2(descriptor_set, &renderer.ctx)
+		}
 	}
 }
 

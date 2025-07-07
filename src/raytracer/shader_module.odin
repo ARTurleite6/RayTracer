@@ -1,5 +1,8 @@
 package raytracer
 
+import "core:log"
+_ :: log
+
 import "core:hash/xxhash"
 import "core:mem"
 import "core:os"
@@ -49,6 +52,7 @@ Shader_Resource_Type :: enum {
 	Buffer_Storage,
 	Push_Constant,
 	Specialization_Constant,
+	Acceleration_Structure,
 	All,
 }
 
@@ -169,6 +173,7 @@ parse_shader_resources :: proc(
 	read_sampler_shader_resources(compiler, shader_resources, stage, resources) or_return
 	read_uniform_buffers_shader_resources(compiler, shader_resources, stage, resources) or_return
 	read_buffer_storage_shader_resources(compiler, shader_resources, stage, resources) or_return
+	read_acceleration_structures(compiler, shader_resources, stage, resources) or_return
 
 	return nil
 }
@@ -421,6 +426,35 @@ read_buffer_storage_shader_resources :: proc(
 
 		append(resources, resource)
 	}
+	return nil
+}
+
+@(private = "file")
+read_acceleration_structures :: proc(
+	compiler: spvc.compiler,
+	shader_resources: spvc.resources,
+	stage: vk.ShaderStageFlags,
+	resources: ^[dynamic]Shader_Resource,
+) -> (
+	err: spvc.result,
+) {
+	acceleration_structures := get_resource_list(
+		shader_resources,
+		.ACCELERATION_STRUCTURE,
+	) or_return
+	for accel_struct in acceleration_structures {
+		resource := Shader_Resource {
+			type       = .Acceleration_Structure,
+			stages     = stage,
+			name       = strings.clone_from_cstring(accel_struct.name),
+			array_size = read_resource_array_size(compiler, accel_struct),
+			qualifiers = {.NonWritable},
+			set        = spvc.compiler_get_decoration(compiler, accel_struct.id, .DescriptorSet),
+			binding    = spvc.compiler_get_decoration(compiler, accel_struct.id, .Binding),
+		}
+		append(resources, resource)
+	}
+
 	return nil
 }
 
