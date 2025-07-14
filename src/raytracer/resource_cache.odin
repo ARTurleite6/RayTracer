@@ -13,7 +13,9 @@ Resource_Cache :: struct {
 	descriptor_pools:        map[u32]^Descriptor_Pool,
 	descriptor_sets2:        map[u32]^Descriptor_Set2,
 	descriptor_set_layots:   map[u32]Descriptor_Set_Layout,
+	pipeline_layouts2:       map[u32]^Pipeline_Layout,
 	pipeline_layouts:        map[u32]vk.PipelineLayout,
+	raytracing_pipelines2:   map[u32]^Raytracing_Pipeline2,
 	descriptor_sets:         map[u32]vk.DescriptorSet,
 	raytracing_pipelines:    map[u32]vk.Pipeline,
 	shaders:                 map[u32]Shader,
@@ -37,6 +39,19 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 		descriptor_set_layout2_destroy(l, ctx)
 		free(l)
 	}
+	delete(cache.descriptor_set_layouts2)
+
+	for _, p in cache.raytracing_pipelines2 {
+		raytracing_pipeline_destroy(p, ctx)
+		free(p)
+	}
+	delete(cache.raytracing_pipelines2)
+
+	for _, l in cache.pipeline_layouts2 {
+		pipeline_layout_destroy(l, ctx)
+		free(l)
+	}
+	delete(cache.pipeline_layouts2)
 
 	delete(cache.descriptor_set_layots)
 	delete(cache.pipeline_layouts)
@@ -46,6 +61,50 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 		shader_destroy(&shader)
 	}
 	delete(cache.shaders)
+}
+
+@(require_results)
+resource_cache_request_pipeline_layout :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	shader_modules: []^Shader_Module,
+) -> (
+	layout: ^Pipeline_Layout,
+	err: vk.Result,
+) {
+	state, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(state, context.temp_allocator)
+	hash_param(state, shader_modules)
+	hash := xxhash.XXH32_digest(state)
+	_, value_ptr, just_inserted, _ := map_entry(&resource_cache.pipeline_layouts2, hash)
+	if just_inserted {
+		value_ptr^ = new(Pipeline_Layout)
+		pipeline_layout_init2(value_ptr^, ctx, shader_modules) or_return
+	}
+
+	return value_ptr^, nil
+}
+
+@(require_results)
+resource_cache_request_raytracing_pipeline :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	pipeline_state: Pipeline_State,
+) -> (
+	pipeline: ^Raytracing_Pipeline2,
+	err: vk.Result,
+) {
+	state, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(state, context.temp_allocator)
+	hash_param(state, pipeline_state)
+	hash := xxhash.XXH32_digest(state)
+	_, value_ptr, just_inserted, _ := map_entry(&resource_cache.raytracing_pipelines2, hash)
+	if just_inserted {
+		value_ptr^ = new(Raytracing_Pipeline2)
+		raytracing_pipeline_init(value_ptr^, ctx, pipeline_state) or_return
+	}
+
+	return value_ptr^, nil
 }
 
 @(require_results)
@@ -124,6 +183,7 @@ resource_cache_request_descriptor_set2 :: proc(
 	layout: ^Descriptor_Set_Layout2,
 	buffer_infos: Binding_Map(vk.DescriptorBufferInfo),
 	image_infos: Binding_Map(vk.DescriptorImageInfo),
+	acceleration_structure_infos: Binding_Map(vk.WriteDescriptorSetAccelerationStructureKHR),
 ) -> (
 	set: ^Descriptor_Set2,
 	err: vk.Result,
@@ -140,7 +200,15 @@ resource_cache_request_descriptor_set2 :: proc(
 	if just_inserted {
 		value_ptr^ = new(Descriptor_Set2)
 		pool := resource_cache_request_descriptor_pool(resource_cache, ctx, layout)
-		descriptor_set_init(value_ptr^, ctx, layout, pool, buffer_infos, image_infos)
+		descriptor_set_init(
+			value_ptr^,
+			ctx,
+			layout,
+			pool,
+			buffer_infos,
+			image_infos,
+			acceleration_structure_infos,
+		)
 	}
 
 	return value_ptr^, nil

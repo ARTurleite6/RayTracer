@@ -63,7 +63,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 }
 
 cmd_create_tlas :: proc(
-	rt_builder: ^Raytracing_Builder,
+	tlas: ^Acceleration_Structure,
 	cmd: vk.CommandBuffer,
 	count_instance: u32,
 	instance_buffer_address: vk.DeviceAddress,
@@ -123,12 +123,12 @@ cmd_create_tlas :: proc(
 	defer buffer_destroy(scratch_buffer)
 
 	if update {
-		build_info.srcAccelerationStructure = rt_builder.tlas.handle
+		build_info.srcAccelerationStructure = tlas.handle
 	} else {
-		rt_builder.tlas = create_acceleration(&create_info, ctx)
+		tlas^ = create_acceleration(&create_info, ctx)
 	}
 
-	build_info.dstAccelerationStructure = rt_builder.tlas.handle
+	build_info.dstAccelerationStructure = tlas.handle
 	build_info.scratchData.deviceAddress = buffer_get_device_address(scratch_buffer^)
 
 	range_info := vk.AccelerationStructureBuildRangeInfoKHR {

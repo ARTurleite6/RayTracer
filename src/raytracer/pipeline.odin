@@ -130,7 +130,7 @@ raytracing_pipeline_init :: proc(
 		stage_create_info := vk.PipelineShaderStageCreateInfo {
 			sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 			stage  = s.stage,
-			pName  = strings.clone_to_cstring(s.entry_point),
+			pName  = strings.clone_to_cstring(s.entry_point, context.temp_allocator),
 			module = module,
 		}
 
@@ -160,7 +160,18 @@ raytracing_pipeline_init :: proc(
 		"Failed to create raytracing pipeline",
 	) or_return
 
+	shader_binding_table_build(
+		&pipeline.sbt,
+		ctx,
+		pipeline.handle,
+		vulkan_get_raytracing_pipeline_properties(ctx),
+	)
+
 	return nil
+}
+
+raytracing_pipeline_destroy :: proc(pipeline: ^Raytracing_Pipeline2, ctx: ^Vulkan_Context) {
+	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
 }
 
 pipeline_add_shader :: proc(self: ^Pipeline, shader: Shader) {

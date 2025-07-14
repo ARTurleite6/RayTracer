@@ -1,5 +1,6 @@
 package raytracer
 
+
 Storage_Buffer_Set :: struct {
 	buffers: []Buffer,
 }

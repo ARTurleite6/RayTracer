@@ -318,7 +318,7 @@ renderer_build_tlas :: proc(
 
 
 		cmd_create_tlas(
-			&renderer.scene_raytracing,
+			&renderer.scene_raytracing.tlas,
 			cmd,
 			count_instance,
 			buffer_get_device_address(instances_buffer),

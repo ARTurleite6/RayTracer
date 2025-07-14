@@ -11,6 +11,38 @@ hash_param :: proc {
 	hash_param_descriptor_buffer_info,
 	hash_param_descriptor_image_info,
 	hash_param_binding_map,
+	hash_param_pipeline_state,
+	hash_param_pipeline_layout,
+	hash_param_shader_modules_list,
+}
+
+hash_param_shader_modules_list :: proc(
+	state: ^xxhash.XXH32_state,
+	shader_modules: []^Shader_Module,
+) {
+	for module in shader_modules {
+		xxhash.XXH32_update(state, mem.any_to_bytes(module.id))
+	}
+}
+
+hash_param_pipeline_state :: proc(state: ^xxhash.XXH32_state, pipeline_state: Pipeline_State) {
+	pipeline_layout := pipeline_state.layout
+	hash_param_pipeline_layout(state, pipeline_layout.handle)
+
+	//add logic for render passes on graphics pipeline
+
+	for shader_module in pipeline_layout.shader_modules {
+		xxhash.XXH32_update(state, mem.any_to_bytes(shader_module.id))
+	}
+
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.max_ray_recursion))
+}
+
+hash_param_pipeline_layout :: proc(
+	state: ^xxhash.XXH32_state,
+	pipeline_layout: vk.PipelineLayout,
+) {
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_layout))
 }
 
 hash_param_binding_map :: proc(state: ^xxhash.XXH32_state, binding_map: Binding_Map($T)) {
@@ -62,6 +94,13 @@ hash_param_write_descriptor_set :: proc(state: ^xxhash.XXH32_state, param: vk.Wr
 		xxhash.XXH32_update(state, mem.any_to_bytes(param.pImageInfo))
 	case .UNIFORM_BUFFER, .STORAGE_BUFFER, .UNIFORM_BUFFER_DYNAMIC, .STORAGE_BUFFER_DYNAMIC:
 		xxhash.XXH32_update(state, mem.any_to_bytes(param.pBufferInfo))
+	case .ACCELERATION_STRUCTURE_KHR:
+		write_info := cast(^vk.WriteDescriptorSetAccelerationStructureKHR)param.pNext
+		assert(write_info != nil)
+		as := write_info.pAccelerationStructures[:write_info.accelerationStructureCount]
+		for a in as {
+			xxhash.XXH32_update(state, mem.any_to_bytes(a))
+		}
 	case:
 		unimplemented("needs to implement for this type")
 	}

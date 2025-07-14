@@ -40,13 +40,11 @@ application_init :: proc(
 	window_set_window_user_pointer(app.window, app.window)
 	window_set_event_handler(app.window, application_event_handler(app))
 
+	raytracing_renderer_init(&app.renderer, app.window)
+	// TODO: change this
+	app.scene = create_scene()
+	raytracing_renderer_set_scene(&app.renderer, &app.scene)
 
-	{ 	// create rendering stuff
-		raytracing_renderer_init(&app.renderer, app.window)
-		// TODO: change this
-		app.scene = create_scene()
-		// renderer_set_scene(&app.renderer, &app.scene)
-	}
 	return
 }
 
@@ -86,7 +84,7 @@ application_update :: proc(app: ^Application) {
 application_render :: proc(app: ^Application) {
 	raytracing_renderer_begin_frame(&app.renderer)
 	defer raytracing_renderer_end_frame(&app.renderer)
-	// raytracing_renderer_render_scene(&app.renderer)
+	raytracing_renderer_render_scene(&app.renderer)
 	// renderer_begin_frame(&app.renderer)
 	//
 	// renderer_render(&app.renderer, &app.camera_controller.camera)

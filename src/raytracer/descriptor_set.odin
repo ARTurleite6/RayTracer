@@ -11,13 +11,31 @@ Binding_Map :: struct($T: typeid) {
 }
 
 Descriptor_Set2 :: struct {
-	handle:                vk.DescriptorSet,
-	descriptor_set_layout: ^Descriptor_Set_Layout2,
-	descriptor_pool:       ^Descriptor_Pool,
-	buffer_infos:          Binding_Map(vk.DescriptorBufferInfo),
-	image_infos:           Binding_Map(vk.DescriptorImageInfo),
-	write_descriptor_sets: [dynamic]vk.WriteDescriptorSet,
-	updated_bindings:      map[u32]u32,
+	handle:                       vk.DescriptorSet,
+	descriptor_set_layout:        ^Descriptor_Set_Layout2,
+	descriptor_pool:              ^Descriptor_Pool,
+	buffer_infos:                 Binding_Map(vk.DescriptorBufferInfo),
+	image_infos:                  Binding_Map(vk.DescriptorImageInfo),
+	acceleration_structure_infos: Binding_Map(vk.WriteDescriptorSetAccelerationStructureKHR),
+	write_descriptor_sets:        [dynamic]vk.WriteDescriptorSet,
+	updated_bindings:             map[u32]u32,
+}
+
+make_binding_map :: proc($T: typeid) -> Binding_Map(T) {
+	return {inner = make(map[u32]map[u32]T)}
+}
+
+binding_map_set_binding :: proc(
+	b: ^Binding_Map($T),
+	binding: u32,
+	value: T,
+	array_element := u32(0),
+) {
+	_, value_ptr, just_inserted, _ := map_entry(&b.inner, binding)
+	if just_inserted {
+		value_ptr^ = make(map[u32]T)
+	}
+	value_ptr[array_element] = value
 }
 
 descriptor_set_init :: proc(
@@ -27,6 +45,7 @@ descriptor_set_init :: proc(
 	pool: ^Descriptor_Pool,
 	buffer_infos: Binding_Map(vk.DescriptorBufferInfo),
 	image_infos: Binding_Map(vk.DescriptorImageInfo),
+	acceleration_structure_infos: Binding_Map(vk.WriteDescriptorSetAccelerationStructureKHR),
 ) -> (
 	err: vk.Result,
 ) {
@@ -34,6 +53,7 @@ descriptor_set_init :: proc(
 	set.descriptor_pool = pool
 	set.buffer_infos = buffer_infos
 	set.image_infos = image_infos
+	set.acceleration_structure_infos = acceleration_structure_infos
 	set.handle = descriptor_pool_allocate(pool, ctx) or_return
 
 	descriptor_set_prepare(set, ctx)
@@ -118,6 +138,32 @@ descriptor_set_prepare :: proc(set: ^Descriptor_Set2, ctx: ^Vulkan_Context) {
 			log.errorf("Shader layout set does not use image binding at %d", binding_index)
 		}
 	}
+
+	for binding_index, &as_bindings in set.acceleration_structure_infos.inner {
+		if binding_info, ok := set.descriptor_set_layout.bindings_lookup[binding_index];
+		   ok && binding_info.descriptorType == .ACCELERATION_STRUCTURE_KHR {
+			// Ensure this is an acceleration structure binding
+			for k, &as_info in as_bindings {
+				write_descriptor_set := vk.WriteDescriptorSet {
+					sType           = .WRITE_DESCRIPTOR_SET,
+					dstBinding      = binding_index,
+					descriptorType  = .ACCELERATION_STRUCTURE_KHR,
+					dstSet          = set.handle,
+					dstArrayElement = k,
+					descriptorCount = 1,
+					pNext           = &as_info,
+				}
+				append(&set.write_descriptor_sets, write_descriptor_set)
+			}
+		} else {
+			log.errorf(
+				"Binding %d is not an acceleration structure type, got %v",
+				binding_index,
+				binding_info.descriptorType,
+			)
+		}
+	}
+
 }
 
 descriptor_set_update2 :: proc(
@@ -160,6 +206,8 @@ descriptor_set_update2 :: proc(
 			}
 		}
 	}
+
+	log.debug(write_operations)
 
 	if len(write_operations) > 0 {
 		vk.UpdateDescriptorSets(

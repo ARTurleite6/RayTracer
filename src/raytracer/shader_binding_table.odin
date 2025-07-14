@@ -28,7 +28,7 @@ shader_binding_table_destroy :: proc(self: ^Shader_Binding_Table) {
 shader_binding_table_build :: proc(
 	self: ^Shader_Binding_Table,
 	ctx: ^Vulkan_Context,
-	pipeline: Pipeline,
+	pipeline: vk.Pipeline,
 	props: vk.PhysicalDeviceRayTracingPipelinePropertiesKHR,
 ) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
@@ -69,7 +69,7 @@ shader_binding_table_build :: proc(
 	_ = vk_check(
 		vk.GetRayTracingShaderGroupHandlesKHR(
 			device,
-			pipeline.handle,
+			pipeline,
 			0,
 			u32(group_count),
 			int(sbt_size),

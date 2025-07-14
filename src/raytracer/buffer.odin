@@ -34,16 +34,17 @@ buffer_init :: proc(
 	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
 	assert(size > 0, "A buffer must have a size greater than 0")
+	buffer^ = {}
 	buffer.ctx = ctx
 	buffer.size = vk.DeviceSize(size)
-	buffer.usage = usage
+	buffer.usage = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS}
 
 	device := buffer.ctx.device
 
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
 		size        = vk.DeviceSize(size),
-		usage       = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS},
+		usage       = buffer.usage,
 		sharingMode = .EXCLUSIVE,
 	}
 
@@ -67,21 +68,21 @@ buffer_init :: proc(
 		   .SUCCESS {
 			return .Creation_Failed
 		}
-	}
-
-	if vk_check(
-		   vma.create_buffer(
-			   device.allocator,
-			   buffer_info,
-			   alloc_create_info,
-			   &buffer.handle,
-			   &buffer.allocation,
-			   nil,
-		   ),
-		   "Failed to create buffer",
-	   ) !=
-	   .SUCCESS {
-		return .Creation_Failed
+	} else {
+		if vk_check(
+			   vma.create_buffer(
+				   device.allocator,
+				   buffer_info,
+				   alloc_create_info,
+				   &buffer.handle,
+				   &buffer.allocation,
+				   nil,
+			   ),
+			   "Failed to create buffer",
+		   ) !=
+		   .SUCCESS {
+			return .Creation_Failed
+		}
 	}
 
 	return .None
@@ -132,7 +133,6 @@ buffer_destroy :: proc(buffer: ^Buffer) {
 	if buffer.handle != 0 {
 		vma.destroy_buffer(buffer.ctx.device.allocator, buffer.handle, buffer.allocation)
 	}
-	buffer^ = {}
 }
 
 buffer_descriptor_info :: proc(buffer: Buffer) -> vk.DescriptorBufferInfo {

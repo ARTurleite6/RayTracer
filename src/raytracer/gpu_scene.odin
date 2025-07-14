@@ -6,12 +6,43 @@ import vk "vendor:vulkan"
 _ :: log
 
 GPU_Scene2 :: struct {
+	tlas:                                            Acceleration_Structure,
+	tlas_infos:                                      [dynamic]vk.AccelerationStructureInstanceKHR,
+	acceleration_structures:                         [dynamic]Acceleration_Structure,
 	meshes_data:                                     []Mesh_GPU_Data,
 	objects_buffer, lights_buffer, materials_buffer: Storage_Buffer_Set,
 }
 
 gpu_scene2_init :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
 	gpu_scene2_bake(gpu_scene, ctx, scene)
+}
+
+gpu_scene2_destroy :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context) {
+	device := vulkan_get_device_handle(ctx)
+
+	{ 	// Destroying Bottom Level Acceleration Structure
+		for &acceleration_structure in gpu_scene.acceleration_structures {
+			vk.DestroyAccelerationStructureKHR(device, acceleration_structure.handle, nil)
+			buffer_destroy(&acceleration_structure.buffer)
+		}
+		delete(gpu_scene.acceleration_structures)
+	}
+
+	{ 	// Destroying Top Level Acceleration Structures
+		vk.DestroyAccelerationStructureKHR(device, gpu_scene.tlas.handle, nil)
+		buffer_destroy(&gpu_scene.tlas.buffer)
+		delete(gpu_scene.tlas_infos)
+	}
+
+	for &mesh in gpu_scene.meshes_data {
+		buffer_destroy(&mesh.vertex_buffer)
+		buffer_destroy(&mesh.index_buffer)
+	}
+	delete(gpu_scene.meshes_data)
+
+	storage_buffer_set_destroy(ctx, &gpu_scene.objects_buffer)
+	storage_buffer_set_destroy(ctx, &gpu_scene.lights_buffer)
+	storage_buffer_set_destroy(ctx, &gpu_scene.materials_buffer)
 }
 
 gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
@@ -45,6 +76,206 @@ gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Sce
 
 	gpu_scene2_compile_objects_data(gpu_scene, ctx, scene)
 	gpu_scene2_compile_materials(gpu_scene, ctx, scene)
+	gpu_scene2_compile_bottom_level_as(gpu_scene, ctx)
+	gpu_scene2_compile_top_level_as(gpu_scene, ctx, scene)
+}
+
+gpu_scene2_compile_top_level_as :: proc(
+	gpu_scene: ^GPU_Scene2,
+	ctx: ^Vulkan_Context,
+	scene: Scene,
+) {
+	tlas := &gpu_scene.tlas_infos
+	tlas^ = make([dynamic]vk.AccelerationStructureInstanceKHR, 0, len(scene.objects))
+
+	for obj, i in scene.objects {
+		model_matrix := obj.transform.model_matrix
+		ray_inst := vk.AccelerationStructureInstanceKHR {
+			transform                              = matrix_to_transform_matrix_khr(model_matrix),
+			instanceCustomIndex                    = u32(i),
+			mask                                   = 0xFF,
+			instanceShaderBindingTableRecordOffset = 0,
+			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
+			accelerationStructureReference         = u64(
+				get_blas_device_address(
+					gpu_scene.acceleration_structures[obj.mesh_index],
+					vulkan_get_device_handle(ctx),
+				),
+			),
+		}
+		append(tlas, ray_inst)
+	}
+
+	gpu_scene2_build_tlas(gpu_scene, ctx, tlas[:], flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE})
+}
+
+gpu_scene2_build_tlas :: proc(
+	gpu_scene: ^GPU_Scene2,
+	ctx: ^Vulkan_Context,
+	instances: []vk.AccelerationStructureInstanceKHR,
+	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
+	update := false,
+) {
+	assert(gpu_scene.tlas.handle == 0 || update, "Cannot build tlas twice, only update")
+	device := ctx.device
+	count_instance := u32(len(instances))
+
+	instances_buffer: Buffer
+	buffer_init_with_staging_buffer(
+		&instances_buffer,
+		ctx,
+		raw_data(instances),
+		u64(size_of(vk.AccelerationStructureInstanceKHR) * int(count_instance)),
+		{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+	)
+
+	defer buffer_destroy(&instances_buffer)
+	scratch_buffer: Buffer
+	{
+		cmd := device_begin_single_time_commands(device, device.command_pool)
+		defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+
+		cmd_create_tlas(
+			&gpu_scene.tlas,
+			cmd,
+			count_instance,
+			buffer_get_device_address(instances_buffer),
+			&scratch_buffer,
+			flags,
+			update = update,
+			motion = false,
+			ctx = ctx,
+		)
+	}
+}
+
+gpu_scene2_compile_bottom_level_as :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context) {
+	inputs := make(
+		[dynamic]Bottom_Level_Input,
+		0,
+		len(gpu_scene.meshes_data),
+		allocator = context.temp_allocator,
+	)
+	device := ctx.device
+
+	for &mesh in gpu_scene.meshes_data {
+		append(&inputs, mesh_to_geometry(&mesh, device^))
+	}
+
+	gpu_scene2_build_blas(gpu_scene, ctx, inputs[:], {.PREFER_FAST_TRACE})
+}
+
+gpu_scene2_build_blas :: proc(
+	gpu_scene: ^GPU_Scene2,
+	ctx: ^Vulkan_Context,
+	inputs: []Bottom_Level_Input,
+	flags: vk.BuildAccelerationStructureFlagsKHR,
+) {
+	device := ctx.device
+	build_infos := make([]Build_Acceleration_Structure, len(inputs), context.temp_allocator)
+
+	n_blas := u32(len(inputs))
+	total_size, max_scratch_size: vk.DeviceSize
+	number_compactions: u32
+
+	for &input, i in inputs {
+		info := &build_infos[i]
+
+		info.build_info = {
+			sType         = .ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+			type          = .BOTTOM_LEVEL,
+			mode          = .BUILD,
+			flags         = flags,
+			geometryCount = 1,
+			pGeometries   = &input.geometry,
+		}
+
+		info.range_info = input.offset
+		max_prim_counts := [?]u32{info.range_info.primitiveCount}
+		info.size_info.sType = .ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR
+		vk.GetAccelerationStructureBuildSizesKHR(
+			device.logical_device.ptr,
+			.DEVICE,
+			&info.build_info,
+			raw_data(max_prim_counts[:]),
+			&info.size_info,
+		)
+
+		total_size += info.size_info.accelerationStructureSize
+		max_scratch_size = max(info.size_info.buildScratchSize, max_scratch_size)
+		number_compactions += 1 if .ALLOW_COMPACTION in info.build_info.flags else 0
+	}
+
+	scratch_buffer: Buffer
+	buffer_init(
+		&scratch_buffer,
+		ctx,
+		u64(max_scratch_size),
+		{.SHADER_DEVICE_ADDRESS, .STORAGE_BUFFER},
+		.Gpu_Only,
+		alignment = 128,
+	)
+	defer buffer_destroy(&scratch_buffer)
+
+	query_pool: vk.QueryPool
+	if number_compactions > 0 {
+		assert(number_compactions == n_blas)
+		create_info := vk.QueryPoolCreateInfo {
+			sType      = .QUERY_POOL_CREATE_INFO,
+			queryCount = n_blas,
+			queryType  = .ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR,
+		}
+
+		_ = vk_check(
+			vk.CreateQueryPool(device.logical_device.ptr, &create_info, nil, &query_pool),
+			"Failed to create query_pool",
+		)
+	}
+
+	indices := make([dynamic]u32, context.temp_allocator)
+
+	batch_size: vk.DeviceSize
+	batch_limit := vk.DeviceSize(256_000_000)
+	for i in 0 ..< n_blas {
+		append(&indices, i)
+		batch_size += build_infos[i].size_info.accelerationStructureSize
+
+		if batch_size >= batch_limit || i == n_blas - 1 {
+			cmd := device_begin_single_time_commands(device, device.command_pool)
+			defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+			cmd_create_blas(
+				cmd,
+				indices[:],
+				build_infos,
+				buffer_get_device_address(scratch_buffer),
+				query_pool,
+				ctx,
+			)
+
+			if query_pool != 0 {
+				// cmd := device_begin_single_time_commands(device, device.command_pool)
+				// defer device_end_single_time_commands(device, device.command_pool, cmd)
+
+				// compact
+			}
+
+			batch_size = 0
+			clear(&indices)
+		}
+
+
+		gpu_scene.acceleration_structures = make(
+			[dynamic]Acceleration_Structure,
+			0,
+			len(build_infos),
+		)
+
+		for b in build_infos {
+			append(&gpu_scene.acceleration_structures, b.as)
+		}
+	}
 }
 
 gpu_scene2_compile_objects_data :: proc(
@@ -83,6 +314,7 @@ gpu_scene2_compile_objects_data :: proc(
 	)
 	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		buffer := storage_buffer_set_get(&gpu_scene.objects_buffer, f)
+		buffer_map(buffer)
 		buffer_write_rawptr(
 			buffer,
 			raw_data(objects_data),
@@ -98,6 +330,7 @@ gpu_scene2_compile_objects_data :: proc(
 	)
 	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		buffer := storage_buffer_set_get(&gpu_scene.lights_buffer, f)
+		buffer_map(buffer)
 		buffer_write_rawptr(
 			buffer,
 			raw_data(lights_data),
@@ -128,6 +361,7 @@ gpu_scene2_compile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Contex
 	)
 	for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		buffer := storage_buffer_set_get(&gpu_scene.materials_buffer, f)
+		buffer_map(buffer)
 		buffer_write_rawptr(
 			buffer,
 			raw_data(materials_data),

@@ -91,6 +91,17 @@ shader_module_init :: proc(
 	return nil
 }
 
+shader_module_destroy :: proc(module: ^Shader_Module, allocator := context.allocator) {
+	context.allocator = allocator
+	delete(module.compiled_src)
+
+	for resource in module.resources {
+		delete(resource.name)
+	}
+	delete(module.resources)
+	// resources:    []Shader_Resource,
+}
+
 @(private = "file")
 reflect_shader_resources :: proc(
 	code: []u32,

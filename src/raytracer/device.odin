@@ -49,6 +49,15 @@ device_init :: proc(
 
 		when ODIN_DEBUG {
 			vkb.instance_request_validation_layers(&builder)
+
+			vkb.instance_add_debug_messenger_severity(
+				&builder,
+				{.INFO, .ERROR, .VERBOSE, .WARNING},
+			)
+			vkb.instance_add_debug_messenger_type(
+				&builder,
+				{.GENERAL, .VALIDATION, .PERFORMANCE, .DEVICE_ADDRESS_BINDING},
+			)
 			vkb.instance_use_default_debug_messenger(&builder)
 		}
 

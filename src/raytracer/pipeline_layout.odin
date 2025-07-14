@@ -84,7 +84,11 @@ pipeline_layout_init2 :: proc(
 	push_constant_ranges := make([dynamic]vk.PushConstantRange)
 	defer delete(push_constant_ranges)
 
-	for push_constant_range in pipeline_layout_get_resources(layout^, .Push_Constant) {
+	for push_constant_range in pipeline_layout_get_resources(
+		layout^,
+		.Push_Constant,
+		allocator = context.temp_allocator,
+	) {
 		range := vk.PushConstantRange {
 			stageFlags = push_constant_range.stages,
 			offset     = push_constant_range.offset,
@@ -107,6 +111,26 @@ pipeline_layout_init2 :: proc(
 	) or_return
 
 	return nil
+}
+
+pipeline_layout_destroy :: proc(
+	layout: ^Pipeline_Layout,
+	ctx: ^Vulkan_Context,
+	allocator := context.allocator,
+) {
+	context.allocator = allocator
+
+	for key in layout.shader_resources {
+		delete(key)
+	}
+	delete(layout.shader_resources)
+	for _, set in layout.shader_sets {
+		delete(set)
+	}
+	delete(layout.shader_sets)
+	delete(layout.descriptor_set_layouts)
+
+	vk.DestroyPipelineLayout(vulkan_get_device_handle(ctx), layout.handle, nil)
 }
 
 pipeline_layout_get_resources :: proc(
