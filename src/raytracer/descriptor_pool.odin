@@ -19,6 +19,7 @@ descriptor_pool2_init :: proc(
 	descriptor_set_layout: ^Descriptor_Set_Layout2,
 	pool_size := MAX_SETS_PER_POOL,
 ) {
+	pool^ = {}
 	pool.descriptor_set_layout = descriptor_set_layout
 	pool.pool_max_sets = pool_size
 	bindings := &pool.descriptor_set_layout.bindings
@@ -42,10 +43,14 @@ descriptor_pool2_init :: proc(
 	}
 }
 
-descriptor_pool_destroy :: proc(pool: Descriptor_Pool, ctx: ^Vulkan_Context) {
+descriptor_pool_destroy :: proc(pool: ^Descriptor_Pool, ctx: ^Vulkan_Context) {
 	for p in pool.pools {
 		vk.DestroyDescriptorPool(vulkan_get_device_handle(ctx), p, nil)
 	}
+	delete(pool.pools)
+	delete(pool.pool_set_counts)
+	delete(pool.pool_sizes)
+	delete(pool.set_pool_mapping)
 }
 
 descriptor_pool_reset :: proc(pool: ^Descriptor_Pool, ctx: ^Vulkan_Context) {

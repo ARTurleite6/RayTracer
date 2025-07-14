@@ -195,6 +195,7 @@ renderer_render :: proc(renderer: ^Renderer, camera: ^Camera) {
 	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
 	buffer_map(ubo_buffer)
 	buffer_write(ubo_buffer, &ubo_data)
+	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
 
 	if camera.dirty {
 		camera.dirty = false

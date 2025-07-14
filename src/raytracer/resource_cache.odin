@@ -35,6 +35,18 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 	context.allocator = allocator
 	cache := &ctx.cache
 
+	for _, &s in cache.descriptor_sets2 {
+		descriptor_set_destroy(s)
+		free(s)
+	}
+	delete(cache.descriptor_sets2)
+
+	for _, &pool in cache.descriptor_pools {
+		descriptor_pool_destroy(pool, ctx)
+		free(pool)
+	}
+	delete(cache.descriptor_pools)
+
 	for _, l in cache.descriptor_set_layouts2 {
 		descriptor_set_layout2_destroy(l, ctx)
 		free(l)

@@ -366,8 +366,16 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
         float NdotL = cosTheta(wiLocal);
         float LdotN = max(dot(-lightDir, worldLightNormal), 0.0);
 
-        float triangleSelectionPdf = 1.0;
-        float lightContribPdf = selectionPdf * triangleSelectionPdf;
+        vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
+        vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
+        vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
+        float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+        float triangleSelectionPdf = 1.0 / float(num_triangles);
+        float areaPdf = 1.0 / triangleArea;
+        float cosTheta = abs(LdotN);
+        if (cosTheta <= 1e-8) return vec3(0.0);
+        float solidAnglePdf = areaPdf * lightDistSq / cosTheta;
+        float lightContribPdf = selectionPdf * triangleSelectionPdf * solidAnglePdf;
 
         vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
         directIllumination = (emission * brdf * NdotL * LdotN) / lightContribPdf;

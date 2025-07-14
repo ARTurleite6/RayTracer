@@ -84,7 +84,7 @@ application_update :: proc(app: ^Application) {
 application_render :: proc(app: ^Application) {
 	raytracing_renderer_begin_frame(&app.renderer)
 	defer raytracing_renderer_end_frame(&app.renderer)
-	raytracing_renderer_render_scene(&app.renderer)
+	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
 	// renderer_begin_frame(&app.renderer)
 	//
 	// renderer_render(&app.renderer, &app.camera_controller.camera)

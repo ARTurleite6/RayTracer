@@ -19,6 +19,7 @@ Raytracing_Renderer :: struct {
 	//frame data
 	current_image_index: u32,
 	current_cmd:         Command_Buffer,
+	accumulation_frame:  u32,
 
 	// resources
 	gbuffers:            GBuffers,
@@ -40,6 +41,7 @@ raytracing_renderer_init :: proc(
 	allocator := context.allocator,
 ) {
 	renderer^ = {}
+	renderer.accumulation_frame = 1
 	renderer.window = window
 	//TODO: change the creation of vulkan context to the windowa, it makes more sense to be there
 	vulkan_context_init(&renderer.ctx, window, allocator)
@@ -106,14 +108,12 @@ raytracing_renderer_init :: proc(
 			&renderer.ctx,
 			{layout = renderer.pipeline_layout, max_ray_recursion = 2},
 		)
-
-		log.debug(renderer.raytracing_pipeline)
 	}
 
 	// TODO: make all this bindings on the command buffer on flight
 	{ 	// setting set 2
 		image_set_layout := renderer.pipeline_layout.descriptor_set_layouts[2]
-		b := make_binding_map(vk.DescriptorImageInfo)
+		b := make_binding_map(vk.DescriptorImageInfo, context.temp_allocator)
 		binding_map_set_binding(
 			&b,
 			0,
@@ -135,7 +135,7 @@ raytracing_renderer_init :: proc(
 
 	{ 	// camera set
 		set_layout := renderer.pipeline_layout.descriptor_set_layouts[1]
-		buffer_b := make_binding_map(vk.DescriptorBufferInfo)
+		buffer_b := make_binding_map(vk.DescriptorBufferInfo, context.temp_allocator)
 		binding_map_set_binding(
 			&buffer_b,
 			0,
@@ -186,7 +186,10 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 
 		{ 	// setting set 0
 			set_layout := renderer.pipeline_layout.descriptor_set_layouts[0]
-			as_b := make_binding_map(vk.WriteDescriptorSetAccelerationStructureKHR)
+			as_b := make_binding_map(
+				vk.WriteDescriptorSetAccelerationStructureKHR,
+				context.temp_allocator,
+			)
 			binding_map_set_binding(
 				&as_b,
 				0,
@@ -197,7 +200,7 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 				},
 			)
 
-			buffer_b := make_binding_map(vk.DescriptorBufferInfo)
+			buffer_b := make_binding_map(vk.DescriptorBufferInfo, context.temp_allocator)
 			binding_map_set_binding(
 				&buffer_b,
 				1,
@@ -222,62 +225,7 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 				image_infos = {},
 				acceleration_structure_infos = as_b,
 			)
-			// descriptor_set_update2(renderer.descriptor_sets[0], &renderer.ctx)
-
-			device := vulkan_get_device_handle(&renderer.ctx)
-			as_info := vk.WriteDescriptorSetAccelerationStructureKHR {
-				sType                      = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-				accelerationStructureCount = 1,
-				pAccelerationStructures    = &renderer.gpu_scene.tlas.handle,
-			}
-			objects_buffer_info := buffer_descriptor_info(
-				renderer.gpu_scene.objects_buffer.buffers[0],
-			)
-			materials_buffer_info := buffer_descriptor_info(
-				renderer.gpu_scene.materials_buffer.buffers[0],
-			)
-			lights_buffer_info := buffer_descriptor_info(
-				renderer.gpu_scene.lights_buffer.buffers[0],
-			)
-			writes := [?]vk.WriteDescriptorSet {
-				{
-					sType = .WRITE_DESCRIPTOR_SET,
-					pNext = &as_info,
-					dstSet = renderer.descriptor_sets[0].handle,
-					dstBinding = 0,
-					dstArrayElement = 0,
-					descriptorCount = 1,
-					descriptorType = .ACCELERATION_STRUCTURE_KHR,
-				},
-				{
-					sType = .WRITE_DESCRIPTOR_SET,
-					dstSet = renderer.descriptor_sets[0].handle,
-					dstBinding = 1,
-					dstArrayElement = 0,
-					descriptorCount = 1,
-					descriptorType = .STORAGE_BUFFER,
-					pBufferInfo = &objects_buffer_info,
-				},
-				{
-					sType = .WRITE_DESCRIPTOR_SET,
-					dstSet = renderer.descriptor_sets[0].handle,
-					dstBinding = 2,
-					dstArrayElement = 0,
-					descriptorCount = 1,
-					descriptorType = .STORAGE_BUFFER,
-					pBufferInfo = &materials_buffer_info,
-				},
-				{
-					sType = .WRITE_DESCRIPTOR_SET,
-					dstSet = renderer.descriptor_sets[0].handle,
-					dstBinding = 3,
-					dstArrayElement = 0,
-					descriptorCount = 1,
-					descriptorType = .STORAGE_BUFFER,
-					pBufferInfo = &lights_buffer_info,
-				},
-			}
-			vk.UpdateDescriptorSets(device, len(writes), raw_data(writes[:]), 0, nil)
+			descriptor_set_update2(renderer.descriptor_sets[0], &renderer.ctx)
 		}
 
 	}
@@ -291,8 +239,25 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 	command_buffer_bind_image(&renderer.current_cmd, output_image_view, 0, 2, 0, 0)
 }
 
-raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
+raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera: ^Camera) {
 	cmd := &renderer.current_cmd
+
+	if camera.dirty {
+		renderer.accumulation_frame = 1
+		camera.dirty = false
+	}
+
+	ubo_data := Camera_UBO {
+		projection         = camera.proj,
+		view               = camera.view,
+		inverse_view       = camera.inverse_view,
+		inverse_projection = camera.inverse_proj,
+	}
+	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
+	buffer_map(ubo_buffer)
+	buffer_write(ubo_buffer, &ubo_data)
+	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
+	buffer_unmap(ubo_buffer)
 
 	descriptor_sets := slice.mapper(
 		renderer.descriptor_sets[:],
@@ -319,7 +284,10 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
 		{.RAYGEN_KHR},
 		0,
 		size_of(Raytracing_Push_Constant),
-		&Raytracing_Push_Constant{clear_color = {0.2, 0.2, 0.2}, accumulation_frame = 1},
+		&Raytracing_Push_Constant {
+			clear_color = {0.2, 0.2, 0.2},
+			accumulation_frame = renderer.accumulation_frame,
+		},
 	)
 
 	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, renderer.raytracing_pipeline.handle)
@@ -419,4 +387,5 @@ raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 
 	command_buffer_destroy(&renderer.current_cmd)
+	renderer.accumulation_frame += 1
 }

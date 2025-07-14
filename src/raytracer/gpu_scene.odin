@@ -263,18 +263,14 @@ gpu_scene2_build_blas :: proc(
 
 			batch_size = 0
 			clear(&indices)
+
 		}
+	}
 
+	gpu_scene.acceleration_structures = make([dynamic]Acceleration_Structure, 0, len(build_infos))
 
-		gpu_scene.acceleration_structures = make(
-			[dynamic]Acceleration_Structure,
-			0,
-			len(build_infos),
-		)
-
-		for b in build_infos {
-			append(&gpu_scene.acceleration_structures, b.as)
-		}
+	for b in build_infos {
+		append(&gpu_scene.acceleration_structures, b.as)
 	}
 }
 
@@ -321,6 +317,7 @@ gpu_scene2_compile_objects_data :: proc(
 			0,
 			vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
 		)
+		buffer_flush(buffer, 0, buffer.size)
 	}
 
 	gpu_scene.lights_buffer = make_storage_buffer_set(
@@ -337,6 +334,7 @@ gpu_scene2_compile_objects_data :: proc(
 			0,
 			vk.DeviceSize(size_of(Light_GPU_Data) * len(lights_data)),
 		)
+		buffer_flush(buffer, 0, buffer.size)
 	}
 }
 

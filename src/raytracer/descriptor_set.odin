@@ -21,8 +21,31 @@ Descriptor_Set2 :: struct {
 	updated_bindings:             map[u32]u32,
 }
 
-make_binding_map :: proc($T: typeid) -> Binding_Map(T) {
-	return {inner = make(map[u32]map[u32]T)}
+make_binding_map :: proc($T: typeid, allocator := context.allocator) -> Binding_Map(T) {
+	return {inner = make(map[u32]map[u32]T, allocator = allocator)}
+}
+
+binding_map_clone :: proc(
+	b: Binding_Map($T),
+	allocator := context.allocator,
+) -> (
+	dst: Binding_Map(T),
+) {
+	context.allocator = allocator
+	dst = make_binding_map(T)
+	for ko, vo in b.inner {
+		for ki, vi in vo {
+			binding_map_set_binding(&dst, ko, vi, ki)
+		}
+	}
+	return dst
+}
+
+binding_map_destroy :: proc(b: ^Binding_Map($T)) {
+	for _, v in b.inner {
+		delete(v)
+	}
+	delete(b.inner)
 }
 
 binding_map_set_binding :: proc(
@@ -51,13 +74,21 @@ descriptor_set_init :: proc(
 ) {
 	set.descriptor_set_layout = layout
 	set.descriptor_pool = pool
-	set.buffer_infos = buffer_infos
-	set.image_infos = image_infos
-	set.acceleration_structure_infos = acceleration_structure_infos
+	set.buffer_infos = binding_map_clone(buffer_infos)
+	set.image_infos = binding_map_clone(image_infos)
+	set.acceleration_structure_infos = binding_map_clone(acceleration_structure_infos)
 	set.handle = descriptor_pool_allocate(pool, ctx) or_return
 
 	descriptor_set_prepare(set, ctx)
 	return nil
+}
+
+descriptor_set_destroy :: proc(set: ^Descriptor_Set2) {
+	binding_map_destroy(&set.buffer_infos)
+	binding_map_destroy(&set.image_infos)
+	binding_map_destroy(&set.acceleration_structure_infos)
+	delete(set.write_descriptor_sets)
+	delete(set.updated_bindings)
 }
 
 descriptor_set_prepare :: proc(set: ^Descriptor_Set2, ctx: ^Vulkan_Context) {
