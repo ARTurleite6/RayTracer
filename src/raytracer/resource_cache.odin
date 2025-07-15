@@ -26,7 +26,10 @@ resource_cache_init :: proc(ctx: ^Vulkan_Context, allocator := context.allocator
 	cache := &ctx.cache
 
 	cache.descriptor_set_layots = make(map[u32]Descriptor_Set_Layout)
+	cache.descriptor_set_layouts2 = make(map[u32]^Descriptor_Set_Layout2)
 	cache.pipeline_layouts = make(map[u32]vk.PipelineLayout)
+	cache.pipeline_layouts2 = make(map[u32]^Pipeline_Layout)
+	cache.raytracing_pipelines2 = make(map[u32]^Raytracing_Pipeline2)
 	cache.raytracing_pipelines = make(map[u32]vk.Pipeline)
 	cache.shaders = make(map[u32]Shader)
 }

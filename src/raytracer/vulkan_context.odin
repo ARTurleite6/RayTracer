@@ -210,7 +210,7 @@ ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> (cmd: Command_Buffer
 
 	vk.BeginCommandBuffer(buffer, &begin_info)
 
-	command_buffer_init(&cmd, buffer)
+	command_buffer_init(&cmd, ctx, buffer)
 	return cmd
 }
 

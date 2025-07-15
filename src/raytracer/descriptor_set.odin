@@ -2,12 +2,15 @@ package raytracer
 
 import "core:hash/xxhash"
 import "core:log"
+import "core:mem"
 import "core:slice"
 
 import vk "vendor:vulkan"
 
 Binding_Map :: struct($T: typeid) {
-	inner: map[u32]map[u32]T,
+	inner:     map[u32]map[u32]T,
+	// TODO: maybe in the future this could be an arena allocator
+	allocator: mem.Allocator,
 }
 
 Descriptor_Set2 :: struct {
@@ -22,7 +25,7 @@ Descriptor_Set2 :: struct {
 }
 
 make_binding_map :: proc($T: typeid, allocator := context.allocator) -> Binding_Map(T) {
-	return {inner = make(map[u32]map[u32]T, allocator = allocator)}
+	return {inner = make(map[u32]map[u32]T, allocator = allocator), allocator = allocator}
 }
 
 binding_map_clone :: proc(
@@ -42,6 +45,7 @@ binding_map_clone :: proc(
 }
 
 binding_map_destroy :: proc(b: ^Binding_Map($T)) {
+	context.allocator = b.allocator
 	for _, v in b.inner {
 		delete(v)
 	}
@@ -56,7 +60,7 @@ binding_map_set_binding :: proc(
 ) {
 	_, value_ptr, just_inserted, _ := map_entry(&b.inner, binding)
 	if just_inserted {
-		value_ptr^ = make(map[u32]T)
+		value_ptr^ = make(map[u32]T, b.allocator)
 	}
 	value_ptr[array_element] = value
 }
@@ -237,8 +241,6 @@ descriptor_set_update2 :: proc(
 			}
 		}
 	}
-
-	log.debug(write_operations)
 
 	if len(write_operations) > 0 {
 		vk.UpdateDescriptorSets(

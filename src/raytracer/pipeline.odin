@@ -37,6 +37,7 @@ Pipeline_State :: struct {
 
 	// raytracing
 	max_ray_recursion: u32,
+	dirty:             bool,
 }
 
 raytracing_pipeline_init :: proc(

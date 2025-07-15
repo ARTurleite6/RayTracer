@@ -2,6 +2,7 @@
 package raytracer
 
 import "core:log"
+import "core:mem"
 import "core:slice"
 _ :: slice
 _ :: log
@@ -92,7 +93,8 @@ raytracing_renderer_init :: proc(
 		shader_module_init(&renderer.shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
 		shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
 		shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
-		renderer.pipeline_layout, _ = resource_cache_request_pipeline_layout(
+		layout_err: vk.Result
+		renderer.pipeline_layout, layout_err = resource_cache_request_pipeline_layout(
 			&renderer.ctx.cache,
 			&renderer.ctx,
 			{
@@ -234,9 +236,6 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 	renderer.current_image_index, _ = ctx_begin_frame(&renderer.ctx)
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
-
-	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
-	command_buffer_bind_image(&renderer.current_cmd, output_image_view, 0, 2, 0, 0)
 }
 
 raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera: ^Camera) {
@@ -246,6 +245,16 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 		renderer.accumulation_frame = 1
 		camera.dirty = false
 	}
+
+	command_buffer_set_raytracing_program(
+		cmd,
+		{
+			rgen_shader = &renderer.shaders[0],
+			miss_shaders = {&renderer.shaders[1], &renderer.shaders[2]},
+			closest_hit_shaders = {&renderer.shaders[3]},
+			max_tracing_depth = 2,
+		},
+	)
 
 	ubo_data := Camera_UBO {
 		projection         = camera.proj,
@@ -259,50 +268,56 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
 	buffer_unmap(ubo_buffer)
 
-	descriptor_sets := slice.mapper(
-		renderer.descriptor_sets[:],
-		proc(set: ^Descriptor_Set2) -> vk.DescriptorSet {
-			return set.handle
-		},
-		allocator = context.temp_allocator,
+	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+	// TODO: maybe add also layout tracking into the image
+	command_buffer_bind_resource(
+		cmd,
+		2,
+		0,
+		vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
 	)
-
-	vk.CmdBindDescriptorSets(
-		cmd.buffer,
-		.RAY_TRACING_KHR,
-		renderer.raytracing_pipeline.state.layout.handle,
+	command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		0,
+		vk.WriteDescriptorSetAccelerationStructureKHR {
+			sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			accelerationStructureCount = 1,
+			pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
+		},
+	)
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		1,
+		buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
+	)
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		2,
+		buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
+	)
+	command_buffer_bind_resource(
+		cmd,
 		0,
 		3,
-		raw_data(descriptor_sets),
-		0,
-		nil,
+		buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
 	)
 
-	vk.CmdPushConstants(
-		cmd.buffer,
-		renderer.raytracing_pipeline.state.layout.handle,
-		{.RAYGEN_KHR},
+	command_buffer_push_constant_range(
+		cmd,
 		0,
-		size_of(Raytracing_Push_Constant),
-		&Raytracing_Push_Constant {
-			clear_color = {0.2, 0.2, 0.2},
-			accumulation_frame = renderer.accumulation_frame,
-		},
+		mem.any_to_bytes(
+			Raytracing_Push_Constant {
+				clear_color = {0.2, 0.2, 0.2},
+				accumulation_frame = renderer.accumulation_frame,
+			},
+		),
 	)
-
-	vk.CmdBindPipeline(cmd.buffer, .RAY_TRACING_KHR, renderer.raytracing_pipeline.handle)
-
 	extent := renderer.ctx.swapchain_manager.extent
-	vk.CmdTraceRaysKHR(
-		cmd.buffer,
-		&renderer.raytracing_pipeline.sbt.regions[.Ray_Gen],
-		&renderer.raytracing_pipeline.sbt.regions[.Miss],
-		&renderer.raytracing_pipeline.sbt.regions[.Hit],
-		&renderer.raytracing_pipeline.sbt.regions[.Callable],
-		extent.width,
-		extent.height,
-		1,
-	)
+	command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
 
 	output_image := image_set_get(&renderer.output_images, renderer.ctx.current_frame)
 	image_index := renderer.current_image_index
@@ -373,16 +388,6 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 }
 
 raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
-	// ctx_transition_swapchain_image(
-	// 	renderer.ctx,
-	// 	renderer.current_cmd,
-	// 	.UNDEFINED,
-	// 	.PRESENT_SRC_KHR,
-	// 	{.TRANSFER},
-	// 	{.BOTTOM_OF_PIPE},
-	// 	{.TRANSFER_WRITE},
-	// 	{},
-	// )
 	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 

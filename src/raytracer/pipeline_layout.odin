@@ -27,7 +27,7 @@ pipeline_layout_init2 :: proc(
 ) -> (
 	err: vk.Result,
 ) {
-	layout.shader_modules = shader_modules
+	layout.shader_modules = slice.clone(shader_modules)
 
 	for module in shader_modules {
 		for resource in module.resources {
@@ -129,6 +129,7 @@ pipeline_layout_destroy :: proc(
 	}
 	delete(layout.shader_sets)
 	delete(layout.descriptor_set_layouts)
+	delete(layout.shader_modules)
 
 	vk.DestroyPipelineLayout(vulkan_get_device_handle(ctx), layout.handle, nil)
 }
@@ -147,6 +148,26 @@ pipeline_layout_get_resources :: proc(
 		}
 	}
 	return result[:]
+}
+
+pipeline_layout_get_push_constant_range_stages :: proc(
+	layout: Pipeline_Layout,
+	size: u32,
+	offset: u32,
+) -> (
+	stages: vk.ShaderStageFlags,
+) {
+	resources := pipeline_layout_get_resources(
+		layout,
+		.Push_Constant,
+		allocator = context.temp_allocator,
+	)
+	for res in resources {
+		if offset >= res.offset && offset + size <= res.offset + res.size {
+			stages |= res.stages
+		}
+	}
+	return stages
 }
 
 // make_pipeline_layout :: proc(
