@@ -24,6 +24,10 @@ Raytracing_Pipeline2 :: struct {
 	sbt:            Shader_Binding_Table,
 }
 
+Graphics_Pipeline :: struct {
+	using pipeline: Pipeline2,
+}
+
 Pipeline :: struct {
 	handle:                 vk.Pipeline,
 	layout:                 vk.PipelineLayout,
@@ -32,8 +36,35 @@ Pipeline :: struct {
 	push_constant_ranges:   [dynamic]vk.PushConstantRange,
 }
 
+Vertex_Input_State :: struct {
+	bindings:   [dynamic]vk.VertexInputBindingDescription,
+	attributes: [dynamic]vk.VertexInputAttributeDescription,
+}
+
+Input_Assembly_State :: struct {
+	topology: vk.PrimitiveTopology,
+}
+
+Rasterization_State :: struct {
+	depth_clamp_enable:        bool,
+	rasterizer_discard_enable: bool,
+	polygon_mode:              vk.PolygonMode,
+	cull_mode:                 vk.CullModeFlags,
+	front_face:                vk.FrontFace,
+	depth_bias_enable:         bool,
+}
+
+Viewport_State :: struct {
+	viewport_count: u32,
+	scissor_count:  u32,
+}
+
 Pipeline_State :: struct {
 	layout:            ^Pipeline_Layout,
+	vertex_input:      Vertex_Input_State,
+	input_assembly:    Input_Assembly_State,
+	rasterization:     Rasterization_State,
+	viewport:          Viewport_State,
 
 	// raytracing
 	max_ray_recursion: u32,
@@ -48,6 +79,15 @@ raytracing_pipeline_init :: proc(
 	err: vk.Result,
 ) {
 	pipeline.state = state
+
+	shader_stages := to_pipeline_shader_stage_craete_info(
+		pipeline.state.layout.shader_modules[:],
+		ctx,
+		context.temp_allocator,
+	) or_return
+	defer for shader in shader_stages {
+		vk.DestroyShaderModule(vulkan_get_device_handle(ctx), shader.module, nil)
+	}
 
 	for shader, i in state.layout.shader_modules {
 		if .RAYGEN_KHR in shader.stage {
@@ -93,51 +133,6 @@ raytracing_pipeline_init :: proc(
 		}
 	}
 
-	shader_stages := make(
-		[dynamic]vk.PipelineShaderStageCreateInfo,
-		0,
-		len(pipeline.state.layout.shader_modules),
-	)
-	defer delete(shader_stages)
-	shader_modules := make([dynamic]vk.ShaderModule, 0, len(pipeline.state.layout.shader_modules))
-	defer {
-		defer for module in shader_modules {
-			vk.DestroyShaderModule(vulkan_get_device_handle(ctx), module, nil)
-		}
-
-		delete(shader_modules)
-	}
-
-	for s in pipeline.state.layout.shader_modules {
-		module_create_info := vk.ShaderModuleCreateInfo {
-			sType    = .SHADER_MODULE_CREATE_INFO,
-			codeSize = len(s.compiled_src) * size_of(u32),
-			pCode    = &s.compiled_src[0],
-		}
-
-		module: vk.ShaderModule
-		vk_check(
-			vk.CreateShaderModule(
-				vulkan_get_device_handle(ctx),
-				&module_create_info,
-				nil,
-				&module,
-			),
-			"Failed to creaste shader module",
-		) or_return
-
-		append(&shader_modules, module)
-
-		stage_create_info := vk.PipelineShaderStageCreateInfo {
-			sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-			stage  = s.stage,
-			pName  = strings.clone_to_cstring(s.entry_point, context.temp_allocator),
-			module = module,
-		}
-
-		append(&shader_stages, stage_create_info)
-	}
-
 	create_info := vk.RayTracingPipelineCreateInfoKHR {
 		sType                        = .RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
 		stageCount                   = u32(len(pipeline.state.layout.shader_modules)),
@@ -172,6 +167,50 @@ raytracing_pipeline_init :: proc(
 }
 
 raytracing_pipeline_destroy :: proc(pipeline: ^Raytracing_Pipeline2, ctx: ^Vulkan_Context) {
+	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
+	shader_binding_table_destroy(&pipeline.sbt)
+}
+
+graphics_pipeline_init :: proc(
+	pipeline: ^Graphics_Pipeline,
+	ctx: ^Vulkan_Context,
+	state: Pipeline_State,
+) {
+	pipeline.state = state
+
+	shader_stages := to_pipeline_shader_stage_craete_info(
+		pipeline.state.layout.shader_modules[:],
+		ctx,
+		context.temp_allocator,
+	) or_return
+	defer for shader in shader_stages {
+		vk.DestroyShaderModule(vulkan_get_device_handle(ctx), shader.module, nil)
+	}
+
+	vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		vertexBindingDescriptionCount   = u32(len(state.vertex_input.bindings)),
+		pVertexBindingDescriptions      = raw_data(state.vertex_input.bindings[:]),
+		vertexAttributeDescriptionCount = u32(len(state.vertex_input.attributes)),
+		pVertexAttributeDescriptions    = raw_data(state.vertex_input.attributes[:]),
+	}
+
+	input_assembly_info := vk.PipelineInputAssemblyStateCreateInfo {
+		sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		topology               = state.input_assembly.topology,
+		primitiveRestartEnable = false,
+	}
+
+	create_info := vk.GraphicsPipelineCreateInfo {
+		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		stageCount          = u32(len(shader_stages)),
+		pStages             = raw_data(shader_stages),
+		pVertexInputState   = &vertex_input_info,
+		pInputAssemblyState = &input_assembly_info,
+	}
+}
+
+graphics_pipeline_destroy :: proc(pipeline: ^Graphics_Pipeline, ctx: ^Vulkan_Context) {
 	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
 }
 
@@ -210,7 +249,6 @@ pipeline_destroy :: proc(self: ^Pipeline, device: vk.Device) {
 		delete(shader.pName)
 	}
 	delete(self.shaders)
-
 }
 
 pipeline_build_layout :: proc(self: ^Pipeline, device: vk.Device) -> (result: vk.Result) {
@@ -226,4 +264,45 @@ pipeline_build_layout :: proc(self: ^Pipeline, device: vk.Device) -> (result: vk
 		vk.CreatePipelineLayout(device, &create_info, nil, &self.layout),
 		"Failed to create pipeline layout",
 	)
+}
+
+@(private)
+@(require_results)
+to_pipeline_shader_stage_craete_info :: proc(
+	modules: []^Shader_Module,
+	ctx: ^Vulkan_Context,
+	allocator := context.allocator,
+) -> (
+	create_infos: []vk.PipelineShaderStageCreateInfo,
+	err: vk.Result,
+) {
+	create_infos = make([]vk.PipelineShaderStageCreateInfo, len(modules), allocator)
+	for shader, i in modules {
+		module_create_info := vk.ShaderModuleCreateInfo {
+			sType    = .SHADER_MODULE_CREATE_INFO,
+			codeSize = len(shader.compiled_src) * size_of(u32),
+			pCode    = &shader.compiled_src[0],
+		}
+
+		module: vk.ShaderModule
+		vk_check(
+			vk.CreateShaderModule(
+				vulkan_get_device_handle(ctx),
+				&module_create_info,
+				nil,
+				&module,
+			),
+			"Failed to creaste shader module",
+		) or_return
+
+		stage_create_info := vk.PipelineShaderStageCreateInfo {
+			sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+			stage  = shader.stage,
+			pName  = strings.clone_to_cstring(shader.entry_point, context.temp_allocator),
+			module = module,
+		}
+		create_infos[i] = stage_create_info
+	}
+
+	return create_infos, nil
 }

@@ -116,13 +116,13 @@ reflect_shader_resources :: proc(
 	defer spvc.context_destroy(ctx)
 
 	ir: spvc.parsed_ir
-	result = spvc.context_parse_spirv(ctx, raw_data(code), len(code), &ir)
+	spvc.context_parse_spirv(ctx, raw_data(code), len(code), &ir) or_return
 	compiler: spvc.compiler
 	spvc.context_create_compiler(ctx, .GLSL, ir, .TAKE_OWNERSHIP, &compiler) or_return
 
 	result_resources := make([dynamic]Shader_Resource)
-	parse_shader_resources(compiler, stage, &result_resources)
-	parse_push_constants(compiler, stage, &result_resources)
+	parse_shader_resources(compiler, stage, &result_resources) or_return
+	parse_push_constants(compiler, stage, &result_resources) or_return
 
 	return result_resources[:], nil
 }

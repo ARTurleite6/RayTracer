@@ -7,6 +7,7 @@ Image_Set :: struct {
 	image_views: []vk.ImageView,
 }
 
+@(require_results)
 make_image_set :: proc(
 	ctx: ^Vulkan_Context,
 	format: vk.Format,
@@ -19,12 +20,11 @@ make_image_set :: proc(
 	is.images = make([]Image, frames_in_flight, allocator)
 	is.image_views = make([]vk.ImageView, frames_in_flight, allocator)
 
+	cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
+	defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
 	for &img, idx in is.images {
 		image_init(&img, ctx, format, extent)
 		image_view_init(&is.image_views[idx], img, ctx)
-
-		cmd := device_begin_single_time_commands(ctx.device, ctx.device.command_pool)
-		defer device_end_single_time_commands(ctx.device, ctx.device.command_pool, cmd)
 
 		image_transition_layout_stage_access(
 			cmd,
