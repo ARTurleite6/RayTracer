@@ -11,11 +11,9 @@ camera_controller_init :: proc(self: ^Camera_Controller, position: Vec3, aspect_
 }
 
 camera_controller_on_event :: proc(self: ^Camera_Controller, event: Event) {
-	dispatch(event, Resize_Event, proc(user_data: rawptr, event: Resize_Event) -> bool {
-			self := cast(^Camera_Controller)user_data
-			camera_on_resize(&self.camera, f32(event.width) / f32(event.height))
-			return true
-		}, self)
+	if event, ok := event.(Resize_Event); ok {
+		camera_on_resize(&self.camera, f32(event.width) / f32(event.height))
+	}
 }
 
 camera_controller_on_update :: proc(self: ^Camera_Controller, ts: f32) {

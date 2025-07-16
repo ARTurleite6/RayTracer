@@ -232,6 +232,105 @@ command_buffer_trace_rays :: proc(cmd: ^Command_Buffer, width, height: u32, dept
 		1,
 	)
 }
+
+command_buffer_image_blit :: proc(
+	cmd: Command_Buffer,
+	dst, src: vk.Image,
+	dst_offset, dst_extent, src_offset, src_extent: vk.Offset3D,
+	dst_level, src_level, dst_base_layer, src_base_layer, num_layers: u32,
+	dst_format, src_format: vk.Format,
+	filter: vk.Filter,
+) {
+	add_offset :: proc(a, b: vk.Offset3D) -> vk.Offset3D {
+		return {a.x + b.x, a.y + b.y, a.z + b.z}
+	}
+
+	blit_region := vk.ImageBlit {
+		srcSubresource = {
+			aspectMask = format_to_aspect_mask(src_format),
+			mipLevel = src_level,
+			baseArrayLayer = src_base_layer,
+			layerCount = num_layers,
+		},
+		srcOffsets = [2]vk.Offset3D{src_offset, add_offset(src_offset, src_extent)},
+		dstSubresource = {
+			aspectMask = format_to_aspect_mask(dst_format),
+			mipLevel = dst_level,
+			baseArrayLayer = dst_base_layer,
+			layerCount = num_layers,
+		},
+		dstOffsets = [2]vk.Offset3D{dst_offset, add_offset(dst_offset, dst_extent)},
+	}
+
+	vk.CmdBlitImage(
+		cmd.buffer,
+		src,
+		.TRANSFER_SRC_OPTIMAL,
+		dst,
+		.TRANSFER_DST_OPTIMAL,
+		1,
+		&blit_region,
+		filter,
+	)
+}
+
+command_buffer_image_layout_transition :: proc(
+	cmd: Command_Buffer,
+	image: vk.Image,
+	old_layout, new_layout: vk.ImageLayout,
+) {
+	src_stage := get_pipeline_stage_flags(old_layout)
+	dst_stage := get_pipeline_stage_flags(new_layout)
+
+	src_access := get_access_flags(old_layout)
+	dst_access := get_access_flags(new_layout)
+
+	command_buffer_image_layout_transition_stage_access(
+		cmd,
+		image,
+		old_layout,
+		new_layout,
+		src_stage,
+		dst_stage,
+		src_access,
+		dst_access,
+	)
+}
+
+command_buffer_image_layout_transition_stage_access :: proc(
+	cmd: Command_Buffer,
+	image: vk.Image,
+	old_layout, new_layout: vk.ImageLayout,
+	src_stage, dst_stage: vk.PipelineStageFlags2,
+	src_access, dst_access: vk.AccessFlags2,
+) {
+	barrier := vk.ImageMemoryBarrier2 {
+		sType = .IMAGE_MEMORY_BARRIER_2,
+		srcStageMask = src_stage,
+		srcAccessMask = src_access,
+		dstStageMask = dst_stage,
+		dstAccessMask = dst_access,
+		oldLayout = old_layout,
+		newLayout = new_layout,
+		image = image,
+		subresourceRange = {
+			aspectMask = {.COLOR},
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+	}
+
+	dependency_info := vk.DependencyInfo {
+		sType                   = .DEPENDENCY_INFO,
+		imageMemoryBarrierCount = 1,
+		pImageMemoryBarriers    = &barrier,
+	}
+
+	vk.CmdPipelineBarrier2(cmd.buffer, &dependency_info)
+}
+
 command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPoint) -> vk.Result {
 	// flush pipeline
 	if cmd.pipeline_state.dirty {

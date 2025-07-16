@@ -22,14 +22,8 @@ Raytracing_Renderer :: struct {
 	current_cmd:         Command_Buffer,
 	accumulation_frame:  u32,
 
-	// resources
-	gbuffers:            GBuffers,
-	raytracing_pipeline: ^Raytracing_Pipeline2,
-
 	// TODO: remove this in the future
 	shaders:             [4]Shader_Module,
-	pipeline_layout:     ^Pipeline_Layout,
-	descriptor_sets:     [3]^Descriptor_Set2,
 }
 
 GBuffers :: struct {
@@ -60,101 +54,10 @@ raytracing_renderer_init :: proc(
 		MAX_FRAMES_IN_FLIGHT,
 	)
 
-	{ 	// initialize resources
-		buffers := &renderer.gbuffers
-		buffers.world_position = make_image_set(
-			&renderer.ctx,
-			.R32G32B32A32_SFLOAT,
-			renderer.ctx.swapchain_manager.extent,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-		buffers.normal = make_image_set(
-			&renderer.ctx,
-			.R16G16B16A16_SFLOAT,
-			renderer.ctx.swapchain_manager.extent,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-		buffers.albedo = make_image_set(
-			&renderer.ctx,
-			.R32G32B32A32_SFLOAT,
-			renderer.ctx.swapchain_manager.extent,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-		buffers.material_properties = make_image_set(
-			&renderer.ctx,
-			.R32G32_SFLOAT,
-			renderer.ctx.swapchain_manager.extent,
-			MAX_FRAMES_IN_FLIGHT,
-		)
-	}
-
-	{
-		shader_module_init(&renderer.shaders[0], {.RAYGEN_KHR}, "shaders/rgen.spv", "main")
-		shader_module_init(&renderer.shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
-		shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
-		shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
-		layout_err: vk.Result
-		renderer.pipeline_layout, layout_err = resource_cache_request_pipeline_layout(
-			&renderer.ctx.cache,
-			&renderer.ctx,
-			{
-				&renderer.shaders[0],
-				&renderer.shaders[1],
-				&renderer.shaders[2],
-				&renderer.shaders[3],
-			},
-		)
-
-		renderer.raytracing_pipeline, _ = resource_cache_request_raytracing_pipeline(
-			&renderer.ctx.cache,
-			&renderer.ctx,
-			{layout = renderer.pipeline_layout, max_ray_recursion = 2},
-		)
-	}
-
-	// TODO: make all this bindings on the command buffer on flight
-	{ 	// setting set 2
-		image_set_layout := renderer.pipeline_layout.descriptor_set_layouts[2]
-		b := make_binding_map(vk.DescriptorImageInfo, context.temp_allocator)
-		binding_map_set_binding(
-			&b,
-			0,
-			vk.DescriptorImageInfo {
-				imageView = image_set_get_view(renderer.output_images, 0),
-				imageLayout = .GENERAL,
-			},
-		)
-		renderer.descriptor_sets[2], _ = resource_cache_request_descriptor_set2(
-			&renderer.ctx.cache,
-			&renderer.ctx,
-			layout = image_set_layout,
-			buffer_infos = {},
-			image_infos = b,
-			acceleration_structure_infos = {},
-		)
-		descriptor_set_update2(renderer.descriptor_sets[2], &renderer.ctx)
-	}
-
-	{ 	// camera set
-		set_layout := renderer.pipeline_layout.descriptor_set_layouts[1]
-		buffer_b := make_binding_map(vk.DescriptorBufferInfo, context.temp_allocator)
-		binding_map_set_binding(
-			&buffer_b,
-			0,
-			buffer_descriptor_info(renderer.camera_ubo.buffers[0]),
-		)
-
-		renderer.descriptor_sets[1], _ = resource_cache_request_descriptor_set2(
-			&renderer.ctx.cache,
-			&renderer.ctx,
-			set_layout,
-			buffer_infos = buffer_b,
-			image_infos = {},
-			acceleration_structure_infos = {},
-		)
-		descriptor_set_update2(renderer.descriptor_sets[1], &renderer.ctx)
-	}
-
+	shader_module_init(&renderer.shaders[0], {.RAYGEN_KHR}, "shaders/rgen.spv", "main")
+	shader_module_init(&renderer.shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
+	shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
+	shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 }
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
@@ -166,14 +69,6 @@ raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 	}
 
 	uniform_buffer_set_destroy(&renderer.ctx, &renderer.camera_ubo)
-	image_set_destroy(&renderer.ctx, &renderer.output_images)
-	{ 	// destroy gbuffers
-		buffers := &renderer.gbuffers
-		image_set_destroy(&renderer.ctx, &buffers.world_position)
-		image_set_destroy(&renderer.ctx, &buffers.albedo)
-		image_set_destroy(&renderer.ctx, &buffers.normal)
-		image_set_destroy(&renderer.ctx, &buffers.material_properties)
-	}
 
 	for &shader in renderer.shaders {
 		shader_module_destroy(&shader)
@@ -185,51 +80,6 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 	renderer.scene = scene
 	if renderer.scene != nil {
 		gpu_scene2_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
-
-		{ 	// setting set 0
-			set_layout := renderer.pipeline_layout.descriptor_set_layouts[0]
-			as_b := make_binding_map(
-				vk.WriteDescriptorSetAccelerationStructureKHR,
-				context.temp_allocator,
-			)
-			binding_map_set_binding(
-				&as_b,
-				0,
-				vk.WriteDescriptorSetAccelerationStructureKHR {
-					sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-					accelerationStructureCount = 1,
-					pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
-				},
-			)
-
-			buffer_b := make_binding_map(vk.DescriptorBufferInfo, context.temp_allocator)
-			binding_map_set_binding(
-				&buffer_b,
-				1,
-				buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
-			)
-			binding_map_set_binding(
-				&buffer_b,
-				2,
-				buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
-			)
-			binding_map_set_binding(
-				&buffer_b,
-				3,
-				buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
-			)
-
-			renderer.descriptor_sets[0], _ = resource_cache_request_descriptor_set2(
-				&renderer.ctx.cache,
-				&renderer.ctx,
-				layout = set_layout,
-				buffer_infos = buffer_b,
-				image_infos = {},
-				acceleration_structure_infos = as_b,
-			)
-			descriptor_set_update2(renderer.descriptor_sets[0], &renderer.ctx)
-		}
-
 	}
 }
 
@@ -246,27 +96,16 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 		camera.dirty = false
 	}
 
-	command_buffer_set_raytracing_program(
-		cmd,
-		{
-			rgen_shader = &renderer.shaders[0],
-			miss_shaders = {&renderer.shaders[1], &renderer.shaders[2]},
-			closest_hit_shaders = {&renderer.shaders[3]},
-			max_tracing_depth = 2,
-		},
-	)
-
-	ubo_data := Camera_UBO {
-		projection         = camera.proj,
-		view               = camera.view,
-		inverse_view       = camera.inverse_view,
-		inverse_projection = camera.inverse_proj,
-	}
 	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
-	buffer_map(ubo_buffer)
-	buffer_write(ubo_buffer, &ubo_data)
-	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
-	buffer_unmap(ubo_buffer)
+	update_camera_ubo(renderer, ubo_buffer, camera)
+
+	spec := Raytracing_Spec {
+		rgen_shader         = &renderer.shaders[0],
+		miss_shaders        = {&renderer.shaders[1], &renderer.shaders[2]},
+		closest_hit_shaders = {&renderer.shaders[3]},
+		max_tracing_depth   = 2,
+	}
+	command_buffer_set_raytracing_program(cmd, spec)
 
 	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
 	// TODO: maybe add also layout tracking into the image
@@ -319,72 +158,73 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 	extent := renderer.ctx.swapchain_manager.extent
 	command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
 
-	output_image := image_set_get(&renderer.output_images, renderer.ctx.current_frame)
-	image_index := renderer.current_image_index
-	storage_image := output_image.handle
-	swapchain_image := renderer.ctx.swapchain_manager.images[image_index]
-	ctx_transition_swapchain_image(
-		renderer.ctx,
-		cmd^,
-		.UNDEFINED,
-		.TRANSFER_DST_OPTIMAL,
-		{.TOP_OF_PIPE},
-		{.TRANSFER},
-		{},
-		{.TRANSFER_WRITE},
-	)
-	// image_transition_layout(cmd, swapchain_image, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
-	image_transition_layout_stage_access(
-		cmd.buffer,
-		storage_image,
-		.GENERAL,
-		.TRANSFER_SRC_OPTIMAL,
-		{.ALL_COMMANDS},
-		{.TRANSFER},
-		{},
-		{.TRANSFER_READ},
-	)
+	{
+		output_image := image_set_get(&renderer.output_images, renderer.ctx.current_frame)
+		image_index := renderer.current_image_index
+		storage_image := output_image.handle
+		swapchain_image := renderer.ctx.swapchain_manager.images[image_index]
+		command_buffer_image_layout_transition_stage_access(
+			cmd^,
+			renderer.ctx.swapchain_manager.images[renderer.ctx.current_image],
+			.UNDEFINED,
+			.TRANSFER_DST_OPTIMAL,
+			{.TOP_OF_PIPE},
+			{.TRANSFER},
+			{},
+			{.TRANSFER_WRITE},
+		)
 
-	blit_region := vk.ImageBlit {
-		srcSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
-		srcOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(extent.width), i32(extent.height), 1}},
-		dstSubresource = {aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
-		dstOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(extent.width), i32(extent.height), 1}},
+		command_buffer_image_layout_transition_stage_access(
+			cmd^,
+			output_image.handle,
+			.GENERAL,
+			.TRANSFER_SRC_OPTIMAL,
+			{.ALL_COMMANDS},
+			{.TRANSFER},
+			{},
+			{.TRANSFER_READ},
+		)
+		command_buffer_image_blit(
+			cmd^,
+			dst = swapchain_image,
+			src = storage_image,
+			dst_offset = {0, 0, 0},
+			dst_extent = {i32(extent.width), i32(extent.height), 1},
+			src_offset = {0, 0, 0},
+			src_extent = {i32(extent.width), i32(extent.height), 1},
+			dst_level = 0,
+			src_level = 0,
+			dst_base_layer = 0,
+			src_base_layer = 0,
+			dst_format = renderer.ctx.swapchain_manager.format,
+			src_format = output_image.format,
+			num_layers = 1,
+			filter = .LINEAR,
+		)
+
+		command_buffer_image_layout_transition_stage_access(
+			cmd^,
+			swapchain_image,
+			.TRANSFER_DST_OPTIMAL,
+			.PRESENT_SRC_KHR,
+			{.TRANSFER},
+			{.BOTTOM_OF_PIPE},
+			{.TRANSFER_WRITE},
+			{},
+		)
+
+		// Transition ray tracing output image back to general layout
+		command_buffer_image_layout_transition_stage_access(
+			cmd^,
+			storage_image,
+			.TRANSFER_SRC_OPTIMAL,
+			.GENERAL,
+			{.TRANSFER},
+			{.ALL_COMMANDS},
+			{.TRANSFER_READ},
+			{},
+		)
 	}
-
-	// Perform blit operation
-	vk.CmdBlitImage(
-		cmd.buffer,
-		storage_image,
-		.TRANSFER_SRC_OPTIMAL,
-		swapchain_image,
-		.TRANSFER_DST_OPTIMAL,
-		1,
-		&blit_region,
-		.LINEAR, // Use LINEAR for better quality conversion
-	)
-	ctx_transition_swapchain_image(
-		renderer.ctx,
-		cmd^,
-		.TRANSFER_DST_OPTIMAL,
-		.PRESENT_SRC_KHR,
-		{.TRANSFER},
-		{.BOTTOM_OF_PIPE},
-		{.TRANSFER_WRITE},
-		{},
-	)
-
-	// Transition ray tracing output image back to general layout
-	image_transition_layout_stage_access(
-		cmd.buffer,
-		storage_image,
-		.TRANSFER_SRC_OPTIMAL,
-		.GENERAL,
-		{.TRANSFER},
-		{.ALL_COMMANDS},
-		{.TRANSFER_READ},
-		{},
-	)
 }
 
 raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
@@ -393,4 +233,19 @@ raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
 
 	command_buffer_destroy(&renderer.current_cmd)
 	renderer.accumulation_frame += 1
+}
+
+@(private = "file")
+update_camera_ubo :: proc(renderer: ^Raytracing_Renderer, ubo_buffer: ^Buffer, camera: ^Camera) {
+	ubo_data := Camera_UBO {
+		projection         = camera.proj,
+		view               = camera.view,
+		inverse_view       = camera.inverse_view,
+		inverse_projection = camera.inverse_proj,
+	}
+	buffer_map(ubo_buffer)
+	buffer_write(ubo_buffer, &ubo_data)
+	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
+	buffer_unmap(ubo_buffer)
+
 }

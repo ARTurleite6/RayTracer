@@ -136,6 +136,22 @@ image_transition_layout_stage_access :: proc(
 	vk.CmdPipelineBarrier2(cmd, &dependency_info)
 }
 
+@(require_results)
+format_to_aspect_mask :: proc(format: vk.Format) -> vk.ImageAspectFlags {
+	#partial switch format {
+	case .UNDEFINED:
+		return {}
+	case .R8_UINT:
+		return {.STENCIL}
+	case .D16_UNORM_S8_UINT, .D24_UNORM_S8_UINT, .D32_SFLOAT_S8_UINT:
+		return {.STENCIL, .DEPTH}
+	case .D16_UNORM, .D32_SFLOAT, .X8_D24_UNORM_PACK32:
+		return {.DEPTH}
+	case:
+		return {.COLOR}
+	}
+}
+
 get_pipeline_stage_flags :: proc(layout: vk.ImageLayout) -> vk.PipelineStageFlags2 {
 	#partial switch layout {
 	case .UNDEFINED:

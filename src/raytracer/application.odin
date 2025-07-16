@@ -103,20 +103,23 @@ application_run :: proc(app: ^Application) {
 application_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	app := (^Application)(handler.data)
 
-	dispatch(event, Resize_Event, application_on_resize, app)
-	dispatch(event, Window_Close_Event, application_on_window_close, app)
+	#partial switch v in event {
+	case Resize_Event:
+		application_on_resize(app, v.width, v.height)
+	case Window_Close_Event:
+		application_on_window_close(app)
+	}
 
 	camera_controller_on_event(&app.camera_controller, event)
 }
 
-application_on_resize :: proc(user_data: rawptr, event: Resize_Event) -> bool {
+application_on_resize :: proc(app: ^Application, width, height: i32) -> bool {
 	// app := (^Application)(user_data)
 	// renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
 	return true
 }
 
-application_on_window_close :: proc(user_data: rawptr, event: Window_Close_Event) -> bool {
-	app := (^Application)(user_data)
+application_on_window_close :: proc(app: ^Application) -> bool {
 	app.running = false
 	return true
 }
