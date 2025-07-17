@@ -14,6 +14,8 @@ hash_param :: proc {
 	hash_param_pipeline_state,
 	hash_param_pipeline_layout,
 	hash_param_shader_modules_list,
+	hash_param_vertex_input_attribute_description,
+	hash_param_vertex_input_binding_description,
 }
 
 hash_param_shader_modules_list :: proc(
@@ -29,13 +31,106 @@ hash_param_pipeline_state :: proc(state: ^xxhash.XXH32_state, pipeline_state: Pi
 	pipeline_layout := pipeline_state.layout
 	hash_param_pipeline_layout(state, pipeline_layout.handle)
 
-	//add logic for render passes on graphics pipeline
-
 	for shader_module in pipeline_layout.shader_modules {
 		xxhash.XXH32_update(state, mem.any_to_bytes(shader_module.id))
 	}
 
+	for c in pipeline_state.color_attachment_formats {
+		xxhash.XXH32_update(state, mem.any_to_bytes(c))
+	}
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_attachment_format))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.stencil_attachment_format))
+
+	// Vertex Input Attributes
+	for attribute in pipeline_state.vertex_input.attributes {
+		hash_param(state, attribute)
+	}
+
+	// Vertex Input Bindings
+	for binding in pipeline_state.vertex_input.bindings {
+		hash_param(state, binding)
+	}
+
+	// Input Assembly
+	xxhash.XXH32_update(
+		state,
+		mem.any_to_bytes(pipeline_state.input_assembly.primitive_restart_enable),
+	)
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.input_assembly.topology))
+
+	// Viewport State
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.viewport.viewport_count))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.viewport.scissor_count))
+
+	// VkPipelineRasterizationStateCreateInfo
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.rasterization.cull_mode))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.rasterization.depth_bias_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.rasterization.depth_clamp_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.rasterization.front_face))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.rasterization.polygon_mode))
+	xxhash.XXH32_update(
+		state,
+		mem.any_to_bytes(pipeline_state.rasterization.rasterizer_discard_enable),
+	)
+
+	// VkPipelineMultisampleStateCreateInfo
+	xxhash.XXH32_update(
+		state,
+		mem.any_to_bytes(pipeline_state.multisample.alpha_to_coverage_enable),
+	)
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.multisample.alpha_to_one_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.multisample.min_sample_shading))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.multisample.rasterization_samples))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.multisample.sample_shading_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.multisample.sample_mask))
+
+	// VkPipelineDepthStencilStateCreateInfo
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.back))
+	xxhash.XXH32_update(
+		state,
+		mem.any_to_bytes(pipeline_state.depth_stencil.depth_bounds_test_enable),
+	)
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.depth_compare_op))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.depth_test_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.depth_write_enable))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.front))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.depth_stencil.stencil_test_enable))
+
+	// VkPipelineColorBlendStateCreateInfo
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.color_blend.logic_op))
+	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.color_blend.logic_op_enable))
+	for color_blend_attachment in pipeline_state.color_blend.attachments {
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.alpha_blend_op))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.blend_enable))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.color_blend_op))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.color_write_mask))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.dst_alpha_blend_factor))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.dst_color_blend_factor))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.src_alpha_blend_factor))
+		xxhash.XXH32_update(state, mem.any_to_bytes(color_blend_attachment.src_color_blend_factor))
+	}
+
+	// Raytracing max recursion
 	xxhash.XXH32_update(state, mem.any_to_bytes(pipeline_state.max_ray_recursion))
+}
+
+hash_param_vertex_input_attribute_description :: proc(
+	state: ^xxhash.XXH32_state,
+	attribute: vk.VertexInputAttributeDescription,
+) {
+	xxhash.XXH32_update(state, mem.any_to_bytes(attribute.binding))
+	xxhash.XXH32_update(state, mem.any_to_bytes(attribute.format))
+	xxhash.XXH32_update(state, mem.any_to_bytes(attribute.location))
+	xxhash.XXH32_update(state, mem.any_to_bytes(attribute.offset))
+}
+
+hash_param_vertex_input_binding_description :: proc(
+	state: ^xxhash.XXH32_state,
+	binding: vk.VertexInputBindingDescription,
+) {
+	xxhash.XXH32_update(state, mem.any_to_bytes(binding.binding))
+	xxhash.XXH32_update(state, mem.any_to_bytes(binding.inputRate))
+	xxhash.XXH32_update(state, mem.any_to_bytes(binding.stride))
 }
 
 hash_param_pipeline_layout :: proc(

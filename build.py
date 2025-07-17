@@ -19,6 +19,14 @@ shaders = [
         "out": "shaders/rmiss.spv",
     },
     {
+        "src": "shaders/simple.vert",
+        "out": "shaders/vert.spv",
+    },
+    {
+        "src": "shaders/simple.frag",
+        "out": "shaders/frag.spv",
+    },
+    {
         "src": "shaders/simple.rchit",
         "out": "shaders/rchit.spv",
     },

@@ -20,6 +20,11 @@ Command_Buffer :: struct {
 	sbt:                    ^Shader_Binding_Table,
 }
 
+Render_Pass_Info :: struct {
+	color_formats:                []vk.Format,
+	depth_format, stencil_format: vk.Format,
+}
+
 Resource_Binding_State :: struct {
 	buffer_infos:                 Binding_Map(vk.DescriptorBufferInfo),
 	image_infos:                  Binding_Map(vk.DescriptorImageInfo),
@@ -49,6 +54,11 @@ Raytracing_Spec :: struct {
 
 command_buffer_init :: proc(cmd: ^Command_Buffer, ctx: ^Vulkan_Context, buffer: vk.CommandBuffer) {
 	cmd^ = {}
+	cmd.pipeline_state.color_blend.attachments = make(
+		[dynamic]Color_Blend_Attachment_State,
+		context.temp_allocator,
+	)
+	cmd.pipeline_state.color_attachment_formats = make([dynamic]vk.Format, context.temp_allocator)
 	cmd.buffer = buffer
 	cmd.ctx = ctx
 	cmd.resource_binding_state = make(map[u32]Resource_Binding_State, context.temp_allocator)
@@ -60,7 +70,8 @@ command_buffer_destroy :: proc(cmd: ^Command_Buffer) {
 
 command_buffer_reset :: proc(cmd: ^Command_Buffer) {
 	// TODO: implement the rest of resource cleaning in the future.
-	cmd.pipeline_state = {}
+	clear(&cmd.pipeline_state.color_blend.attachments)
+	clear(&cmd.pipeline_state.color_attachment_formats)
 }
 
 command_buffer_bind_image :: proc(
@@ -189,6 +200,30 @@ command_buffer_push_constant_range :: proc(cmd: ^Command_Buffer, offset: u32, da
 	state.size = u32(len(data))
 	state.offset = offset
 	state.dirty = true
+}
+
+command_buffer_set_graphics_program :: proc(
+	cmd: ^Command_Buffer,
+	vertex_shader: ^Shader_Module,
+	fragment_shader: ^Shader_Module,
+) -> vk.Result {
+	layout := resource_cache_request_pipeline_layout(
+		&cmd.ctx.cache,
+		cmd.ctx,
+		{vertex_shader, fragment_shader},
+	) or_return
+
+	cmd.pipeline_state.layout = layout
+	cmd.pipeline_state.dirty = true
+	return nil
+}
+
+command_buffer_draw :: proc(
+	cmd: ^Command_Buffer,
+	vertex_count, instance_count, first_vertex, first_instance: u32,
+) {
+	command_buffer_flush(cmd, .GRAPHICS)
+	vk.CmdDraw(cmd.buffer, vertex_count, instance_count, first_vertex, first_instance)
 }
 
 command_buffer_set_raytracing_program :: proc(
@@ -349,6 +384,13 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 			pipeline = raytracing_pipeline
 			cmd.sbt = &raytracing_pipeline.sbt
 
+		case .GRAPHICS:
+			pipeline = resource_cache_request_graphics_pipeline(
+				&cmd.ctx.cache,
+				cmd.ctx,
+				cmd.pipeline_state,
+			) or_return
+
 		case:
 			unimplemented("Pipeline still not implemented")
 		}
@@ -411,22 +453,48 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 		}
 	}
 
-	vk.CmdBindDescriptorSets(
-		cmd.buffer,
-		bind_point,
-		cmd.pipeline_state.layout.handle,
-		0,
-		u32(len(binding_sets)),
-		raw_data(binding_sets),
-		0,
-		nil,
-	)
+	if len(binding_sets) > 0 {
+		vk.CmdBindDescriptorSets(
+			cmd.buffer,
+			bind_point,
+			cmd.pipeline_state.layout.handle,
+			0,
+			u32(len(binding_sets)),
+			raw_data(binding_sets),
+			0,
+			nil,
+		)
+	}
 
 	return nil
 }
 
 
-command_buffer_begin_render_pass :: proc(cmd: ^Command_Buffer, rendering_info: ^vk.RenderingInfo) {
+command_buffer_begin_render_pass :: proc(
+	cmd: ^Command_Buffer,
+	rendering_info: ^vk.RenderingInfo,
+	render_pass_info: Render_Pass_Info,
+) {
+	clear(&cmd.pipeline_state.color_attachment_formats)
+	clear(&cmd.pipeline_state.color_blend.attachments)
+
+
+	for format in render_pass_info.color_formats {
+		append(&cmd.pipeline_state.color_attachment_formats, format)
+
+		append(
+			&cmd.pipeline_state.color_blend.attachments,
+			Color_Blend_Attachment_State {
+				blend_enable = false,
+				color_write_mask = vk.ColorComponentFlags{.R, .G, .B, .A},
+			},
+		)
+	}
+
+	cmd.pipeline_state.depth_attachment_format = render_pass_info.depth_format
+	cmd.pipeline_state.stencil_attachment_format = render_pass_info.stencil_format
+	cmd.pipeline_state.dirty = true
+
 	vk.CmdBeginRendering(cmd.buffer, rendering_info)
 
 	viewport := vk.Viewport {

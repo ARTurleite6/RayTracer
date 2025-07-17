@@ -1,16 +1,11 @@
 #version 460
 
-layout(binding = 0, set = 0) uniform CameraProperties {
-    mat4 proj;
-    mat4 view;
-    mat4 inverse_view;
-    mat4 inverse_proj;
-} cam;
+layout(set = 0, binding = 0) uniform sampler2D gBufferAlbedo;
 
-layout(location = 0) in vec3 fragColor;
-
+layout(location = 0) in vec2 inUV;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = vec4(fragColor, 1.0);
+    vec3 albedo = texture(gBufferAlbedo, ivec2(inUV)).rgb;
+    outColor = vec4(albedo, 1.0);
 }

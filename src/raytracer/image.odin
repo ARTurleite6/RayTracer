@@ -7,10 +7,13 @@ Image :: struct {
 	handle:     vk.Image,
 	allocation: vma.Allocation,
 	format:     vk.Format,
+	extent:     vk.Extent2D,
 }
 
 image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, extent: vk.Extent2D) {
+	image^ = {}
 	image.format = format
+	image.extent = extent
 	image_info := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,
 		imageType = .D2,
@@ -20,7 +23,7 @@ image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, exten
 		arrayLayers = 1,
 		samples = {._1},
 		tiling = .OPTIMAL,
-		usage = {.STORAGE, .TRANSFER_SRC},
+		usage = {.COLOR_ATTACHMENT, .STORAGE, .SAMPLED, .TRANSFER_SRC},
 		sharingMode = .EXCLUSIVE,
 		initialLayout = .UNDEFINED,
 	}
@@ -45,7 +48,6 @@ image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, exten
 
 image_destroy :: proc(image: ^Image, ctx: Vulkan_Context) {
 	vma.destroy_image(ctx.device.allocator, image.handle, nil)
-	image^ = {}
 }
 
 image_view_init :: proc(image_view: ^vk.ImageView, image: Image, ctx: ^Vulkan_Context) {

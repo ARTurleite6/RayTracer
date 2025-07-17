@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:slice"
 import "core:strings"
 
 import vk "vendor:vulkan"
@@ -42,33 +43,75 @@ Vertex_Input_State :: struct {
 }
 
 Input_Assembly_State :: struct {
-	topology: vk.PrimitiveTopology,
+	topology:                 Maybe(vk.PrimitiveTopology),
+	primitive_restart_enable: bool,
 }
 
 Rasterization_State :: struct {
-	depth_clamp_enable:        bool,
-	rasterizer_discard_enable: bool,
-	polygon_mode:              vk.PolygonMode,
-	cull_mode:                 vk.CullModeFlags,
-	front_face:                vk.FrontFace,
-	depth_bias_enable:         bool,
+	depth_clamp_enable, rasterizer_discard_enable: bool,
+	polygon_mode:                                  vk.PolygonMode,
+	cull_mode:                                     Maybe(vk.CullModeFlags),
+	front_face:                                    vk.FrontFace,
+	depth_bias_enable:                             bool,
 }
 
 Viewport_State :: struct {
-	viewport_count: u32,
-	scissor_count:  u32,
+	viewport_count: Maybe(u32),
+	scissor_count:  Maybe(u32),
+}
+
+Multisample_State :: struct {
+	rasterization_samples:                         Maybe(vk.SampleCountFlags),
+	sample_shading_enable:                         bool,
+	min_sample_shading:                            f32,
+	sample_mask:                                   vk.SampleMask,
+	alpha_to_coverage_enable, alpha_to_one_enable: bool,
+}
+
+Stencil_Op_State :: struct {
+	fail_op, pass_op, depth_fail_op: Maybe(vk.StencilOp),
+	compare_op:                      vk.CompareOp,
+}
+
+Depth_Stencil_State :: struct {
+	depth_test_enable, depth_write_enable:         Maybe(bool),
+	depth_compare_op:                              Maybe(vk.CompareOp),
+	depth_bounds_test_enable, stencil_test_enable: bool,
+	front, back:                                   Stencil_Op_State,
+}
+
+Color_Blend_Attachment_State :: struct {
+	blend_enable:           bool,
+	src_color_blend_factor: Maybe(vk.BlendFactor),
+	dst_color_blend_factor: vk.BlendFactor,
+	color_blend_op:         vk.BlendOp,
+	src_alpha_blend_factor: Maybe(vk.BlendFactor),
+	dst_alpha_blend_factor: vk.BlendFactor,
+	alpha_blend_op:         vk.BlendOp,
+	color_write_mask:       Maybe(vk.ColorComponentFlags),
+}
+
+Color_Blend_State :: struct {
+	logic_op_enable: bool,
+	logic_op:        vk.LogicOp,
+	attachments:     [dynamic]Color_Blend_Attachment_State,
 }
 
 Pipeline_State :: struct {
-	layout:            ^Pipeline_Layout,
-	vertex_input:      Vertex_Input_State,
-	input_assembly:    Input_Assembly_State,
-	rasterization:     Rasterization_State,
-	viewport:          Viewport_State,
+	layout:                                             ^Pipeline_Layout,
+	vertex_input:                                       Vertex_Input_State,
+	input_assembly:                                     Input_Assembly_State,
+	rasterization:                                      Rasterization_State,
+	viewport:                                           Viewport_State,
+	multisample:                                        Multisample_State,
+	depth_stencil:                                      Depth_Stencil_State,
+	color_blend:                                        Color_Blend_State,
+	color_attachment_formats:                           [dynamic]vk.Format,
+	depth_attachment_format, stencil_attachment_format: vk.Format,
 
 	// raytracing
-	max_ray_recursion: u32,
-	dirty:             bool,
+	max_ray_recursion:                                  u32,
+	dirty:                                              bool,
 }
 
 raytracing_pipeline_init :: proc(
@@ -80,7 +123,7 @@ raytracing_pipeline_init :: proc(
 ) {
 	pipeline.state = state
 
-	shader_stages := to_pipeline_shader_stage_craete_info(
+	shader_stages := to_pipeline_shader_stage_create_info(
 		pipeline.state.layout.shader_modules[:],
 		ctx,
 		context.temp_allocator,
@@ -175,10 +218,18 @@ graphics_pipeline_init :: proc(
 	pipeline: ^Graphics_Pipeline,
 	ctx: ^Vulkan_Context,
 	state: Pipeline_State,
+) -> (
+	err: vk.Result,
 ) {
 	pipeline.state = state
+	pipeline.state.color_attachment_formats = slice.clone_to_dynamic(
+		state.color_attachment_formats[:],
+	)
+	pipeline.state.color_blend.attachments = slice.clone_to_dynamic(
+		state.color_blend.attachments[:],
+	)
 
-	shader_stages := to_pipeline_shader_stage_craete_info(
+	shader_stages := to_pipeline_shader_stage_create_info(
 		pipeline.state.layout.shader_modules[:],
 		ctx,
 		context.temp_allocator,
@@ -197,21 +248,139 @@ graphics_pipeline_init :: proc(
 
 	input_assembly_info := vk.PipelineInputAssemblyStateCreateInfo {
 		sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		topology               = state.input_assembly.topology,
-		primitiveRestartEnable = false,
+		topology               = state.input_assembly.topology.? or_else .TRIANGLE_STRIP,
+		primitiveRestartEnable = b32(state.input_assembly.primitive_restart_enable),
+	}
+
+	viewport_state_info := vk.PipelineViewportStateCreateInfo {
+		sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		viewportCount = state.viewport.viewport_count.? or_else 1,
+		scissorCount  = state.viewport.scissor_count.? or_else 1,
+	}
+
+	rasterizer := vk.PipelineRasterizationStateCreateInfo {
+		sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		depthClampEnable        = b32(state.rasterization.depth_clamp_enable),
+		rasterizerDiscardEnable = b32(state.rasterization.rasterizer_discard_enable),
+		polygonMode             = state.rasterization.polygon_mode,
+		cullMode                = state.rasterization.cull_mode.? or_else {.BACK},
+		frontFace               = state.rasterization.front_face,
+		depthBiasEnable         = b32(state.rasterization.depth_bias_enable),
+		depthBiasClamp          = 1.0,
+		depthBiasSlopeFactor    = 1.0,
+		lineWidth               = 1.0,
+	}
+
+	multisample_state_info := vk.PipelineMultisampleStateCreateInfo {
+		sType                 = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		sampleShadingEnable   = b32(state.multisample.sample_shading_enable),
+		rasterizationSamples  = state.multisample.rasterization_samples.? or_else {._1},
+		minSampleShading      = state.multisample.min_sample_shading,
+		alphaToCoverageEnable = b32(state.multisample.alpha_to_coverage_enable),
+		alphaToOneEnable      = b32(state.multisample.alpha_to_one_enable),
+	}
+
+	if (state.multisample.sample_mask != {}) {
+		multisample_state_info.pSampleMask = &pipeline.state.multisample.sample_mask
+	}
+
+	depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+		sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		depthTestEnable = b32(state.depth_stencil.depth_test_enable.? or_else true),
+		depthWriteEnable = b32(state.depth_stencil.depth_write_enable.? or_else true),
+		depthCompareOp = state.depth_stencil.depth_compare_op.? or_else .GREATER,
+		depthBoundsTestEnable = b32(state.depth_stencil.depth_bounds_test_enable),
+		stencilTestEnable = b32(state.depth_stencil.stencil_test_enable),
+		front = {
+			failOp = state.depth_stencil.front.fail_op.? or_else .REPLACE,
+			passOp = state.depth_stencil.front.pass_op.? or_else .REPLACE,
+			depthFailOp = state.depth_stencil.front.pass_op.? or_else .REPLACE,
+			compareOp = state.depth_stencil.front.compare_op,
+			compareMask = ~u32(0),
+			writeMask = ~u32(0),
+			reference = ~u32(0),
+		},
+		back = {
+			failOp = state.depth_stencil.back.fail_op.? or_else .REPLACE,
+			passOp = state.depth_stencil.back.pass_op.? or_else .REPLACE,
+			depthFailOp = state.depth_stencil.back.pass_op.? or_else .REPLACE,
+			compareOp = state.depth_stencil.back.compare_op,
+			compareMask = ~u32(0),
+			writeMask = ~u32(0),
+			reference = ~u32(0),
+		},
+	}
+
+	color_blend_state := vk.PipelineColorBlendStateCreateInfo {
+		sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		logicOpEnable   = b32(state.color_blend.logic_op_enable),
+		logicOp         = state.color_blend.logic_op,
+		attachmentCount = u32(len(state.color_blend.attachments)),
+		pAttachments    = raw_data(
+			to_vk_color_blend_attachment_state(
+				state.color_blend.attachments[:],
+				context.temp_allocator,
+			),
+		),
+		blendConstants  = {1, 1, 1, 1},
+	}
+
+	dynamic_states := [9]vk.DynamicState {
+		.VIEWPORT,
+		.SCISSOR,
+		.LINE_WIDTH,
+		.DEPTH_BIAS,
+		.BLEND_CONSTANTS,
+		.DEPTH_BOUNDS,
+		.STENCIL_COMPARE_MASK,
+		.STENCIL_WRITE_MASK,
+		.STENCIL_REFERENCE,
+	}
+
+	dynamic_state := vk.PipelineDynamicStateCreateInfo {
+		sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		dynamicStateCount = u32(len(dynamic_states)),
+		pDynamicStates    = raw_data(dynamic_states[:]),
+	}
+
+	rendering_info := vk.PipelineRenderingCreateInfo {
+		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+		colorAttachmentCount    = u32(len(state.color_attachment_formats)),
+		pColorAttachmentFormats = raw_data(state.color_attachment_formats),
+		depthAttachmentFormat   = state.depth_attachment_format,
+		stencilAttachmentFormat = state.stencil_attachment_format,
 	}
 
 	create_info := vk.GraphicsPipelineCreateInfo {
 		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+		pNext               = &rendering_info,
 		stageCount          = u32(len(shader_stages)),
 		pStages             = raw_data(shader_stages),
 		pVertexInputState   = &vertex_input_info,
 		pInputAssemblyState = &input_assembly_info,
+		pViewportState      = &viewport_state_info,
+		pRasterizationState = &rasterizer,
+		pMultisampleState   = &multisample_state_info,
+		pDepthStencilState  = &depth_stencil_state,
+		pColorBlendState    = &color_blend_state,
+		pDynamicState       = &dynamic_state,
+		layout              = state.layout.handle,
 	}
+
+	return vk.CreateGraphicsPipelines(
+		vulkan_get_device_handle(ctx),
+		0,
+		1,
+		&create_info,
+		nil,
+		&pipeline.handle,
+	)
 }
 
 graphics_pipeline_destroy :: proc(pipeline: ^Graphics_Pipeline, ctx: ^Vulkan_Context) {
 	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
+	delete(pipeline.state.color_attachment_formats)
+	delete(pipeline.state.color_blend.attachments)
 }
 
 pipeline_add_shader :: proc(self: ^Pipeline, shader: Shader) {
@@ -268,7 +437,7 @@ pipeline_build_layout :: proc(self: ^Pipeline, device: vk.Device) -> (result: vk
 
 @(private)
 @(require_results)
-to_pipeline_shader_stage_craete_info :: proc(
+to_pipeline_shader_stage_create_info :: proc(
 	modules: []^Shader_Module,
 	ctx: ^Vulkan_Context,
 	allocator := context.allocator,
@@ -305,4 +474,28 @@ to_pipeline_shader_stage_craete_info :: proc(
 	}
 
 	return create_infos, nil
+}
+
+@(private)
+@(require_results)
+to_vk_color_blend_attachment_state :: proc(
+	states: []Color_Blend_Attachment_State,
+	allocator := context.allocator,
+) -> []vk.PipelineColorBlendAttachmentState {
+	return slice.mapper(
+		states,
+		proc(state: Color_Blend_Attachment_State) -> vk.PipelineColorBlendAttachmentState {
+			return {
+				blendEnable = b32(state.blend_enable),
+				srcColorBlendFactor = state.src_color_blend_factor.? or_else .ONE,
+				dstColorBlendFactor = state.dst_color_blend_factor,
+				colorBlendOp = state.color_blend_op,
+				srcAlphaBlendFactor = state.src_alpha_blend_factor.? or_else .ONE,
+				dstAlphaBlendFactor = state.dst_alpha_blend_factor,
+				alphaBlendOp = state.alpha_blend_op,
+				colorWriteMask = state.color_write_mask.? or_else {.R, .G, .B, .A},
+			}
+		},
+		allocator = allocator,
+	)
 }

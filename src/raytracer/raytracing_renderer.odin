@@ -243,7 +243,8 @@ raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
 	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 
-	command_buffer_destroy(&renderer.current_cmd)
+	command_buffer_reset(&renderer.current_cmd)
+	// command_buffer_destroy(&renderer.current_cmd)
 	renderer.accumulation_frame += 1
 }
 

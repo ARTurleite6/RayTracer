@@ -16,6 +16,7 @@ Resource_Cache :: struct {
 	pipeline_layouts2:       map[u32]^Pipeline_Layout,
 	pipeline_layouts:        map[u32]vk.PipelineLayout,
 	raytracing_pipelines2:   map[u32]^Raytracing_Pipeline2,
+	graphics_pipelines:      map[u32]^Graphics_Pipeline,
 	descriptor_sets:         map[u32]vk.DescriptorSet,
 	raytracing_pipelines:    map[u32]vk.Pipeline,
 	shaders:                 map[u32]Shader,
@@ -61,6 +62,12 @@ resource_cache_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.alloca
 		free(p)
 	}
 	delete(cache.raytracing_pipelines2)
+
+	for _, p in cache.graphics_pipelines {
+		graphics_pipeline_destroy(p, ctx)
+		free(p)
+	}
+	delete(cache.graphics_pipelines)
 
 	for _, l in cache.pipeline_layouts2 {
 		pipeline_layout_destroy(l, ctx)
@@ -117,6 +124,28 @@ resource_cache_request_raytracing_pipeline :: proc(
 	if just_inserted {
 		value_ptr^ = new(Raytracing_Pipeline2)
 		raytracing_pipeline_init(value_ptr^, ctx, pipeline_state) or_return
+	}
+
+	return value_ptr^, nil
+}
+
+@(require_results)
+resource_cache_request_graphics_pipeline :: proc(
+	resource_cache: ^Resource_Cache,
+	ctx: ^Vulkan_Context,
+	pipeline_state: Pipeline_State,
+) -> (
+	pipeline: ^Graphics_Pipeline,
+	err: vk.Result,
+) {
+	state, _ := xxhash.XXH32_create_state(context.temp_allocator)
+	defer xxhash.XXH32_destroy_state(state, context.temp_allocator)
+	hash_param(state, pipeline_state)
+	hash := xxhash.XXH32_digest(state)
+	_, value_ptr, just_inserted, _ := map_entry(&resource_cache.graphics_pipelines, hash)
+	if just_inserted {
+		value_ptr^ = new(Graphics_Pipeline)
+		graphics_pipeline_init(value_ptr^, ctx, pipeline_state) or_return
 	}
 
 	return value_ptr^, nil
