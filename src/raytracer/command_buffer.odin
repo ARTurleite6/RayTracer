@@ -1,6 +1,7 @@
 package raytracer
 
 import "core:log"
+import "core:mem"
 _ :: log
 
 import vk "vendor:vulkan"
@@ -18,6 +19,7 @@ Command_Buffer :: struct {
 	push_constant_state:    Push_Constant_State,
 	resource_binding_state: map[u32]Resource_Binding_State, // map from set to resource binding of that set
 	sbt:                    ^Shader_Binding_Table,
+	allocator:              mem.Allocator,
 }
 
 Render_Pass_Info :: struct {
@@ -58,10 +60,9 @@ command_buffer_init :: proc(cmd: ^Command_Buffer, ctx: ^Vulkan_Context, buffer: 
 		[dynamic]Color_Blend_Attachment_State,
 		context.temp_allocator,
 	)
-	cmd.pipeline_state.color_attachment_formats = make([dynamic]vk.Format, context.temp_allocator)
 	cmd.buffer = buffer
 	cmd.ctx = ctx
-	cmd.resource_binding_state = make(map[u32]Resource_Binding_State, context.temp_allocator)
+	cmd.allocator = context.temp_allocator
 }
 
 command_buffer_destroy :: proc(cmd: ^Command_Buffer) {
@@ -70,36 +71,10 @@ command_buffer_destroy :: proc(cmd: ^Command_Buffer) {
 
 command_buffer_reset :: proc(cmd: ^Command_Buffer) {
 	// TODO: implement the rest of resource cleaning in the future.
-	clear(&cmd.pipeline_state.color_blend.attachments)
-	clear(&cmd.pipeline_state.color_attachment_formats)
-}
-
-command_buffer_bind_image :: proc(
-	cmd: ^Command_Buffer,
-	set: u32,
-	binding: u32,
-	info: vk.DescriptorImageInfo,
-	dst_array_element := u32(0),
-) {
-	_, set_ptr, just_inserted, _ := map_entry(&cmd.resource_binding_state, set)
-	if just_inserted {
-		set_ptr^ = {
-			buffer_infos                 = make_binding_map(
-				vk.DescriptorBufferInfo,
-				context.temp_allocator,
-			),
-			image_infos                  = make_binding_map(
-				vk.DescriptorImageInfo,
-				context.temp_allocator,
-			),
-			acceleration_structure_infos = make_binding_map(
-				vk.WriteDescriptorSetAccelerationStructureKHR,
-				context.temp_allocator,
-			),
-		}
-	}
-	bind_resource(&set_ptr.image_infos, binding, dst_array_element, info)
-	set_ptr.dirty = true
+	cmd.resource_binding_state = {}
+	cmd.pipeline_state = {}
+	cmd.push_constant_state = {}
+	cmd.sbt = nil
 }
 
 command_buffer_bind_resource :: proc(
@@ -109,20 +84,14 @@ command_buffer_bind_resource :: proc(
 	info: Resource_Type,
 	dst_array_element := u32(0),
 ) {
+	context.allocator = cmd.allocator
 	_, set_ptr, just_inserted, _ := map_entry(&cmd.resource_binding_state, set)
 	if just_inserted {
 		set_ptr^ = {
-			buffer_infos                 = make_binding_map(
-				vk.DescriptorBufferInfo,
-				context.temp_allocator,
-			),
-			image_infos                  = make_binding_map(
-				vk.DescriptorImageInfo,
-				context.temp_allocator,
-			),
+			buffer_infos                 = make_binding_map(vk.DescriptorBufferInfo),
+			image_infos                  = make_binding_map(vk.DescriptorImageInfo),
 			acceleration_structure_infos = make_binding_map(
 				vk.WriteDescriptorSetAccelerationStructureKHR,
-				context.temp_allocator,
 			),
 		}
 	}
@@ -135,62 +104,6 @@ command_buffer_bind_resource :: proc(
 	case vk.WriteDescriptorSetAccelerationStructureKHR:
 		bind_resource(&set_ptr.acceleration_structure_infos, binding, dst_array_element, v)
 	}
-	set_ptr.dirty = true
-}
-
-command_buffer_bind_buffer :: proc(
-	cmd: ^Command_Buffer,
-	set: u32,
-	binding: u32,
-	info: vk.DescriptorBufferInfo,
-	dst_array_element := u32(0),
-) {
-	_, set_ptr, just_inserted, _ := map_entry(&cmd.resource_binding_state, set)
-	if just_inserted {
-		set_ptr^ = {
-			buffer_infos                 = make_binding_map(
-				vk.DescriptorBufferInfo,
-				context.temp_allocator,
-			),
-			image_infos                  = make_binding_map(
-				vk.DescriptorImageInfo,
-				context.temp_allocator,
-			),
-			acceleration_structure_infos = make_binding_map(
-				vk.WriteDescriptorSetAccelerationStructureKHR,
-				context.temp_allocator,
-			),
-		}
-	}
-	bind_resource(&set_ptr.buffer_infos, binding, dst_array_element, info)
-	set_ptr.dirty = true
-}
-
-command_buffer_bind_acceleration_structure :: proc(
-	cmd: ^Command_Buffer,
-	set: u32,
-	binding: u32,
-	info: vk.WriteDescriptorSetAccelerationStructureKHR,
-	dst_array_element := u32(0),
-) {
-	_, set_ptr, just_inserted, _ := map_entry(&cmd.resource_binding_state, set)
-	if just_inserted {
-		set_ptr^ = {
-			buffer_infos                 = make_binding_map(
-				vk.DescriptorBufferInfo,
-				context.temp_allocator,
-			),
-			image_infos                  = make_binding_map(
-				vk.DescriptorImageInfo,
-				context.temp_allocator,
-			),
-			acceleration_structure_infos = make_binding_map(
-				vk.WriteDescriptorSetAccelerationStructureKHR,
-				context.temp_allocator,
-			),
-		}
-	}
-	bind_resource(&set_ptr.acceleration_structure_infos, binding, dst_array_element, info)
 	set_ptr.dirty = true
 }
 
@@ -207,6 +120,8 @@ command_buffer_set_graphics_program :: proc(
 	vertex_shader: ^Shader_Module,
 	fragment_shader: ^Shader_Module,
 ) -> vk.Result {
+	command_buffer_reset(cmd)
+
 	layout := resource_cache_request_pipeline_layout(
 		&cmd.ctx.cache,
 		cmd.ctx,
@@ -230,6 +145,7 @@ command_buffer_set_raytracing_program :: proc(
 	cmd: ^Command_Buffer,
 	spec: Raytracing_Spec,
 ) -> vk.Result {
+	command_buffer_reset(cmd)
 	modules := make(
 		[dynamic]^Shader_Module,
 		0,
@@ -475,9 +391,7 @@ command_buffer_begin_render_pass :: proc(
 	rendering_info: ^vk.RenderingInfo,
 	render_pass_info: Render_Pass_Info,
 ) {
-	clear(&cmd.pipeline_state.color_attachment_formats)
-	clear(&cmd.pipeline_state.color_blend.attachments)
-
+	context.allocator = cmd.allocator
 
 	for format in render_pass_info.color_formats {
 		append(&cmd.pipeline_state.color_attachment_formats, format)
