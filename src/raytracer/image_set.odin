@@ -35,6 +35,7 @@ make_image_set :: proc(
 			{.ALL_COMMANDS},
 			{},
 			{},
+			format = img.format,
 		)
 	}
 

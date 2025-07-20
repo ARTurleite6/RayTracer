@@ -46,10 +46,18 @@ shaders = [
         "src": "shaders/restir.rchit",
         "out": "shaders/restir_rchit.spv",
     },
-    # {
-    #     "src": "shaders/restir_shadow.rmiss",
-    #     "out": "shaders/restir_shadow.spv",
-    # }
+    {
+        "src": "shaders/restir/gbuffer.vert",
+        "out": "shaders/restir/gbuffer_vert.spv",
+    },
+    {
+        "src": "shaders/restir/gbuffer.frag",
+        "out": "shaders/restir/gbuffer_frag.spv",
+    },
+    {
+        "src": "shaders/restir/restir_di.rgen",
+        "out": "shaders/restir/restir_di_rgen.spv",
+    },
 ]
 
 def print_command_result(result: subprocess.CompletedProcess[str]):

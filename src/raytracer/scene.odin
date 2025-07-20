@@ -10,7 +10,6 @@ _ :: log
 Vertex :: struct {
 	pos:    Vec3,
 	normal: Vec3,
-	color:  Vec3,
 }
 
 Scene_Change_Type :: enum {
@@ -46,10 +45,11 @@ Object :: struct {
 }
 
 Transform :: struct {
-	position:     Vec3,
-	rotation:     Vec3,
-	scale:        Vec3,
-	model_matrix: Mat4,
+	position:      Vec3,
+	rotation:      Vec3,
+	scale:         Vec3,
+	model_matrix:  Mat4,
+	normal_matrix: Mat4,
 }
 
 Mesh :: struct {
@@ -180,6 +180,8 @@ object_update_model_matrix :: proc(object: ^Object) {
 			glm.to_radians(object.transform.rotation.z),
 		) *
 		glm.matrix4_scale_f32(transform.scale)
+
+	transform.normal_matrix = glm.matrix4_inverse_transpose_f32(transform.model_matrix)
 }
 
 mesh_init :: proc(mesh: ^Mesh, vertices: []Vertex, indices: []u32, name: string) -> Mesh_Error {
@@ -188,6 +190,7 @@ mesh_init :: proc(mesh: ^Mesh, vertices: []Vertex, indices: []u32, name: string)
 		vertices = slice.clone(vertices),
 		indices  = slice.clone(indices),
 	}
+
 	return nil
 }
 
@@ -201,7 +204,7 @@ create_sphere :: proc(stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
 	vertices := make([dynamic]Vertex, context.temp_allocator)
 	indices := make([dynamic]u32, context.temp_allocator)
 
-	append(&vertices, Vertex{pos = {0, 1, 0}, normal = {0, 1, 0}, color = {}}) // north pole
+	append(&vertices, Vertex{pos = {0, 1, 0}, normal = {0, 1, 0}}) // north pole
 
 	for i in 0 ..< stacks - 1 {
 		phi := math.PI * f32(i + 1) / f32(stacks)
@@ -211,11 +214,11 @@ create_sphere :: proc(stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
 			y := math.cos(phi)
 			z := math.sin(phi) * math.sin(theta)
 
-			append(&vertices, Vertex{pos = {x, y, z}, normal = {x, y, z}, color = {}})
+			append(&vertices, Vertex{pos = {x, y, z}, normal = {x, y, z}})
 		}
 	}
 
-	append(&vertices, Vertex{pos = {0, -1, 0}, normal = {0, -1, 0}, color = {}}) // north pole
+	append(&vertices, Vertex{pos = {0, -1, 0}, normal = {0, -1, 0}}) // north pole
 
 	for i in 0 ..< slices {
 		i0 := i + 1
@@ -255,16 +258,16 @@ create_sphere :: proc(stacks: int = 32, slices: int = 32) -> (mesh: Mesh) {
 }
 
 create_plane :: proc(width: f32 = 1.0, height: f32 = 1.0) -> (mesh: Mesh) {
+	// TODO: for now lets handle this type of object like this but probably later lets just disable cull
 	vertices := []Vertex {
-		// Plane in XY plane, facing +Z (normal: 0, 0, 1)
-		// Counter-clockwise when viewed from +Z
-		{{-0.5, -0.5, 0}, {0, 0, 1}, {0, 0, 1}}, // 0: bottom-left
-		{{0.5, -0.5, 0}, {0, 0, 1}, {1, 0, 0}}, // 1: bottom-right
-		{{0.5, 0.5, 0}, {0, 0, 1}, {1, 1, 0}}, // 2: top-right
-		{{-0.5, 0.5, 0}, {0, 0, 1}, {0, 1, 0}}, // 3: top-left
+		{{-0.5, -0.5, 0}, {0, 0, 1}}, // 0: bottom-left
+		{{0.5, -0.5, 0}, {0, 0, 1}}, // 1: bottom-right
+		{{0.5, 0.5, 0}, {0, 0, 1}}, // 2: top-right
+		{{-0.5, 0.5, 0}, {0, 0, 1}}, // 3: top-left
 	}
 
 	indices := []u32 {
+		// Front face
 		0,
 		1,
 		2, // First triangle
@@ -292,40 +295,40 @@ create_cube_simple :: proc() -> (mesh: Mesh) {
 
 	vertices := []Vertex {
 		// Front face (z = +0.5, normal: 0, 0, 1)
-		{positions[4], {0, 0, 1}, {1, 0, 0}}, // 0
-		{positions[5], {0, 0, 1}, {0, 1, 0}}, // 1
-		{positions[6], {0, 0, 1}, {0, 0, 1}}, // 2
-		{positions[7], {0, 0, 1}, {1, 1, 0}}, // 3
+		{positions[4], {0, 0, 1}}, // 0
+		{positions[5], {0, 0, 1}}, // 1
+		{positions[6], {0, 0, 1}}, // 2
+		{positions[7], {0, 0, 1}}, // 3
 
 		// Back face (z = -0.5, normal: 0, 0, -1)
-		{positions[1], {0, 0, -1}, {0, 1, 1}}, // 4
-		{positions[0], {0, 0, -1}, {1, 0, 1}}, // 5
-		{positions[3], {0, 0, -1}, {0, 0, 0}}, // 6
-		{positions[2], {0, 0, -1}, {1, 1, 1}}, // 7
+		{positions[1], {0, 0, -1}}, // 4
+		{positions[0], {0, 0, -1}}, // 5
+		{positions[3], {0, 0, -1}}, // 6
+		{positions[2], {0, 0, -1}}, // 7
 
 		// Right face (x = +0.5, normal: 1, 0, 0)
-		{positions[5], {1, 0, 0}, {0, 1, 0}}, // 8
-		{positions[1], {1, 0, 0}, {0, 1, 1}}, // 9
-		{positions[2], {1, 0, 0}, {1, 1, 1}}, // 10
-		{positions[6], {1, 0, 0}, {0, 0, 1}}, // 11
+		{positions[5], {1, 0, 0}}, // 8
+		{positions[1], {1, 0, 0}}, // 9
+		{positions[2], {1, 0, 0}}, // 10
+		{positions[6], {1, 0, 0}}, // 11
 
 		// Left face (x = -0.5, normal: -1, 0, 0)
-		{positions[0], {-1, 0, 0}, {1, 0, 1}}, // 12
-		{positions[4], {-1, 0, 0}, {1, 0, 0}}, // 13
-		{positions[7], {-1, 0, 0}, {1, 1, 0}}, // 14
-		{positions[3], {-1, 0, 0}, {0, 0, 0}}, // 15
+		{positions[0], {-1, 0, 0}}, // 12
+		{positions[4], {-1, 0, 0}}, // 13
+		{positions[7], {-1, 0, 0}}, // 14
+		{positions[3], {-1, 0, 0}}, // 15
 
 		// Top face (y = +0.5, normal: 0, 1, 0)
-		{positions[7], {0, 1, 0}, {1, 1, 0}}, // 16
-		{positions[6], {0, 1, 0}, {0, 0, 1}}, // 17
-		{positions[2], {0, 1, 0}, {1, 1, 1}}, // 18
-		{positions[3], {0, 1, 0}, {0, 0, 0}}, // 19
+		{positions[7], {0, 1, 0}}, // 16
+		{positions[6], {0, 1, 0}}, // 17
+		{positions[2], {0, 1, 0}}, // 18
+		{positions[3], {0, 1, 0}}, // 19
 
 		// Bottom face (y = -0.5, normal: 0, -1, 0)
-		{positions[0], {0, -1, 0}, {1, 0, 1}}, // 20
-		{positions[1], {0, -1, 0}, {0, 1, 1}}, // 21
-		{positions[5], {0, -1, 0}, {0, 1, 0}}, // 22
-		{positions[4], {0, -1, 0}, {1, 0, 0}}, // 23
+		{positions[0], {0, -1, 0}}, // 20
+		{positions[1], {0, -1, 0}}, // 21
+		{positions[5], {0, -1, 0}}, // 22
+		{positions[4], {0, -1, 0}}, // 23
 	}
 
 	indices := []u32 {
@@ -375,40 +378,40 @@ create_cube_simple :: proc() -> (mesh: Mesh) {
 create_cube :: proc() -> (mesh: Mesh) {
 	vertices := []Vertex {
 		// Front face (normal: 0, 0, 1)
-		{{-0.5, -0.5, 0.5}, {0, 0, 1}, {1, 0, 0}}, // 0
-		{{-0.5, 0.5, 0.5}, {0, 0, 1}, {1, 1, 0}}, // 1
-		{{0.5, 0.5, 0.5}, {0, 0, 1}, {0, 0, 1}}, // 2
-		{{0.5, -0.5, 0.5}, {0, 0, 1}, {0, 1, 0}}, // 3
+		{{-0.5, -0.5, 0.5}, {0, 0, 1}}, // 0
+		{{-0.5, 0.5, 0.5}, {0, 0, 1}}, // 1
+		{{0.5, 0.5, 0.5}, {0, 0, 1}}, // 2
+		{{0.5, -0.5, 0.5}, {0, 0, 1}}, // 3
 
 		// Back face (normal: 0, 0, -1)
-		{{-0.5, -0.5, -0.5}, {0, 0, -1}, {1, 0, 1}}, // 4
-		{{-0.5, 0.5, -0.5}, {0, 0, -1}, {0, 0, 0}}, // 5
-		{{0.5, 0.5, -0.5}, {0, 0, -1}, {1, 1, 1}}, // 6
-		{{0.5, -0.5, -0.5}, {0, 0, -1}, {0, 1, 1}}, // 7
+		{{-0.5, -0.5, -0.5}, {0, 0, -1}}, // 4
+		{{-0.5, 0.5, -0.5}, {0, 0, -1}}, // 5
+		{{0.5, 0.5, -0.5}, {0, 0, -1}}, // 6
+		{{0.5, -0.5, -0.5}, {0, 0, -1}}, // 7
 
 		// Right face (normal: 1, 0, 0)
-		{{0.5, -0.5, 0.5}, {1, 0, 0}, {0, 1, 0}}, // 8
-		{{0.5, 0.5, 0.5}, {1, 0, 0}, {0, 0, 1}}, // 9
-		{{0.5, 0.5, -0.5}, {1, 0, 0}, {1, 1, 1}}, // 10
-		{{0.5, -0.5, -0.5}, {1, 0, 0}, {0, 1, 1}}, // 11
+		{{0.5, -0.5, 0.5}, {1, 0, 0}}, // 8
+		{{0.5, 0.5, 0.5}, {1, 0, 0}}, // 9
+		{{0.5, 0.5, -0.5}, {1, 0, 0}}, // 10
+		{{0.5, -0.5, -0.5}, {1, 0, 0}}, // 11
 
 		// Left face (normal: -1, 0, 0)
-		{{-0.5, -0.5, -0.5}, {-1, 0, 0}, {1, 0, 1}}, // 12
-		{{-0.5, 0.5, -0.5}, {-1, 0, 0}, {0, 0, 0}}, // 13
-		{{-0.5, 0.5, 0.5}, {-1, 0, 0}, {1, 1, 0}}, // 14
-		{{-0.5, -0.5, 0.5}, {-1, 0, 0}, {1, 0, 0}}, // 15
+		{{-0.5, -0.5, -0.5}, {-1, 0, 0}}, // 12
+		{{-0.5, 0.5, -0.5}, {-1, 0, 0}}, // 13
+		{{-0.5, 0.5, 0.5}, {-1, 0, 0}}, // 14
+		{{-0.5, -0.5, 0.5}, {-1, 0, 0}}, // 15
 
 		// Top face (normal: 0, 1, 0)
-		{{-0.5, 0.5, 0.5}, {0, 1, 0}, {1, 1, 0}}, // 16
-		{{-0.5, 0.5, -0.5}, {0, 1, 0}, {0, 0, 0}}, // 17
-		{{0.5, 0.5, -0.5}, {0, 1, 0}, {1, 1, 1}}, // 18
-		{{0.5, 0.5, 0.5}, {0, 1, 0}, {0, 0, 1}}, // 19
+		{{-0.5, 0.5, 0.5}, {0, 1, 0}}, // 16
+		{{-0.5, 0.5, -0.5}, {0, 1, 0}}, // 17
+		{{0.5, 0.5, -0.5}, {0, 1, 0}}, // 18
+		{{0.5, 0.5, 0.5}, {0, 1, 0}}, // 19
 
 		// Bottom face (normal: 0, -1, 0)
-		{{-0.5, -0.5, -0.5}, {0, -1, 0}, {1, 0, 1}}, // 20
-		{{-0.5, -0.5, 0.5}, {0, -1, 0}, {1, 0, 0}}, // 21
-		{{0.5, -0.5, 0.5}, {0, -1, 0}, {0, 1, 0}}, // 22
-		{{0.5, -0.5, -0.5}, {0, -1, 0}, {0, 1, 1}}, // 23
+		{{-0.5, -0.5, -0.5}, {0, -1, 0}}, // 20
+		{{-0.5, -0.5, 0.5}, {0, -1, 0}}, // 21
+		{{0.5, -0.5, 0.5}, {0, -1, 0}}, // 22
+		{{0.5, -0.5, -0.5}, {0, -1, 0}}, // 23
 	}
 
 	indices := []u32 {
@@ -508,7 +511,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 			name = "light",
 			albedo = {0.8, 0.8, 0.8},
 			emission_color = {1.0, 1.0, 1.0},
-			emission_power = 5.0,
+			emission_power = 10.0,
 		},
 	)
 
@@ -526,7 +529,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		white_material_idx,
 		position = {0, -room_size / 2, 0},
 		scale = {room_size, room_size, room_size},
-		rotation = {90, 0, 0},
+		rotation = {-90, 0, 0},
 	)
 
 
@@ -549,6 +552,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		green_material_idx,
 		position = {0, 0, room_size / 2},
 		scale = {room_size, room_size, room_size},
+		rotation = {0, 180, 0},
 	)
 
 	// Left wall (green)
@@ -559,7 +563,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		green_material_idx,
 		position = {-room_size / 2, 0, 0},
 		scale = {room_size, room_size, room_size},
-		rotation = {0, 90, 0},
+		rotation = {0, -90, 0},
 	)
 
 	// 	Rightwall(red)
@@ -570,7 +574,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		red_material_idx,
 		position = {room_size / 2, 0, 0},
 		scale = {room_size, room_size, room_size},
-		rotation = {0, -90, 0},
+		rotation = {0, 90, 0},
 	)
 
 
@@ -583,7 +587,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Light Center",
 		plane_mesh_idx,
 		light_material_idx,
-		position = {0, room_size / 2 - 0.1, 0},
+		position = {0, -(room_size / 2 - 0.1), 0},
 		scale = {light_size, light_size, light_size},
 		rotation = {90, 0, 0},
 	)
@@ -615,7 +619,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Metal Sphere",
 		sphere_mesh_idx,
 		metallic_material_idx,
-		position = {-1.0, -room_size / 2 + 1.0, -1.0},
+		position = {-1.0, -(-room_size / 2 + 1.0), -1.0},
 		scale = {1.0, 1.0, 1.0},
 	)
 
@@ -624,7 +628,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 		"Glossy Sphere",
 		sphere_mesh_idx,
 		glossy_material_idx,
-		position = {1.5, -room_size / 2 + 0.5, 0.5},
+		position = {1.5, -(-room_size / 2 + 0.5), 0.5},
 		scale = {0.5, 0.5, 0.5},
 	)
 

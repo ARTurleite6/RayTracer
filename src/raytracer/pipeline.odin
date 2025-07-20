@@ -51,7 +51,7 @@ Rasterization_State :: struct {
 	depth_clamp_enable, rasterizer_discard_enable: bool,
 	polygon_mode:                                  vk.PolygonMode,
 	cull_mode:                                     Maybe(vk.CullModeFlags),
-	front_face:                                    vk.FrontFace,
+	front_face:                                    Maybe(vk.FrontFace),
 	depth_bias_enable:                             bool,
 }
 
@@ -248,7 +248,7 @@ graphics_pipeline_init :: proc(
 
 	input_assembly_info := vk.PipelineInputAssemblyStateCreateInfo {
 		sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		topology               = state.input_assembly.topology.? or_else .TRIANGLE_STRIP,
+		topology               = state.input_assembly.topology.? or_else .TRIANGLE_LIST,
 		primitiveRestartEnable = b32(state.input_assembly.primitive_restart_enable),
 	}
 
@@ -263,8 +263,8 @@ graphics_pipeline_init :: proc(
 		depthClampEnable        = b32(state.rasterization.depth_clamp_enable),
 		rasterizerDiscardEnable = b32(state.rasterization.rasterizer_discard_enable),
 		polygonMode             = state.rasterization.polygon_mode,
-		cullMode                = state.rasterization.cull_mode.? or_else {.BACK},
-		frontFace               = state.rasterization.front_face,
+		cullMode                = state.rasterization.cull_mode.? or_else nil,
+		frontFace               = state.rasterization.front_face.? or_else .COUNTER_CLOCKWISE,
 		depthBiasEnable         = b32(state.rasterization.depth_bias_enable),
 		depthBiasClamp          = 1.0,
 		depthBiasSlopeFactor    = 1.0,
@@ -288,7 +288,7 @@ graphics_pipeline_init :: proc(
 		sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		depthTestEnable = b32(state.depth_stencil.depth_test_enable.? or_else true),
 		depthWriteEnable = b32(state.depth_stencil.depth_write_enable.? or_else true),
-		depthCompareOp = state.depth_stencil.depth_compare_op.? or_else .GREATER,
+		depthCompareOp = state.depth_stencil.depth_compare_op.? or_else .LESS,
 		depthBoundsTestEnable = b32(state.depth_stencil.depth_bounds_test_enable),
 		stencilTestEnable = b32(state.depth_stencil.stencil_test_enable),
 		front = {

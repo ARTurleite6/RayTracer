@@ -2,11 +2,12 @@ package raytracer
 
 import "core:log"
 import "core:mem"
+import "core:slice"
 _ :: log
 
 import vk "vendor:vulkan"
 
-MAX_PUSH_CONSTANT_SIZE :: 128
+MAX_PUSH_CONSTANT_SIZE :: 256
 
 Command_Buffer :: struct {
 	buffer:                 vk.CommandBuffer,
@@ -77,6 +78,74 @@ command_buffer_reset :: proc(cmd: ^Command_Buffer) {
 	cmd.sbt = nil
 }
 
+command_buffer_bind_vertex_buffers :: proc(
+	cmd: Command_Buffer,
+	first_binding: u32,
+	buffers: []Buffer,
+	offsets: []vk.DeviceSize,
+) {
+	raw_buffers := slice.mapper(
+		buffers,
+		proc(buffer: Buffer) -> vk.Buffer {return buffer.handle},
+		allocator = cmd.allocator,
+	)
+
+	vk.CmdBindVertexBuffers(
+		cmd.buffer,
+		first_binding,
+		u32(len(buffers)),
+		raw_data(raw_buffers),
+		raw_data(offsets),
+	)
+}
+
+command_buffer_bind_index_buffer :: proc(
+	cmd: Command_Buffer,
+	buffer: Buffer,
+	offset: vk.DeviceSize,
+	index_type: vk.IndexType,
+) {
+	vk.CmdBindIndexBuffer(cmd.buffer, buffer.handle, offset, index_type)
+}
+
+command_buffer_set_vertex_attrib :: proc(
+	cmd: ^Command_Buffer,
+	location, binding: u32,
+	format: vk.Format,
+	offset: u32,
+) {
+	context.allocator = cmd.allocator
+	if len(cmd.pipeline_state.vertex_input.attributes) <= int(location) {
+		resize(&cmd.pipeline_state.vertex_input.attributes, location + 1)
+	}
+	cmd.pipeline_state.vertex_input.attributes[location] = {
+		location = location,
+		binding  = binding,
+		format   = format,
+		offset   = offset,
+	}
+
+	cmd.pipeline_state.dirty = true
+}
+
+command_buffer_set_vertex_binding :: proc(
+	cmd: ^Command_Buffer,
+	binding, stride: u32,
+	input_rate := vk.VertexInputRate.VERTEX,
+) {
+	context.allocator = cmd.allocator
+	if len(cmd.pipeline_state.vertex_input.bindings) <= int(binding) {
+		resize(&cmd.pipeline_state.vertex_input.bindings, binding + 1)
+	}
+	cmd.pipeline_state.vertex_input.bindings[binding] = {
+		binding   = binding,
+		stride    = stride,
+		inputRate = input_rate,
+	}
+
+	cmd.pipeline_state.dirty = true
+}
+
 command_buffer_bind_resource :: proc(
 	cmd: ^Command_Buffer,
 	set: u32,
@@ -140,6 +209,24 @@ command_buffer_draw :: proc(
 	command_buffer_flush(cmd, .GRAPHICS)
 	vk.CmdDraw(cmd.buffer, vertex_count, instance_count, first_vertex, first_instance)
 }
+
+command_buffer_draw_indexed :: proc(
+	cmd: ^Command_Buffer,
+	index_count, instance_count, first_index: u32,
+	vertex_offset: i32,
+	first_instance: u32,
+) {
+	command_buffer_flush(cmd, .GRAPHICS)
+	vk.CmdDrawIndexed(
+		cmd.buffer,
+		index_count,
+		instance_count,
+		first_index,
+		vertex_offset,
+		first_instance,
+	)
+}
+
 
 command_buffer_set_raytracing_program :: proc(
 	cmd: ^Command_Buffer,
@@ -286,7 +373,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 	// flush pipeline
 	if cmd.pipeline_state.dirty {
 		// we need to get another pipeline
-		defer cmd.pipeline_state.dirty = true
+		defer cmd.pipeline_state.dirty = false
 
 		pipeline: ^Pipeline2
 
@@ -338,6 +425,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 		len(cmd.resource_binding_state),
 		context.temp_allocator,
 	)
+	dirty: bool
 	// flush sets
 	for set, &state in cmd.resource_binding_state {
 		// TODO:check if all descriptors are getting bound(probably this could be directly on descriptor_set
@@ -347,6 +435,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 			assert(cmd.pipeline_state.layout != nil, "Pipeline layout must already been bound")
 			assert(set < u32(len(cmd.pipeline_state.layout.descriptor_set_layouts)), "Invalid set")
 			descriptor_layout := cmd.pipeline_state.layout.descriptor_set_layouts[set]
+			dirty = true
 
 			descriptor_set := resource_cache_request_descriptor_set2(
 				&cmd.ctx.cache,
@@ -369,7 +458,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 		}
 	}
 
-	if len(binding_sets) > 0 {
+	if len(binding_sets) > 0 && dirty {
 		vk.CmdBindDescriptorSets(
 			cmd.buffer,
 			bind_point,

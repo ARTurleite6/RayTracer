@@ -3,6 +3,7 @@ package raytracer
 import "core:log"
 import "core:mem"
 _ :: log
+_ :: mem
 
 import vk "vendor:vulkan"
 
@@ -101,7 +102,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 
 	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
 	update_camera_ubo(renderer, ubo_buffer, camera)
-	if true {
+	when false {
 
 		spec := Raytracing_Spec {
 			rgen_shader         = &renderer.shaders[0],
@@ -166,6 +167,8 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 			&renderer.restir_render_pass,
 			cmd,
 			&renderer.gpu_scene,
+			renderer.scene^,
+			camera^,
 			ubo_buffer^,
 		)
 	}

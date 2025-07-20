@@ -55,7 +55,11 @@ gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Sce
 			ctx,
 			raw_data(mesh.vertices),
 			u64(size_of(Vertex) * len(mesh.vertices)),
-			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+			{
+				.SHADER_DEVICE_ADDRESS,
+				.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+				.VERTEX_BUFFER,
+			},
 		)
 
 		buffer_init_with_staging_buffer(
@@ -63,7 +67,11 @@ gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Sce
 			ctx,
 			raw_data(mesh.indices),
 			u64(size_of(u32) * len(mesh.indices)),
-			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
+			{
+				.SHADER_DEVICE_ADDRESS,
+				.ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
+				.INDEX_BUFFER,
+			},
 		)
 
 		gpu_scene.meshes_data[i] = Mesh_GPU_Data {

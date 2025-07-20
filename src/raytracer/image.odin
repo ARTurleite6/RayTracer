@@ -14,6 +14,16 @@ image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, exten
 	image^ = {}
 	image.format = format
 	image.extent = extent
+
+	is_depth := is_depth_format(format)
+
+	usage := vk.ImageUsageFlags{.SAMPLED, .TRANSFER_SRC}
+	if is_depth {
+		usage |= {.DEPTH_STENCIL_ATTACHMENT}
+	} else {
+		usage |= {.COLOR_ATTACHMENT, .STORAGE}
+	}
+
 	image_info := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,
 		imageType = .D2,
@@ -23,7 +33,7 @@ image_init :: proc(image: ^Image, ctx: ^Vulkan_Context, format: vk.Format, exten
 		arrayLayers = 1,
 		samples = {._1},
 		tiling = .OPTIMAL,
-		usage = {.COLOR_ATTACHMENT, .STORAGE, .SAMPLED, .TRANSFER_SRC},
+		usage = usage,
 		sharingMode = .EXCLUSIVE,
 		initialLayout = .UNDEFINED,
 	}
@@ -51,6 +61,9 @@ image_destroy :: proc(image: ^Image, ctx: Vulkan_Context) {
 }
 
 image_view_init :: proc(image_view: ^vk.ImageView, image: Image, ctx: ^Vulkan_Context) {
+	is_depth := is_depth_format(image.format)
+	aspect_mask := is_depth ? vk.ImageAspectFlags{.DEPTH} : vk.ImageAspectFlags{.COLOR}
+
 	create_info := vk.ImageViewCreateInfo {
 		sType = .IMAGE_VIEW_CREATE_INFO,
 		image = image.handle,
@@ -58,7 +71,7 @@ image_view_init :: proc(image_view: ^vk.ImageView, image: Image, ctx: ^Vulkan_Co
 		format = image.format,
 		components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
 		subresourceRange = {
-			aspectMask = {.COLOR},
+			aspectMask = aspect_mask,
 			baseMipLevel = 0,
 			levelCount = 1,
 			baseArrayLayer = 0,
@@ -110,7 +123,12 @@ image_transition_layout_stage_access :: proc(
 	old_layout, new_layout: vk.ImageLayout,
 	src_stage, dst_stage: vk.PipelineStageFlags2,
 	src_access, dst_access: vk.AccessFlags2,
+	format := vk.Format.UNDEFINED,
 ) {
+	aspect_mask := vk.ImageAspectFlags{.COLOR}
+	if is_depth_format(format) {
+		aspect_mask = {.DEPTH}
+	}
 	barrier := vk.ImageMemoryBarrier2 {
 		sType = .IMAGE_MEMORY_BARRIER_2,
 		srcStageMask = src_stage,
@@ -121,7 +139,7 @@ image_transition_layout_stage_access :: proc(
 		newLayout = new_layout,
 		image = image,
 		subresourceRange = {
-			aspectMask = {.COLOR},
+			aspectMask = aspect_mask,
 			baseMipLevel = 0,
 			levelCount = 1,
 			baseArrayLayer = 0,
@@ -215,5 +233,15 @@ get_access_flags :: proc(layout: vk.ImageLayout) -> vk.AccessFlags2 {
 	case:
 		assert(false)
 		return {}
+	}
+}
+
+// Helper function to determine if a format is a depth format
+is_depth_format :: proc(format: vk.Format) -> bool {
+	#partial switch format {
+	case .D16_UNORM, .D32_SFLOAT, .D16_UNORM_S8_UINT, .D24_UNORM_S8_UINT, .D32_SFLOAT_S8_UINT:
+		return true
+	case:
+		return false
 	}
 }
