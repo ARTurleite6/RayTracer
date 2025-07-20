@@ -1,5 +1,7 @@
 package raytracer
 
+import "core:fmt"
+_ :: fmt
 
 import vk "vendor:vulkan"
 
@@ -43,7 +45,7 @@ rt_pipeline_build :: proc(
 		self.layout,
 	)
 
-	shader_binding_table_build(&self.shader_binding_table, ctx, self, self.raytracing_props)
+	shader_binding_table_build(&self.shader_binding_table, ctx, self.handle, self.raytracing_props)
 
 	return .SUCCESS
 }

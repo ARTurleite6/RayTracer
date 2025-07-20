@@ -39,7 +39,7 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 	}
 
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-
+	glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
 	window.handle = glfw.CreateWindow(width, height, title, nil, nil)
 	if window.handle == nil {
 		log.error("GLFW: Error creating window")

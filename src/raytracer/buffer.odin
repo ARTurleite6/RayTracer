@@ -2,20 +2,20 @@ package raytracer
 
 import "base:runtime"
 import "core:fmt"
+import "core:log"
 import vma "external:odin-vma"
 import vk "vendor:vulkan"
 _ :: runtime
+_ :: log
 _ :: fmt
 
 Buffer :: struct {
-	handle:         vk.Buffer,
-	allocation:     vma.Allocation,
-	size:           vk.DeviceSize,
-	instance_size:  vk.DeviceSize,
-	instance_count: int,
-	mapped_data:    rawptr,
-	usage:          vk.BufferUsageFlags,
-	ctx:            ^Vulkan_Context,
+	handle:      vk.Buffer,
+	allocation:  vma.Allocation,
+	size:        vk.DeviceSize,
+	mapped_data: rawptr,
+	usage:       vk.BufferUsageFlags,
+	ctx:         ^Vulkan_Context,
 }
 
 Buffer_Error :: enum {
@@ -28,28 +28,23 @@ Buffer_Error :: enum {
 buffer_init :: proc(
 	buffer: ^Buffer,
 	ctx: ^Vulkan_Context,
-	instance_size: vk.DeviceSize,
+	size: u64,
 	usage: vk.BufferUsageFlags,
 	memory_usage: vma.Memory_Usage,
-	instance_count := 1,
 	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
-	size := instance_size * vk.DeviceSize(instance_count)
-	if size <= 0 {
-		return .Invalid_Size
-	}
+	assert(size > 0, "A buffer must have a size greater than 0")
+	buffer^ = {}
 	buffer.ctx = ctx
-	buffer.size = size // TODO: this should be handled better in the future
-	buffer.instance_size = instance_size
-	buffer.instance_count = instance_count
-	buffer.usage = usage
+	buffer.size = vk.DeviceSize(size)
+	buffer.usage = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS}
 
 	device := buffer.ctx.device
 
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
-		size        = size,
-		usage       = usage,
+		size        = vk.DeviceSize(size),
+		usage       = buffer.usage,
 		sharingMode = .EXCLUSIVE,
 	}
 
@@ -73,21 +68,21 @@ buffer_init :: proc(
 		   .SUCCESS {
 			return .Creation_Failed
 		}
-	}
-
-	if vk_check(
-		   vma.create_buffer(
-			   device.allocator,
-			   buffer_info,
-			   alloc_create_info,
-			   &buffer.handle,
-			   &buffer.allocation,
-			   nil,
-		   ),
-		   "Failed to create buffer",
-	   ) !=
-	   .SUCCESS {
-		return .Creation_Failed
+	} else {
+		if vk_check(
+			   vma.create_buffer(
+				   device.allocator,
+				   buffer_info,
+				   alloc_create_info,
+				   &buffer.handle,
+				   &buffer.allocation,
+				   nil,
+			   ),
+			   "Failed to create buffer",
+		   ) !=
+		   .SUCCESS {
+			return .Creation_Failed
+		}
 	}
 
 	return .None
@@ -97,9 +92,9 @@ buffer_init_with_staging_buffer :: proc(
 	buffer: ^Buffer,
 	ctx: ^Vulkan_Context,
 	data: rawptr,
-	instance_size: vk.DeviceSize,
-	instance_count: int,
+	size: u64,
 	usage: vk.BufferUsageFlags,
+	alignment := vk.DeviceSize(0),
 	memory_usage: vma.Memory_Usage = .Gpu_Only,
 ) -> (
 	err: Buffer_Error,
@@ -109,27 +104,24 @@ buffer_init_with_staging_buffer :: proc(
 	buffer_init(
 		buffer,
 		buffer.ctx,
-		instance_size,
+		size,
 		{.TRANSFER_DST} | usage,
 		memory_usage,
-		instance_count = instance_count,
+		alignment = alignment,
 	) or_return
 
-	staging_buffer: Buffer
-	buffer_init(
-		&staging_buffer,
-		buffer.ctx,
-		instance_size,
-		{.TRANSFER_SRC} | usage,
-		.Cpu_To_Gpu,
-		instance_count = instance_count,
-	) or_return
-	defer buffer_destroy(&staging_buffer)
+	staging_buffer := vulkan_context_request_staging_buffer(ctx, vk.DeviceSize(size))
 
-	buffer_map(&staging_buffer) or_return
-	buffer_write(&staging_buffer, data)
+	buffer_allocation_update(&staging_buffer, data, vk.DeviceSize(size))
 
-	device_copy_buffer(device, staging_buffer.handle, buffer.handle, staging_buffer.size)
+	device_copy_buffer(
+		device,
+		staging_buffer.buffer.handle,
+		buffer.handle,
+		staging_buffer.size,
+		src_offset = staging_buffer.offset,
+		dst_offset = 0,
+	)
 	return nil
 }
 
@@ -141,7 +133,6 @@ buffer_destroy :: proc(buffer: ^Buffer) {
 	if buffer.handle != 0 {
 		vma.destroy_buffer(buffer.ctx.device.allocator, buffer.handle, buffer.allocation)
 	}
-	buffer^ = {}
 }
 
 buffer_descriptor_info :: proc(buffer: Buffer) -> vk.DescriptorBufferInfo {
@@ -163,55 +154,43 @@ buffer_unmap :: proc(buffer: ^Buffer) {
 	vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 }
 
-buffer_write :: proc(
-	buffer: ^Buffer,
-	data: rawptr,
-	size := vk.WHOLE_SIZE,
-	offset: vk.DeviceSize = 0,
-) {
-	assert(buffer.mapped_data != nil, "Buffer must be mapped before writing to it")
+buffer_write :: proc {
+	buffer_write_poly,
+	buffer_write_rawptr,
+}
 
-	if size == vk.WHOLE_SIZE {
-		runtime.mem_copy(buffer.mapped_data, data, int(buffer.size))
+buffer_write_poly :: proc(buffer: ^Buffer, data: ^$T) {
+	buffer_write_rawptr(buffer, data, 0, size_of(T))
+}
+
+buffer_write_rawptr :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {
+	assert(buffer.mapped_data != nil)
+	dst_ptr := rawptr(uintptr(buffer.mapped_data) + uintptr(offset))
+
+	if size == vk.DeviceSize(vk.WHOLE_SIZE) {
+		runtime.mem_copy(dst_ptr, data, int(buffer.size - offset))
 	} else {
-		runtime.mem_copy(buffer.mapped_data, data, int(size))
+		runtime.mem_copy(dst_ptr, data, int(size))
 	}
 }
 
-buffer_update_region :: proc(
-	buffer: ^Buffer,
-	data: rawptr,
-	size: vk.DeviceSize,
-	offset: vk.DeviceSize = 0,
-) {
-
-	staging_buffer: Buffer
-	buffer_init(&staging_buffer, buffer.ctx, size, {.TRANSFER_SRC}, .Cpu_To_Gpu)
-	defer buffer_destroy(&staging_buffer)
-
-	// Map, copy data, and unmap
-	buffer_map(&staging_buffer)
-	buffer_write(&staging_buffer, data)
-
-	// Copy from staging buffer to destination buffer
-	device := buffer.ctx.device
-	cmd := device_begin_single_time_commands(device, device.command_pool)
-	defer device_end_single_time_commands(device, device.command_pool, cmd)
-
-	copy_region := vk.BufferCopy {
-		srcOffset = 0,
-		dstOffset = offset,
-		size      = size,
+buffer_flush :: proc(buffer: ^Buffer, offset, size: vk.DeviceSize) {
+	if size == vk.DeviceSize(vk.WHOLE_SIZE) {
+		_ = vk_check(
+			vma.flush_allocation(
+				buffer.ctx.device.allocator,
+				buffer.allocation,
+				offset,
+				buffer.size - offset,
+			),
+			"Failed to upload data to uniform buffer",
+		)
+	} else {
+		_ = vk_check(
+			vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, offset, size),
+			"Failed to upload data to uniform buffer",
+		)
 	}
-
-	vk.CmdCopyBuffer(cmd, staging_buffer.handle, buffer.handle, 1, &copy_region)
-}
-
-buffer_flush :: proc(buffer: ^Buffer, size := vk.WHOLE_SIZE) {
-	_ = vk_check(
-		vma.flush_allocation(buffer.ctx.device.allocator, buffer.allocation, 0, buffer.size),
-		"Failed to upload data to uniform buffer",
-	)
 }
 
 buffer_get_device_address :: proc(buffer: Buffer) -> vk.DeviceAddress {
