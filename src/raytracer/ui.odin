@@ -108,7 +108,7 @@ ui_render :: proc(renderer: ^Renderer) {
 	)
 
 	info := ctx_get_swapchain_render_pass(ctx^, load_op = .LOAD)
-	command_buffer_begin_render_pass(cmd, &info)
+	command_buffer_begin_render_pass(cmd, &info, {})
 
 	imgui_vulkan.NewFrame()
 	imgui_glfw.NewFrame()

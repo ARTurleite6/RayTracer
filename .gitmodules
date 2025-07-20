@@ -13,3 +13,6 @@
 [submodule "external/odin-spirv-reflect/SPIRV-Reflect"]
 	path = external/odin-spirv-reflect/SPIRV-Reflect
 	url = git@github.com:KhronosGroup/SPIRV-Reflect.git
+[submodule "external/odin-spirv-cross/SPIRV-Cross"]
+	path = external/odin-spirv-cross/SPIRV-Cross
+	url = git@github.com:KhronosGroup/SPIRV-Cross.git
