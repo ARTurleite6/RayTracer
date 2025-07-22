@@ -102,7 +102,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 
 	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
 	update_camera_ubo(renderer, ubo_buffer, camera)
-	when false {
+	when true {
 
 		spec := Raytracing_Spec {
 			rgen_shader         = &renderer.shaders[0],
