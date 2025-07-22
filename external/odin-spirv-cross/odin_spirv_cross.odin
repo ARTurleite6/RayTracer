@@ -2,7 +2,11 @@ package odin_spirv_cross
 
 import "core:c"
 
-foreign import spirv_cross {"lib/spirv-cross-c.lib", "lib/spirv-cross-core.lib", "lib/spirv-cross-glsl.lib"}
+when ODIN_OS == .Linux {
+	foreign import spirv_cross {"libspirv-cross-c.a", "libspirv-cross-core.a", "libspirv-cross-glsl.a"}
+} else when ODIN_OS == .Windows {
+	foreign import spirv_cross {"spirv-cross-c.lib", "spirv-cross-core.lib", "spirv-cross-glsl.lib"}
+}
 
 spvc_context :: rawptr
 parsed_ir :: rawptr
