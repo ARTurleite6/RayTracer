@@ -96,7 +96,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 	extent := renderer.ctx.swapchain_manager.extent
 	output_image: ^Image
 	if camera.dirty {
-		renderer.accumulation_frame = 1
+		renderer.accumulation_frame = 0
 		camera.dirty = false
 	}
 
