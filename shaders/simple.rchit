@@ -373,9 +373,9 @@ vec3 sampleDirectLighting(vec3 hitPos, vec3 normal, Material material, vec3 view
         float triangleSelectionPdf = 1.0 / float(num_triangles);
         float areaPdf = 1.0 / triangleArea;
         float cosTheta = abs(LdotN);
-        if (cosTheta <= 1e-8) return vec3(0.0);
+        if (cosTheta <= 1e-8) return vec3(0);
         float solidAnglePdf = areaPdf * lightDistSq / cosTheta;
-        float lightContribPdf = selectionPdf * triangleSelectionPdf * solidAnglePdf;
+        float lightContribPdf = selectionPdf * triangleSelectionPdf; // * solidAnglePdf;
 
         vec3 emission = lightMaterial.emission_color * lightMaterial.emission_power;
         directIllumination = (emission * brdf * NdotL * LdotN) / lightContribPdf;
@@ -454,7 +454,13 @@ void main() {
         payload.color += payload.throughput * mat.emission_color * mat.emission_power;
     }
 
-    vec3 directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
+    vec3 directLight = vec3(0);
+    // if (payload.firstBounce || !payload.isSpecular) {
+    if (getSpecularProbability(mat) < 0.7) {
+        directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
+    }
+    // }
+
     payload.color += payload.throughput * directLight;
 
     mat3 basis = createBasis(worldNrm);
