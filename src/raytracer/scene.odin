@@ -511,7 +511,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 			name = "light",
 			albedo = {0.8, 0.8, 0.8},
 			emission_color = {1.0, 1.0, 1.0},
-			emission_power = 5.0,
+			emission_power = 10.0,
 		},
 	)
 
