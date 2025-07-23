@@ -511,7 +511,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 			name = "light",
 			albedo = {0.8, 0.8, 0.8},
 			emission_color = {1.0, 1.0, 1.0},
-			emission_power = 0.1,
+			emission_power = 5.0,
 		},
 	)
 
@@ -606,12 +606,10 @@ create_cornell_box :: proc() -> (scene: Scene) {
 	scene_add_material(
 		&scene,
 		Material {
-			name           = "glossy",
-			albedo         = {0.3, 0.8, 0.3}, // Green glossy material
-			metallic       = 0.0, // Not a metal
-			roughness      = 1.0, // Fairly smooth surface
-			emission_color = {0.3, 0.8, 0.3}, // Green glossy material
-			emission_power = 0.1,
+			name      = "glossy",
+			albedo    = {0.3, 0.8, 0.3}, // Green glossy material
+			metallic  = 0.0, // Not a metal
+			roughness = 1.0, // Fairly smooth surface
 		},
 	)
 

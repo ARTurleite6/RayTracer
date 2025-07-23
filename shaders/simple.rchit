@@ -34,11 +34,21 @@ layout(set = 0, binding = 3, scalar) buffer LightsBuffer {
     LightData lights[];
 } lights_data;
 
-struct BSDFSample {
-    vec3 direction;
-    vec3 value;
+struct LightSample {
+    vec3 position;
+    vec3 normal;
+    vec3 emission;
     float pdf;
-    bool isSpecular;
+    float distance;
+    vec3 direction;
+    bool valid;
+};
+
+struct BRDFEval {
+    vec3 diffuse; // Diffuse component
+    vec3 specular; // Specular component
+    float diffusePdf;
+    float specularPdf;
 };
 
 // Get selection probability for specular vs diffuse sampling
@@ -46,15 +56,6 @@ float getSpecularProbability(Material material) {
     vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
     return max3(F0);
 }
-
-struct SurfaceInteractionResult {
-    vec3 brdf;
-    float pdf;
-    vec3 scatteredDirection;
-    bool isSpecular;
-    float diffusePdf;
-    float specularPdf;
-};
 
 float D_GGX(float NoH, float roughness) {
     float alpha = roughness * roughness;
@@ -87,6 +88,55 @@ vec3 generateCosineWeightedDirection(vec2 random) {
     float z = cosTheta;
 
     return vec3(x, y, z);
+}
+
+BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
+    BRDFEval result;
+
+    // Calculate necessary vectors and dot products
+    float NoL = cosTheta(wi);
+    float NoV = cosTheta(wo);
+
+    if (NoL <= 0.0 || NoV <= 0.0) {
+        // Below horizon - no contribution
+        result.diffuse = vec3(0.0);
+        result.specular = vec3(0.0);
+        result.diffusePdf = 0.0;
+        result.specularPdf = 0.0;
+        return result;
+    }
+
+    // Calculate half-vector
+    vec3 h = normalize(wo + wi);
+    float NoH = cosTheta(h);
+    float VoH = dot(wo, h);
+
+    // Calculate diffuse term (Lambert)
+    float nonMetalWeight = 1.0 - material.metallic;
+    result.diffuse = material.albedo * nonMetalWeight / M_PI;
+    result.diffusePdf = NoL / M_PI;
+
+    // Calculate specular microfacet term
+    // D term (normal distribution function)
+    float D = D_GGX(NoH, material.roughness);
+
+    // G term (geometric shadowing)
+    float G = G_Smith(NoV, NoL, material.roughness);
+
+    // Fresnel term
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    vec3 F = F_Schlick(F0, VoH);
+
+    result.specular = D * G * F / (4.0 * NoV * NoL);
+    result.specularPdf = D * NoH / (4.0 * VoH);
+
+    return result;
+}
+
+// Evaluate full BRDF (diffuse + specular)
+vec3 evaluateFullBRDF(vec3 wo, vec3 wi, Material material) {
+    BRDFEval eval = evaluateBRDFComponents(wo, wi, material);
+    return eval.diffuse + eval.specular;
 }
 
 vec3 microfacetF(vec3 wo, vec3 wi, vec3 h, Material material) {
@@ -150,61 +200,223 @@ vec3 generateLambertianRay(vec3 normal, vec2 random) {
     return localToWorld(localDir, basis);
 }
 
-struct BRDFEval {
-    vec3 diffuse; // Diffuse component
-    vec3 specular; // Specular component
-    float diffusePdf;
-    float specularPdf;
-};
+// Balance Heuristic
+float misWeight(float pdf1, float pdf2) {
+    if (pdf1 <= 0 || pdf2 <= 0) return 0.0;
+    return pdf1 / (pdf1 + pdf2);
+}
 
-BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
-    BRDFEval result;
+// Power heuristic (often better, beta = 2)
+float misWeightPower(float pdf1, float pdf2) {
+    if (pdf1 <= 0.0 || pdf2 <= 0.0) return 0.0;
+    return (pdf1 * pdf1) / (pdf1 * pdf1 + pdf2 * pdf2);
+}
 
-    // Calculate necessary vectors and dot products
-    float NoL = cosTheta(wi);
-    float NoV = cosTheta(wo);
+LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
+    LightSample result;
+    result.valid = false;
 
-    if (NoL <= 0.0 || NoV <= 0.0) {
-        // Below horizon - no contribution
-        result.diffuse = vec3(0.0);
-        result.specular = vec3(0.0);
-        result.diffusePdf = 0.0;
-        result.specularPdf = 0.0;
-        return result;
-    }
+    if (lightIdx >= lights_data.lights.length()) return result;
 
-    // Calculate half-vector
-    vec3 h = normalize(wo + wi);
-    float NoH = cosTheta(h);
-    float VoH = dot(wo, h);
+    LightData light = lights_data.lights[lightIdx];
+    ObjectData lightObject = objects_data.objects[light.object_index];
+    Material lightMaterial = materials_data.materials[lightObject.material_index];
 
-    // Calculate diffuse term (Lambert)
-    float nonMetalWeight = 1.0 - material.metallic;
-    result.diffuse = material.albedo * nonMetalWeight / M_PI;
-    result.diffusePdf = NoL / M_PI;
+    Vertices lightVerts = Vertices(lightObject.vertex_address);
+    Indices lightIndices = Indices(lightObject.index_address);
 
-    // Calculate specular microfacet term
-    // D term (normal distribution function)
-    float D = D_GGX(NoH, material.roughness);
+    // Select random triangle
+    uint numTriangles = light.num_triangles;
+    uint triangleIdx = min(uint(rnd(seed) * numTriangles), numTriangles - 1);
+    ivec3 ind = lightIndices.indices[triangleIdx];
 
-    // G term (geometric shadowing)
-    float G = G_Smith(NoV, NoL, material.roughness);
+    // Get triangle vertices
+    Vertex v0 = lightVerts.v[ind.x];
+    Vertex v1 = lightVerts.v[ind.y];
+    Vertex v2 = lightVerts.v[ind.z];
 
-    // Fresnel term
-    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
-    vec3 F = F_Schlick(F0, VoH);
+    // Sample point on triangle
+    float r1 = rnd(seed);
+    float r2 = rnd(seed);
+    float sqrtR1 = sqrt(r1);
 
-    result.specular = D * G * F / (4.0 * NoV * NoL);
-    result.specularPdf = D * NoH / (4.0 * VoH);
+    float u = 1.0 - sqrtR1;
+    float v = sqrtR1 * (1.0 - r2);
+    float w = sqrtR1 * r2;
+
+    // Compute position and normal in local space
+    vec3 localPos = u * v0.pos + v * v1.pos + w * v2.pos;
+    vec3 localNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+
+    // Transform to world space
+    result.position = vec3(light.transform * vec4(localPos, 1.0));
+    mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
+    result.normal = normalize(normalMatrix * localNormal);
+
+    // Calculate direction and distance
+    vec3 toLight = result.position - hitPos;
+    result.distance = length(toLight);
+    result.direction = toLight / result.distance;
+
+    // Calculate triangle area in world space
+    vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
+    vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
+    vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
+    float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+
+    // Calculate PDF in solid angle measure
+    float cosTheta = max(0.0, dot(-result.direction, result.normal));
+    if (cosTheta <= 1e-8) return result; // Back-facing
+
+    float areaPdf = 1.0 / triangleArea;
+    float triangleSelectionPdf = 1.0 / float(numTriangles);
+    result.pdf = triangleSelectionPdf * areaPdf * (result.distance * result.distance) / cosTheta;
+
+    result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
+    result.valid = true;
 
     return result;
 }
 
-// Evaluate full BRDF (diffuse + specular)
-vec3 evaluateFullBRDF(vec3 wo, vec3 wi, Material material) {
-    BRDFEval eval = evaluateBRDFComponents(wo, wi, material);
-    return eval.diffuse + eval.specular;
+// Test visibility between two points
+bool isVisible(vec3 from, vec3 to, vec3 normal) {
+    vec3 direction = to - from;
+    float distance = length(direction);
+    direction /= distance;
+
+    vec3 offsetFrom = from + normal * 0.001;
+
+    isShadowed = true;
+    traceRayEXT(
+        topLevelAS,
+        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+        0xFF,
+        0, 0, 1,
+        offsetFrom,
+        0.001,
+        direction,
+        distance * 0.999,
+        1
+    );
+
+    return !isShadowed;
 }
+
+// MIS direct lighting estimation
+vec3 estimateDirectLightingMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
+    vec3 totalRadiance = vec3(0.0);
+
+    int numLights = lights_data.lights.length();
+    if (numLights == 0) return totalRadiance;
+
+    mat3 basis = createBasis(normal);
+    vec3 woLocal = worldToLocal(-viewDir, basis);
+
+    // Light selection (simplified - pick random light)
+    uint lightIdx = min(uint(rnd(seed) * numLights), uint(numLights - 1));
+    float lightSelectionPdf = 1.0 / float(numLights);
+
+    // Strategy 1: BRDF Sampling
+    {
+        float specularProb = getSpecularProbability(material);
+
+        vec3 wiLocal;
+        float brdfPdf;
+        bool isSpecular = false;
+
+        // Sample BRDF
+        if (rnd(seed) < specularProb) {
+            // Sample GGX specular
+            vec3 h = sampleGGX(vec2(rnd(seed), rnd(seed)), material.roughness);
+            wiLocal = reflect(-woLocal, h);
+            brdfPdf = microfacetPDF(woLocal, h, material.roughness) * specularProb;
+            isSpecular = true;
+        } else {
+            // Sample Lambert diffuse
+            wiLocal = generateCosineWeightedDirection(vec2(rnd(seed), rnd(seed)));
+            brdfPdf = (cosTheta(wiLocal) / M_PI) * (1.0 - specularProb);
+        }
+
+        if (cosTheta(wiLocal) > 0.0 && brdfPdf > 0.0) {
+            vec3 wiWorld = localToWorld(wiLocal, basis);
+
+            // Check if this direction hits our chosen light
+            // (Simplified - in practice you'd trace a ray and check what it hits)
+            LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
+
+            if (lightSample.valid) {
+                // Check if directions are similar (within some tolerance)
+                float dirSimilarity = dot(wiWorld, lightSample.direction);
+
+                if (dirSimilarity > 0.99 && isVisible(hitPos, lightSample.position, normal)) {
+                    // Calculate light PDF for this direction
+                    float lightPdf = lightSample.pdf * lightSelectionPdf;
+
+                    // Evaluate BRDF
+                    vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
+
+                    // MIS weight
+                    float weight = misWeightPower(brdfPdf, lightPdf);
+
+                    vec3 Li = lightSample.emission;
+                    totalRadiance += brdf * Li * cosTheta(wiLocal) * weight / brdfPdf;
+                }
+            }
+        }
+    }
+
+    // Strategy 2: Light Sampling
+    {
+        LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
+
+        if (lightSample.valid && dot(lightSample.direction, normal) > 0.0) {
+            if (isVisible(hitPos, lightSample.position, normal)) {
+                vec3 wiLocal = worldToLocal(lightSample.direction, basis);
+
+                if (cosTheta(wiLocal) > 0.0) {
+                    // Calculate BRDF PDF for this direction
+                    vec3 hLocal = normalize(woLocal + wiLocal);
+                    float specularProb = getSpecularProbability(material);
+                    float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
+                    float diffusePdf = cosTheta(wiLocal) / M_PI;
+                    float brdfPdf = specularProb * specularPdf + (1.0 - specularProb) * diffusePdf;
+
+                    if (brdfPdf > 0.0) {
+                        // Evaluate BRDF
+                        vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
+
+                        // Light PDF
+                        float lightPdf = lightSample.pdf * lightSelectionPdf;
+
+                        // MIS weight
+                        float weight = misWeightPower(lightPdf, brdfPdf);
+
+                        vec3 Li = lightSample.emission;
+                        totalRadiance += brdf * Li * cosTheta(wiLocal) * weight / lightPdf;
+                    }
+                }
+            }
+        }
+    }
+
+    return totalRadiance;
+}
+
+struct BSDFSample {
+    vec3 direction;
+    vec3 value;
+    float pdf;
+    bool isSpecular;
+};
+
+struct SurfaceInteractionResult {
+    vec3 brdf;
+    float pdf;
+    vec3 scatteredDirection;
+    bool isSpecular;
+    float diffusePdf;
+    float specularPdf;
+};
 
 BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
     BSDFSample result;
@@ -456,9 +668,9 @@ void main() {
 
     vec3 directLight = vec3(0);
     // if (payload.firstBounce || !payload.isSpecular) {
-    if (getSpecularProbability(mat) < 0.7) {
-        directLight = sampleDirectLighting(worldPos, worldNrm, mat, incomingRayDir, seed);
-    }
+    // if (getSpecularProbability(mat) < 0.95) {
+    directLight = estimateDirectLightingMIS(worldPos, worldNrm, mat, incomingRayDir, seed);
+    // }
     // }
 
     payload.color += payload.throughput * directLight;
@@ -470,9 +682,21 @@ void main() {
     vec2 random = vec2(rnd(payload.seed), rnd(payload.seed));
     BSDFSample brdfSample = sampleBRDF(woLocal, mat, random, basis);
 
-    payload.throughput *= brdfSample.value * cosTheta(brdfSample.direction) / brdfSample.pdf;
-    payload.nextDirection = localToWorld(brdfSample.direction, basis);
-    payload.hitPosition = worldPos;
-    payload.hit = true;
-    payload.isSpecular = brdfSample.isSpecular;
+    if (brdfSample.pdf > 0.0 && cosTheta(brdfSample.direction) > 0.0) {
+        payload.throughput *= brdfSample.value * cosTheta(brdfSample.direction) / brdfSample.pdf;
+        payload.nextDirection = localToWorld(brdfSample.direction, basis);
+        payload.hitPosition = worldPos;
+        payload.hit = true;
+        payload.isSpecular = brdfSample.isSpecular;
+    } else {
+        payload.hit = false; // Terminate path
+    }
+
+    payload.firstBounce = false;
+    //
+    // payload.throughput *= brdfSample.value * cosTheta(brdfSample.direction) / brdfSample.pdf;
+    // payload.nextDirection = localToWorld(brdfSample.direction, basis);
+    // payload.hitPosition = worldPos;
+    // payload.hit = true;
+    // payload.isSpecular = brdfSample.isSpecular;
 }
