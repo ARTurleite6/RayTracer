@@ -377,6 +377,40 @@ gpu_scene2_compile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Contex
 	}
 }
 
+gpu_scene_add_material :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene_recompile_materials(gpu_scene, ctx, scene)
+}
+
+gpu_scene_remove_material :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene_recompile_materials(gpu_scene, ctx, scene)
+}
+
+gpu_scene_recompile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+	storage_buffer_set_destroy(ctx, &gpu_scene.materials_buffer)
+	gpu_scene2_compile_materials(gpu_scene, ctx, scene)
+}
+
+gpu_scene_update_object_transform :: proc(
+	gpu_scene: ^GPU_Scene2,
+	ctx: ^Vulkan_Context,
+	scene: Scene,
+	object_index: int,
+) {
+	object := scene.objects[object_index]
+
+	gpu_scene.tlas_infos[object_index].transform = matrix_to_transform_matrix_khr(
+		object.transform.model_matrix,
+	)
+
+	gpu_scene2_build_tlas(
+		gpu_scene,
+		ctx,
+		gpu_scene.tlas_infos[:],
+		{.PREFER_FAST_TRACE, .ALLOW_UPDATE},
+		update = true,
+	)
+}
+
 GPU_Scene :: struct {
 	meshes_data:                                     []Mesh_GPU_Data,
 	objects_buffer, lights_buffer, materials_buffer: Buffer_Allocation,
@@ -558,43 +592,36 @@ gpu_scene_recreate_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene)
 	gpu_scene_create_materials_buffer(gpu_scene, scene)
 }
 
-gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, object_index: int) {
-	unimplemented("This needs to be changed")
-	// object := &scene.objects[object_index]
-	// mesh := &gpu_scene.meshes_data[object.mesh_index]
-	//
-	// object_data := Object_GPU_Data {
-	// 	vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
-	// 	index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
-	// 	material_index        = u32(object.material_index),
-	// 	mesh_index            = u32(object.mesh_index),
-	// }
-	//
-	// offset := vk.DeviceSize(object_index * size_of(Object_GPU_Data))
-	//
-	// buffer_update_region(&gpu_scene.objects_buffer, &object_data, size_of(Object_GPU_Data), offset)
+gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene2, scene: ^Scene, object_index: int) {
+	object := &scene.objects[object_index]
+	mesh := &gpu_scene.meshes_data[object.mesh_index]
+
+	object_data := Object_GPU_Data {
+		vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer),
+		index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
+		material_index        = u32(object.material_index),
+		mesh_index            = u32(object.mesh_index),
+	}
+
+	offset := vk.DeviceSize(object_index * size_of(Object_GPU_Data))
+
+	storage_buffer_set_write(&gpu_scene.objects_buffer, &object_data, offset)
 }
 
-gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, material_index: int) {
-	unimplemented("Need to change this")
-	// material := &scene.materials[material_index]
-	//
-	// material_data := Material_Data {
-	// 	albedo         = material.albedo,
-	// 	emission_color = material.emission_color,
-	// 	emission_power = material.emission_power,
-	// 	roughness      = material.roughness,
-	// 	metallic       = material.metallic,
-	// 	transmission   = material.transmission,
-	// 	ior            = material.ior,
-	// }
-	//
-	// offset := vk.DeviceSize(material_index * size_of(Material_Data))
-	//
-	// buffer_update_region(
-	// 	&gpu_scene.materials_buffer,
-	// 	&material_data,
-	// 	size_of(Material_Data),
-	// 	offset,
-	// )
+gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene2, scene: ^Scene, material_index: int) {
+	material := &scene.materials[material_index]
+
+	material_data := Material_Data {
+		albedo         = material.albedo,
+		emission_color = material.emission_color,
+		emission_power = material.emission_power,
+		roughness      = material.roughness,
+		metallic       = material.metallic,
+		transmission   = material.transmission,
+		ior            = material.ior,
+	}
+
+	offset := vk.DeviceSize(material_index * size_of(Material_Data))
+
+	storage_buffer_set_write(&gpu_scene.materials_buffer, &material_data, offset = offset)
 }

@@ -2,7 +2,7 @@ package raytracer
 
 import "core:c"
 import "core:log"
-// import imgui "external:odin-imgui"
+import imgui "external:odin-imgui"
 import "vendor:glfw"
 _ :: log
 
@@ -70,21 +70,20 @@ application_update :: proc(app: ^Application) {
 	app.delta_time = current_time - app.last_frame_time
 	app.last_frame_time = current_time
 
-	// if io := imgui.GetIO(); !io.WantCaptureKeyboard && is_key_pressed(.Q) {
-	// 	app.running = false
-	// }
+	if io := imgui.GetIO(); !io.WantCaptureKeyboard && is_key_pressed(.Q) {
+		app.running = false
+	}
 
 	dt := f32(app.delta_time)
 
 	camera_controller_on_update(&app.camera_controller, dt)
-
-	// renderer_update(&app.renderer)
 }
 
 application_render :: proc(app: ^Application) {
 	raytracing_renderer_begin_frame(&app.renderer)
 	defer raytracing_renderer_end_frame(&app.renderer)
 	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
+	ui_render(&app.renderer)
 	// renderer_begin_frame(&app.renderer)
 	//
 	// renderer_render(&app.renderer, &app.camera_controller.camera)

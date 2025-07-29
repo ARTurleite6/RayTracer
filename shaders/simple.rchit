@@ -262,59 +262,75 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 
     // Select random triangle
     uint numTriangles = light.num_triangles;
-    uint triangleIdx = min(uint(rnd(seed) * numTriangles), numTriangles - 1);
-    ivec3 ind = lightIndices.indices[triangleIdx];
 
-    // Get triangle vertices
-    Vertex v0 = lightVerts.v[ind.x];
-    Vertex v1 = lightVerts.v[ind.y];
-    Vertex v2 = lightVerts.v[ind.z];
+    const int maxAttempts = 1;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+        uint triangleIdx = min(uint(rnd(seed) * numTriangles), numTriangles - 1);
+        ivec3 ind = lightIndices.indices[triangleIdx];
 
-    // Sample point on triangle
-    float r1 = rnd(seed);
-    float r2 = rnd(seed);
-    float sqrtR1 = sqrt(r1);
+        // Get triangle vertices
+        Vertex v0 = lightVerts.v[ind.x];
+        Vertex v1 = lightVerts.v[ind.y];
+        Vertex v2 = lightVerts.v[ind.z];
 
-    float u = 1.0 - sqrtR1;
-    float v = sqrtR1 * (1.0 - r2);
-    float w = sqrtR1 * r2;
+        // Sample point on triangle
+        float r1 = rnd(seed);
+        float r2 = rnd(seed);
+        float sqrtR1 = sqrt(r1);
 
-    // Compute position and normal in local space
-    vec3 localPos = u * v0.pos + v * v1.pos + w * v2.pos;
-    vec3 localNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+        float u = 1.0 - sqrtR1;
+        float v = sqrtR1 * (1.0 - r2);
+        float w = sqrtR1 * r2;
 
-    // Transform to world space
-    result.position = vec3(light.transform * vec4(localPos, 1.0));
-    mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
-    result.normal = normalize(normalMatrix * localNormal);
+        // Compute position and normal in local space
+        vec3 localPos = u * v0.pos + v * v1.pos + w * v2.pos;
+        vec3 localNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
 
-    // Calculate direction and distance
-    vec3 toLight = result.position - hitPos;
-    result.distance = length(toLight);
-    result.direction = toLight / result.distance;
+        // check if front facing triangle
+        vec3 worldPos = vec3(light.transform * vec4(localPos, 1.0));
+        mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
+        vec3 worldNormal = normalize(normalMatrix * localNormal);
+        vec3 toSurface = hitPos - worldPos;
 
-    // Calculate triangle area in world space
-    vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
-    vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
-    vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
-    float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+        if (dot(worldNormal, normalize(toSurface)) > 0.0) {
 
-    // Calculate PDF in solid angle measure
-    float cosTheta = max(0.0, dot(-result.direction, result.normal));
-    if (cosTheta <= 1e-8) return result; // Back-facing
+            // Transform to world space
+            result.position = worldPos;
+            result.normal = worldNormal;
 
-    float areaPdf = 1.0 / triangleArea;
-    float triangleSelectionPdf = 1.0 / float(numTriangles);
-    result.pdf = triangleSelectionPdf * areaPdf * (result.distance * result.distance) / cosTheta;
+            // Calculate direction and distance
+            vec3 toLight = result.position - hitPos;
+            result.distance = length(toLight);
+            result.direction = toLight / result.distance;
 
-    result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
-    result.valid = true;
+            // Calculate triangle area in world space
+            vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
+            vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
+            vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
+            float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+
+            // Calculate PDF in solid angle measure
+            float cosTheta = max(0.0, dot(-result.direction, result.normal));
+            if (cosTheta <= 1e-8) return result; // Back-facing
+
+            float areaPdf = 1.0 / triangleArea;
+            float triangleSelectionPdf = 1.0 / float(numTriangles);
+            result.pdf = triangleSelectionPdf * areaPdf * (result.distance * result.distance) / cosTheta;
+
+            result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
+            result.valid = true;
+            return result;
+        }
+    }
 
     return result;
 }
 
 // Test visibility between two points
-bool isVisible(vec3 from, vec3 to, vec3 normal) {
+bool isVisible(vec3
+    from, vec3
+    to, vec3
+    normal) {
     vec3 direction = to - from;
     float distance = length(direction);
     direction /= distance;

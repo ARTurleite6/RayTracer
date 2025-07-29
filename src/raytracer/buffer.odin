@@ -159,8 +159,8 @@ buffer_write :: proc {
 	buffer_write_rawptr,
 }
 
-buffer_write_poly :: proc(buffer: ^Buffer, data: ^$T) {
-	buffer_write_rawptr(buffer, data, 0, size_of(T))
+buffer_write_poly :: proc(buffer: ^Buffer, data: ^$T, offset: vk.DeviceSize = 0) {
+	buffer_write_rawptr(buffer, data, offset, size_of(T))
 }
 
 buffer_write_rawptr :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {

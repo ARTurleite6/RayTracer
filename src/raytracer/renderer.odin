@@ -174,10 +174,6 @@ renderer_begin_frame :: proc(renderer: ^Renderer) {
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
 }
 
-renderer_render_ui :: proc(renderer: ^Renderer) {
-	ui_render(renderer)
-}
-
 renderer_end_frame :: proc(renderer: ^Renderer) {
 	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image)

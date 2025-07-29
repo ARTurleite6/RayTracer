@@ -1,5 +1,6 @@
 package raytracer
 
+import vk "vendor:vulkan"
 
 Storage_Buffer_Set :: struct {
 	buffers: []Buffer,
@@ -42,4 +43,10 @@ storage_buffer_set_destroy :: proc(
 		buffer_destroy(&b)
 	}
 	delete(bs.buffers, allocator)
+}
+
+storage_buffer_set_write :: proc(bs: ^Storage_Buffer_Set, data: ^$T, offset: vk.DeviceSize = 0) {
+	for &buffer in bs.buffers {
+		buffer_write(&buffer, data, offset = offset)
+	}
 }
