@@ -22,6 +22,7 @@ Raytracing_Renderer :: struct {
 
 	// different render passes
 	restir_render_pass:  Restir_Render_Pass,
+	ui_ctx:              UI_Context,
 
 	// resources
 	shaders:             [4]Shader_Module,
@@ -58,6 +59,8 @@ raytracing_renderer_init :: proc(
 	shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 
 	restir_render_pass_init(&renderer.restir_render_pass, &renderer.ctx)
+
+	ui_context_init(&renderer.ui_ctx, renderer.ctx.device, window^)
 }
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
@@ -79,15 +82,44 @@ raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 }
 
 raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Scene) {
-	renderer.scene = scene
+	assert(scene != nil)
 	if renderer.scene != nil {
-		gpu_scene2_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+		gpu_scene2_destroy(&renderer.gpu_scene, &renderer.ctx)
 	}
+	renderer.scene = scene
+	gpu_scene2_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+	clear(&renderer.scene.changes)
 }
 
 raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 	renderer.current_image_index, _ = ctx_begin_frame(&renderer.ctx)
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
+
+	if len(renderer.scene.changes) > 0 {
+		defer clear(&renderer.scene.changes)
+		renderer.accumulation_frame = 0
+
+		for change in renderer.scene.changes {
+			//TODO: remove partial
+			#partial switch change.type {
+			case .Material_Changed:
+				gpu_scene_update_material(&renderer.gpu_scene, renderer.scene, change.index)
+			case .Object_Material_Changed:
+				gpu_scene_update_object(&renderer.gpu_scene, renderer.scene, change.index)
+			case .Material_Added:
+				gpu_scene_add_material(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+			case .Material_Removed:
+				gpu_scene_remove_material(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+			case .Object_Transform_Changed:
+				gpu_scene_update_object_transform(
+					&renderer.gpu_scene,
+					&renderer.ctx,
+					renderer.scene^,
+					change.index,
+				)
+			}
+		}
+	}
 }
 
 raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera: ^Camera) {
@@ -96,7 +128,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 	extent := renderer.ctx.swapchain_manager.extent
 	output_image: ^Image
 	if camera.dirty {
-		renderer.accumulation_frame = 1
+		renderer.accumulation_frame = 0
 		camera.dirty = false
 	}
 
