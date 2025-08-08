@@ -19,13 +19,45 @@ shaders = [
         "out": "shaders/rmiss.spv",
     },
     {
+        "src": "shaders/simple.vert",
+        "out": "shaders/vert.spv",
+    },
+    {
+        "src": "shaders/simple.frag",
+        "out": "shaders/frag.spv",
+    },
+    {
         "src": "shaders/simple.rchit",
         "out": "shaders/rchit.spv",
     },
     {
         "src": "shaders/shadow.rmiss",
         "out": "shaders/shadow.spv",
-    }
+    },
+    {
+        "src": "shaders/restir.rgen",
+        "out": "shaders/restir_rgen.spv",
+    },
+    {
+        "src": "shaders/restir.rmiss",
+        "out": "shaders/restir_rmiss.spv",
+    },
+    {
+        "src": "shaders/restir.rchit",
+        "out": "shaders/restir_rchit.spv",
+    },
+    {
+        "src": "shaders/restir/gbuffer.vert",
+        "out": "shaders/restir/gbuffer_vert.spv",
+    },
+    {
+        "src": "shaders/restir/gbuffer.frag",
+        "out": "shaders/restir/gbuffer_frag.spv",
+    },
+    {
+        "src": "shaders/restir/restir_di.rgen",
+        "out": "shaders/restir/restir_di_rgen.spv",
+    },
 ]
 
 def print_command_result(result: subprocess.CompletedProcess[str]):

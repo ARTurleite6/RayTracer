@@ -1,10 +1,8 @@
 package raytracer
 
 import "base:runtime"
-import "core:fmt"
 import "core:log"
 import vk "vendor:vulkan"
-_ :: fmt
 
 Descriptor_Set_Layout :: struct {
 	handle:   vk.DescriptorSetLayout,
@@ -67,8 +65,7 @@ descriptor_set_layout_destroy :: proc(layout: ^Descriptor_Set_Layout) {
 	layout^ = {}
 }
 
-descriptor_set_allocate :: proc(layout: ^Descriptor_Set_Layout) -> (set: Descriptor_Set) {
-	set.layout = layout
+descriptor_set_allocate :: proc(layout: ^Descriptor_Set_Layout) -> (set: vk.DescriptorSet) {
 	alloc_info := vk.DescriptorSetAllocateInfo {
 		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
 		descriptorPool     = layout.ctx.descriptor_pool,
@@ -76,19 +73,23 @@ descriptor_set_allocate :: proc(layout: ^Descriptor_Set_Layout) -> (set: Descrip
 		pSetLayouts        = &layout.handle,
 	}
 
-	vk.AllocateDescriptorSets(vulkan_get_device_handle(layout.ctx), &alloc_info, &set.handle)
+	vk.AllocateDescriptorSets(vulkan_get_device_handle(layout.ctx), &alloc_info, &set)
 
 	return set
 }
 
-descriptor_set_update :: proc(set: ^Descriptor_Set, write_infos: ..Descriptor_Set_Write_Info) {
-	if set == nil || len(write_infos) == 0 {
+descriptor_set_update :: proc(
+	set: vk.DescriptorSet,
+	ctx: ^Vulkan_Context,
+	layout: Descriptor_Set_Layout,
+	write_infos: ..Descriptor_Set_Write_Info,
+) {
+	if len(write_infos) == 0 {
 		return
 	}
 
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 
-	ctx := set.layout.ctx
 	device := vulkan_get_device_handle(ctx)
 
 	write_set_count := len(write_infos)
@@ -100,7 +101,7 @@ descriptor_set_update :: proc(set: ^Descriptor_Set, write_infos: ..Descriptor_Se
 	)
 
 	for write_info, i in write_infos {
-		binding_it, binding_exists := set.layout.bindings[u32(write_info.binding)]
+		binding_it, binding_exists := layout.bindings[u32(write_info.binding)]
 
 		if !binding_exists {
 			log.errorf("Binding %d does not exist in descriptor set layout", write_info.binding)
@@ -109,7 +110,7 @@ descriptor_set_update :: proc(set: ^Descriptor_Set, write_infos: ..Descriptor_Se
 
 		descriptor_write := vk.WriteDescriptorSet {
 			sType           = .WRITE_DESCRIPTOR_SET,
-			dstSet          = set.handle,
+			dstSet          = set,
 			dstBinding      = u32(write_info.binding),
 			descriptorCount = 1,
 			descriptorType  = binding_it.descriptorType,

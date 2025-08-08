@@ -1,8 +1,8 @@
 package raytracer
 
-import "base:runtime"
 import "core:fmt"
 import glm "core:math/linalg"
+import "core:mem"
 import vk "vendor:vulkan"
 _ :: fmt
 
@@ -33,7 +33,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 	vertex_address := buffer_get_device_address(mesh.vertex_buffer)
 	index_address := buffer_get_device_address(mesh.index_buffer)
 
-	max_primitives := u32(mesh.index_buffer.instance_count) / 3
+	max_primitives := u32(mesh.num_indices) / 3
 
 	triangles := vk.AccelerationStructureGeometryTrianglesDataKHR {
 		sType = .ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
@@ -42,7 +42,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 		vertexStride = size_of(Vertex),
 		indexType = .UINT32,
 		indexData = {deviceAddress = index_address},
-		maxVertex = u32(mesh.vertex_buffer.instance_count) - 1,
+		maxVertex = u32(mesh.num_vertices) - 1,
 	}
 
 	geom := vk.AccelerationStructureGeometryKHR {
@@ -63,7 +63,7 @@ mesh_to_geometry :: proc(mesh: ^Mesh_GPU_Data, device: Device) -> Bottom_Level_I
 }
 
 cmd_create_tlas :: proc(
-	rt_builder: ^Raytracing_Builder,
+	tlas: ^Acceleration_Structure,
 	cmd: vk.CommandBuffer,
 	count_instance: u32,
 	instance_buffer_address: vk.DeviceAddress,
@@ -115,7 +115,7 @@ cmd_create_tlas :: proc(
 	buffer_init(
 		scratch_buffer,
 		ctx,
-		size_info.buildScratchSize,
+		u64(size_info.buildScratchSize),
 		{.STORAGE_BUFFER, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 		alignment = 128, // TODO: THIS NEEDS TO BE CHANGED ALSO
@@ -123,12 +123,12 @@ cmd_create_tlas :: proc(
 	defer buffer_destroy(scratch_buffer)
 
 	if update {
-		build_info.srcAccelerationStructure = rt_builder.tlas.handle
+		build_info.srcAccelerationStructure = tlas.handle
 	} else {
-		rt_builder.tlas = create_acceleration(&create_info, ctx)
+		tlas^ = create_acceleration(&create_info, ctx)
 	}
 
-	build_info.dstAccelerationStructure = rt_builder.tlas.handle
+	build_info.dstAccelerationStructure = tlas.handle
 	build_info.scratchData.deviceAddress = buffer_get_device_address(scratch_buffer^)
 
 	range_info := vk.AccelerationStructureBuildRangeInfoKHR {
@@ -216,7 +216,7 @@ create_acceleration :: proc(
 	buffer_init(
 		&as.buffer,
 		ctx,
-		create_info.size,
+		u64(create_info.size),
 		{.ACCELERATION_STRUCTURE_STORAGE_KHR, .SHADER_DEVICE_ADDRESS},
 		.Gpu_Only,
 	)
@@ -239,7 +239,7 @@ matrix_to_transform_matrix_khr :: proc(m: Mat4) -> vk.TransformMatrixKHR {
 	temp := glm.transpose(m)
 	out_matrix := vk.TransformMatrixKHR{}
 
-	runtime.mem_copy(&out_matrix, &temp, size_of(vk.TransformMatrixKHR))
+	mem.copy(&out_matrix, &temp, size_of(vk.TransformMatrixKHR))
 
 	return out_matrix
 }

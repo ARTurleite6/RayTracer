@@ -15,7 +15,7 @@ command_pool_init :: proc(pool: ^Command_Pool, device: ^Device, queue_family_ind
 	pool.device = device
 	create_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
-		flags            = {.TRANSIENT},
+		flags            = {.TRANSIENT, .RESET_COMMAND_BUFFER},
 		queueFamilyIndex = queue_family_index,
 	}
 

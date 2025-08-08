@@ -17,7 +17,7 @@ Application :: struct {
 	window:                      ^Window,
 	scene:                       Scene,
 	camera_controller:           Camera_Controller,
-	renderer:                    Renderer,
+	renderer:                    Raytracing_Renderer,
 	delta_time, last_frame_time: f64,
 	running:                     bool,
 
@@ -40,17 +40,16 @@ application_init :: proc(
 	window_set_window_user_pointer(app.window, app.window)
 	window_set_event_handler(app.window, application_event_handler(app))
 
+	raytracing_renderer_init(&app.renderer, app.window)
+	// TODO: change this
+	app.scene = create_scene()
+	raytracing_renderer_set_scene(&app.renderer, &app.scene)
 
-	{ 	// create rendering stuff
-		renderer_init(&app.renderer, app.window)
-		// TODO: change this
-		app.scene = create_scene()
-	}
 	return
 }
 
 application_destroy :: proc(app: ^Application) {
-	renderer_destroy(&app.renderer)
+	raytracing_renderer_destroy(&app.renderer)
 	window_destroy(app.window)
 	free(app.window)
 	scene_destroy(&app.scene)
@@ -78,18 +77,19 @@ application_update :: proc(app: ^Application) {
 	dt := f32(app.delta_time)
 
 	camera_controller_on_update(&app.camera_controller, dt)
-
-	renderer_update(&app.renderer)
 }
 
 application_render :: proc(app: ^Application) {
-	renderer_begin_frame(&app.renderer)
-
-	renderer_begin_scene(&app.renderer, &app.scene)
-	renderer_render(&app.renderer, &app.camera_controller.camera)
-	renderer_render_ui(&app.renderer)
-
-	renderer_end_frame(&app.renderer)
+	raytracing_renderer_begin_frame(&app.renderer)
+	defer raytracing_renderer_end_frame(&app.renderer)
+	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
+	ui_render(&app.renderer)
+	// renderer_begin_frame(&app.renderer)
+	//
+	// renderer_render(&app.renderer, &app.camera_controller.camera)
+	// renderer_render_ui(&app.renderer)
+	//
+	// renderer_end_frame(&app.renderer)
 }
 
 application_run :: proc(app: ^Application) {
@@ -102,20 +102,23 @@ application_run :: proc(app: ^Application) {
 application_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	app := (^Application)(handler.data)
 
-	dispatch(event, Resize_Event, application_on_resize, app)
-	dispatch(event, Window_Close_Event, application_on_window_close, app)
+	#partial switch v in event {
+	case Resize_Event:
+		application_on_resize(app, v.width, v.height)
+	case Window_Close_Event:
+		application_on_window_close(app)
+	}
 
 	camera_controller_on_event(&app.camera_controller, event)
 }
 
-application_on_resize :: proc(user_data: rawptr, event: Resize_Event) -> bool {
-	app := (^Application)(user_data)
-	renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
+application_on_resize :: proc(app: ^Application, width, height: i32) -> bool {
+	// app := (^Application)(user_data)
+	// renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
 	return true
 }
 
-application_on_window_close :: proc(user_data: rawptr, event: Window_Close_Event) -> bool {
-	app := (^Application)(user_data)
+application_on_window_close :: proc(app: ^Application) -> bool {
 	app.running = false
 	return true
 }

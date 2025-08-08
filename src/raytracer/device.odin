@@ -49,6 +49,15 @@ device_init :: proc(
 
 		when ODIN_DEBUG {
 			vkb.instance_request_validation_layers(&builder)
+
+			vkb.instance_add_debug_messenger_severity(
+				&builder,
+				{.INFO, .ERROR, .VERBOSE, .WARNING},
+			)
+			vkb.instance_add_debug_messenger_type(
+				&builder,
+				{.GENERAL, .VALIDATION, .PERFORMANCE, .DEVICE_ADDRESS_BINDING},
+			)
 			vkb.instance_use_default_debug_messenger(&builder)
 		}
 
@@ -193,13 +202,18 @@ device_destroy :: proc(device: ^Device) {
 	vkb.destroy_instance(device.instance)
 }
 
-device_copy_buffer :: proc(device: ^Device, src, dst: vk.Buffer, size: vk.DeviceSize) {
+device_copy_buffer :: proc(
+	device: ^Device,
+	src, dst: vk.Buffer,
+	size: vk.DeviceSize,
+	src_offset, dst_offset: vk.DeviceSize,
+) {
 	cmd := device_begin_single_time_commands(device, device.command_pool)
 	defer device_end_single_time_commands(device, device.command_pool, cmd)
 
 	copy_region := vk.BufferCopy {
-		srcOffset = 0,
-		dstOffset = 0,
+		srcOffset = src_offset,
+		dstOffset = dst_offset,
 		size      = size,
 	}
 

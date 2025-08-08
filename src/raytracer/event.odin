@@ -1,18 +1,5 @@
 package raytracer
 
-dispatch :: proc(
-	event: Event,
-	$T: typeid,
-	func: proc(user_data: rawptr, event: T) -> bool,
-	user_data: rawptr = nil,
-) -> bool {
-	if value, ok := event.(T); ok {
-		func(user_data, value)
-		return true
-	}
-	return false
-}
-
 Event :: union {
 	Window_Close_Event,
 	Resize_Event,

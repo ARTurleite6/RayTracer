@@ -90,7 +90,7 @@ ui_context_destroy :: proc(ctx: ^UI_Context, device: ^Device) {
 	vk.DestroyDescriptorPool(device.logical_device.ptr, ctx.pool, nil)
 }
 
-ui_render :: proc(renderer: ^Renderer) {
+ui_render :: proc(renderer: ^Raytracing_Renderer) {
 	runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 
 	scene := renderer.scene
@@ -108,7 +108,7 @@ ui_render :: proc(renderer: ^Renderer) {
 	)
 
 	info := ctx_get_swapchain_render_pass(ctx^, load_op = .LOAD)
-	command_buffer_begin_render_pass(cmd, &info)
+	command_buffer_begin_render_pass(cmd, &info, {})
 
 	imgui_vulkan.NewFrame()
 	imgui_glfw.NewFrame()
@@ -149,7 +149,7 @@ ui_render :: proc(renderer: ^Renderer) {
 }
 
 @(private = "file")
-render_scene_properties :: proc(renderer: ^Renderer, device: ^Device) {
+render_scene_properties :: proc(renderer: ^Raytracing_Renderer, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
 		render_object_properties(renderer)
 		render_material_properties(renderer)
@@ -158,7 +158,7 @@ render_scene_properties :: proc(renderer: ^Renderer, device: ^Device) {
 }
 
 @(private = "file")
-render_material_properties :: proc(renderer: ^Renderer) {
+render_material_properties :: proc(renderer: ^Raytracing_Renderer) {
 	scene := renderer.scene
 	if !imgui.CollapsingHeader("Materials", {.DefaultOpen}) {
 		return
@@ -246,7 +246,7 @@ render_material_properties :: proc(renderer: ^Renderer) {
 }
 
 @(private = "file")
-render_object_properties :: proc(renderer: ^Renderer) {
+render_object_properties :: proc(renderer: ^Raytracing_Renderer) {
 	scene := renderer.scene
 	if imgui.CollapsingHeader("Objects", {.DefaultOpen}) {
 		// =================== OBJECT CREATION SECTION =======================
