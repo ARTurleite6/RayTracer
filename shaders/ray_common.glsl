@@ -31,6 +31,7 @@ struct ObjectData {
 struct LightData {
     mat4 transform;
     uint object_index, num_triangles;
+    uint instance_mask;
 };
 
 struct Vertex {

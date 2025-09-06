@@ -41,6 +41,7 @@ struct LightSample {
     float pdf;
     float distance;
     vec3 direction;
+    uint instance_mask;
     bool valid;
 };
 
@@ -284,15 +285,24 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 
         // Compute position and normal in local space
         vec3 localPos = u * v0.pos + v * v1.pos + w * v2.pos;
-        vec3 localNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+        // vec3 localNormal = normalize(u * v0.normal + v * v1.normal + w * v2.normal);
+        vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
+        vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
+        vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
 
         // check if front facing triangle
         vec3 worldPos = vec3(light.transform * vec4(localPos, 1.0));
         mat3 normalMatrix = transpose(inverse(mat3(light.transform)));
-        vec3 worldNormal = normalize(normalMatrix * localNormal);
+        vec3 worldNormal = normalize(cross(worldV1 - worldV0, worldV2 - worldV0));
         vec3 toSurface = hitPos - worldPos;
 
-        if (dot(worldNormal, normalize(toSurface)) > 0.0) {
+        float cosL = dot(worldNormal, normalize(toSurface));
+        if(cosL < 0) {
+          cosL = abs(cosL);
+          worldNormal = -worldNormal;
+        }
+
+        if (cosL > 0.0) {
 
             // Transform to world space
             result.position = worldPos;
@@ -319,6 +329,7 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 
             result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
             result.valid = true;
+            result.instance_mask = light.instance_mask;
             return result;
         }
     }
@@ -330,18 +341,20 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 bool isVisible(vec3
     from, vec3
     to, vec3
-    normal) {
+    normal, uint instanceMask) {
     vec3 direction = to - from;
     float distance = length(direction);
     direction /= distance;
 
     vec3 offsetFrom = from + normal * 0.001;
 
+    uint cullMask = 0xFFu & ~instanceMask;
+
     isShadowed = true;
     traceRayEXT(
         topLevelAS,
         gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
-        0xFF,
+        cullMask,
         0, 0, 1,
         offsetFrom,
         0.001,
@@ -618,7 +631,7 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
             if (dot(wiWorld, toLightCenter) > 0.8) {
                 float lightPdf = calculateLightPdfForDirection(hitPos, wiWorld, lightIdx) * lightSelectionPdf;
 
-                if (lightPdf > 0.0 && isVisible(hitPos, lightCenter, normal)) {
+                if (lightPdf > 0.0 && isVisible(hitPos, lightCenter, normal, light.instance_mask)) {
                     vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
                     float weight = misWeightPower(brdfPdf, lightPdf);
 
@@ -634,7 +647,7 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
         LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
 
         if (lightSample.valid && dot(lightSample.direction, normal) > 0.0) {
-            if (isVisible(hitPos, lightSample.position, normal)) {
+            if (isVisible(hitPos, lightSample.position, normal, lightSample.instance_mask)) {
                 vec3 wiLocal = worldToLocal(lightSample.direction, basis);
 
                 if (cosTheta(wiLocal) > 0.0) {

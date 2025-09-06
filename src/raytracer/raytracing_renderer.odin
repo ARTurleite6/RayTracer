@@ -62,7 +62,7 @@ raytracing_renderer_init :: proc(
 	shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
 	shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 
-	ui_context_init(&renderer.ui_ctx, renderer.ctx.device, window^)
+	ui_context_init(&renderer.ui_ctx, &renderer.ctx, window^)
 }
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
@@ -107,7 +107,13 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 			case .Material_Changed:
 				gpu_scene_update_material(&renderer.gpu_scene, renderer.scene, change.index)
 			case .Object_Material_Changed:
-				gpu_scene_update_object(&renderer.gpu_scene, renderer.scene, change.index)
+				gpu_scene_update_object(
+					&renderer.gpu_scene,
+					&renderer.ctx,
+					renderer.scene,
+					change.index,
+					changed_material = true,
+				)
 			case .Material_Added:
 				gpu_scene_add_material(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
 			case .Material_Removed:
@@ -136,76 +142,64 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 
 	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
 	update_camera_ubo(renderer, ubo_buffer, camera)
-	when true {
-
-		spec := Raytracing_Spec {
-			rgen_shader         = &renderer.shaders[0],
-			miss_shaders        = {&renderer.shaders[1], &renderer.shaders[2]},
-			closest_hit_shaders = {&renderer.shaders[3]},
-			max_tracing_depth   = 2,
-		}
-		command_buffer_set_raytracing_program(cmd, spec)
-
-		output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
-		// TODO: maybe add also layout tracking into the image
-		command_buffer_bind_resource(
-			cmd,
-			2,
-			0,
-			vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
-		)
-		command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
-		command_buffer_bind_resource(
-			cmd,
-			0,
-			0,
-			vk.WriteDescriptorSetAccelerationStructureKHR {
-				sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-				accelerationStructureCount = 1,
-				pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
-			},
-		)
-		command_buffer_bind_resource(
-			cmd,
-			0,
-			1,
-			buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
-		)
-		command_buffer_bind_resource(
-			cmd,
-			0,
-			2,
-			buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
-		)
-		command_buffer_bind_resource(
-			cmd,
-			0,
-			3,
-			buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
-		)
-
-		command_buffer_push_constant_range(
-			cmd,
-			0,
-			mem.any_to_bytes(
-				Raytracing_Push_Constant {
-					clear_color = {0.2, 0.2, 0.2},
-					accumulation_frame = renderer.accumulation_frame,
-				},
-			),
-		)
-		command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
-		output_image = image_set_get(&renderer.output_images, renderer.ctx.current_frame)
-	} else {
-		output_image = restir_render_pass_render(
-			&renderer.restir_render_pass,
-			cmd,
-			&renderer.gpu_scene,
-			renderer.scene^,
-			camera^,
-			ubo_buffer^,
-		)
+	spec := Raytracing_Spec {
+		rgen_shader         = &renderer.shaders[0],
+		miss_shaders        = {&renderer.shaders[1], &renderer.shaders[2]},
+		closest_hit_shaders = {&renderer.shaders[3]},
+		max_tracing_depth   = 2,
 	}
+	command_buffer_set_raytracing_program(cmd, spec)
+
+	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+	// TODO: maybe add also layout tracking into the image
+	command_buffer_bind_resource(
+		cmd,
+		2,
+		0,
+		vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
+	)
+	command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		0,
+		vk.WriteDescriptorSetAccelerationStructureKHR {
+			sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+			accelerationStructureCount = 1,
+			pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
+		},
+	)
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		1,
+		buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
+	)
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		2,
+		buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
+	)
+	command_buffer_bind_resource(
+		cmd,
+		0,
+		3,
+		buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
+	)
+
+	command_buffer_push_constant_range(
+		cmd,
+		0,
+		mem.any_to_bytes(
+			Raytracing_Push_Constant {
+				clear_color = {0.2, 0.2, 0.2},
+				accumulation_frame = renderer.accumulation_frame,
+			},
+		),
+	)
+	command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
+	output_image = image_set_get(&renderer.output_images, renderer.ctx.current_frame)
 
 	{
 		// output_image := image_set_get(&renderer.output_images, renderer.ctx.current_frame)

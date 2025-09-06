@@ -20,7 +20,7 @@ UI_Context :: struct {
 	new_material_name: [256]byte,
 }
 
-ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
+ui_context_init :: proc(ctx: ^UI_Context, vk_ctx: ^Vulkan_Context, window: Window) {
 	{
 		pool_sizes := [?]vk.DescriptorPoolSize {
 			{.SAMPLER, 1000},
@@ -44,7 +44,12 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 		}
 
 		assert(
-			vk.CreateDescriptorPool(device.logical_device.ptr, &create_info, nil, &ctx.pool) ==
+			vk.CreateDescriptorPool(
+				vk_ctx.device.logical_device.ptr,
+				&create_info,
+				nil,
+				&ctx.pool,
+			) ==
 			.SUCCESS,
 		)
 	}
@@ -63,16 +68,16 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 		proc "c" (name: cstring, vulkan_instance: rawptr) -> vk.ProcVoidFunction {
 			return vk.GetInstanceProcAddr(cast(vk.Instance)vulkan_instance, name)
 		},
-		device.instance.ptr,
+		vk_ctx.device.instance.ptr,
 	)
 
 	imgui_glfw.InitForVulkan(window.handle, true)
 	@(static) format: vk.Format = .B8G8R8A8_SRGB
 	init_info := imgui_vulkan.InitInfo {
-		Instance = device.instance.ptr,
-		PhysicalDevice = device.physical_device.ptr,
-		Device = device.logical_device.ptr,
-		Queue = device.graphics_queue,
+		Instance = vk_ctx.device.instance.ptr,
+		PhysicalDevice = vk_ctx.device.physical_device.ptr,
+		Device = vk_ctx.device.logical_device.ptr,
+		Queue = vk_ctx.device.graphics_queue,
 		DescriptorPool = ctx.pool,
 		MinImageCount = 2,
 		ImageCount = 2,
@@ -129,7 +134,7 @@ ui_render :: proc(renderer: ^Raytracing_Renderer) {
 		}
 	}
 
-	render_statistics(scene^)
+	render_statistics(renderer, scene^)
 
 	render_scene_properties(renderer, renderer.ctx.device)
 
@@ -452,7 +457,7 @@ render_object_actions :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int
 }
 
 @(private = "file")
-render_statistics :: proc(scene: Scene) {
+render_statistics :: proc(renderer: ^Raytracing_Renderer, scene: Scene) {
 	io := imgui.GetIO()
 
 	if imgui.Begin("Performance") {
@@ -474,7 +479,20 @@ render_statistics :: proc(scene: Scene) {
 			imgui.Text("Renderer:")
 			imgui.Text("- Objects: %d", len(scene.objects))
 			imgui.Text("- Meshes: %d", len(scene.meshes))
+
+			cache := &renderer.ctx.cache
+			imgui.Separator()
+			imgui.Text("Cache Resources:")
+			imgui.Text("- Objects: %d", len(scene.objects))
+			imgui.Text("- Meshes: %d", len(scene.meshes))
+			imgui.Text("- Descriptor set layouts: %d", len(cache.descriptor_set_layouts))
+			imgui.Text("- Descriptor set pools: %d", len(cache.descriptor_pools))
+			imgui.Text("- Descriptor sets: %d", len(cache.descriptor_sets))
+			imgui.Text("- Pipeline layouts : %d", len(cache.pipeline_layouts))
+			imgui.Text("- Raytracing pipelines: %d", len(cache.raytracing_pipelines))
+			imgui.Text("- Graphics Pipelines: %d", len(cache.graphics_pipelines))
 		}
+
 	}
 	imgui.End()
 }

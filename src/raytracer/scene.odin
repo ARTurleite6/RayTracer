@@ -111,7 +111,7 @@ scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Materi
 	append(&scene.changes, Scene_Change{type = .Material_Changed, index = material_idx})
 }
 
-scene_update_object_material :: proc(scene: ^Scene, object_idx: int, new_material_idx: int) {
+scene_update_object_material :: proc(scene: ^Scene, object_idx, new_material_idx: int) {
 	scene.objects[object_idx].material_index = new_material_idx
 	append(&scene.changes, Scene_Change{type = .Object_Material_Changed, index = object_idx})
 }

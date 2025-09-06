@@ -245,6 +245,8 @@ ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_
 	buffer_pool_reset(&frame.storage_buffer_pool)
 	buffer_pool_reset(&frame.staging_buffer_pool)
 
+	resource_cache_cleanup_unused(&ctx.cache, ctx)
+
 	command_pool_begin(&frame.command_pool)
 
 	return result.image_index, nil

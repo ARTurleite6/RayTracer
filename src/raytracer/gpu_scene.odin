@@ -30,6 +30,7 @@ Light_GPU_Data :: struct {
 	transform:     [16]f32,
 	object_index:  u32,
 	num_triangles: u32,
+	instance_mask: u32,
 }
 
 // Change this in the future
@@ -116,14 +117,21 @@ gpu_scene_bake :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene
 
 gpu_scene_compile_top_level_as :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	tlas := &gpu_scene.tlas_infos
+	if len(tlas) > 0 {
+		delete(tlas^)
+	}
 	tlas^ = make([dynamic]vk.AccelerationStructureInstanceKHR, 0, len(scene.objects))
 
 	for obj, i in scene.objects {
 		model_matrix := obj.transform.model_matrix
+		mask: u32 = 0xFF
+		if material := scene.materials[obj.material_index]; material.emission_power > 0 {
+			mask = (1 << (u32(i) & 7))
+		}
 		ray_inst := vk.AccelerationStructureInstanceKHR {
 			transform                              = matrix_to_transform_matrix_khr(model_matrix),
 			instanceCustomIndex                    = u32(i),
-			mask                                   = 0xFF,
+			mask                                   = mask,
 			instanceShaderBindingTableRecordOffset = 0,
 			flags                                  = .TRIANGLE_FACING_CULL_DISABLE,
 			accelerationStructureReference         = u64(
@@ -306,7 +314,6 @@ gpu_scene_build_blas :: proc(
 
 gpu_scene_compile_objects_data :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	objects_data := make([]Object_GPU_Data, len(scene.objects), context.temp_allocator)
-	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
 
 	for object, i in scene.objects {
 		mesh := gpu_scene.meshes_data[object.mesh_index]
@@ -315,17 +322,6 @@ gpu_scene_compile_objects_data :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Conte
 			index_buffer_address  = buffer_get_device_address(mesh.index_buffer),
 			material_index        = u32(object.material_index),
 			mesh_index            = u32(object.mesh_index),
-		}
-
-		if scene.materials[object.material_index].emission_power > 0 {
-			append(
-				&lights_data,
-				Light_GPU_Data {
-					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
-					object_index = u32(i),
-					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
-				},
-			)
 		}
 	}
 
@@ -344,6 +340,27 @@ gpu_scene_compile_objects_data :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Conte
 			vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
 		)
 		buffer_flush(buffer, 0, buffer.size)
+	}
+
+	gpu_scene_compile_lights(gpu_scene, ctx, scene)
+}
+
+gpu_scene_compile_lights :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
+	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
+
+	for object, i in scene.objects {
+		if scene.materials[object.material_index].emission_power > 0 {
+			mask := u32(1 << (u32(i) & 7))
+			append(
+				&lights_data,
+				Light_GPU_Data {
+					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
+					object_index = u32(i),
+					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
+					instance_mask = mask,
+				},
+			)
+		}
 	}
 
 	gpu_scene.lights_buffer = make_storage_buffer_set(
@@ -420,6 +437,11 @@ gpu_scene_update_object_transform :: proc(
 		object.transform.model_matrix,
 	)
 
+	if scene.materials[object.material_index].emission_power > 0 {
+		storage_buffer_set_destroy(ctx, &gpu_scene.lights_buffer)
+		gpu_scene_compile_lights(gpu_scene, ctx, scene)
+	}
+
 	gpu_scene_build_tlas(
 		gpu_scene,
 		ctx,
@@ -429,7 +451,13 @@ gpu_scene_update_object_transform :: proc(
 	)
 }
 
-gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, object_index: int) {
+gpu_scene_update_object :: proc(
+	gpu_scene: ^GPU_Scene,
+	ctx: ^Vulkan_Context,
+	scene: ^Scene,
+	object_index: int,
+	changed_material := false,
+) {
 	object := &scene.objects[object_index]
 	mesh := &gpu_scene.meshes_data[object.mesh_index]
 
@@ -441,8 +469,25 @@ gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, object_ind
 	}
 
 	offset := vk.DeviceSize(object_index * size_of(Object_GPU_Data))
-
 	storage_buffer_set_write(&gpu_scene.objects_buffer, &object_data, offset)
+
+	// for now lets do it like this, lets recompile the whole lights because for now we dont have a way to know
+	if changed_material {
+		storage_buffer_set_destroy(ctx, &gpu_scene.lights_buffer)
+		gpu_scene_compile_lights(gpu_scene, ctx, scene^)
+		mask: u32 = 0xFF
+		if material := scene.materials[object.material_index]; material.emission_power > 0 {
+			mask = (1 << (u32(object_index) & 7))
+		}
+		gpu_scene.tlas_infos[object_index].mask = mask
+		gpu_scene_build_tlas(
+			gpu_scene,
+			ctx,
+			gpu_scene.tlas_infos[:],
+			{.PREFER_FAST_TRACE, .ALLOW_UPDATE},
+			update = true,
+		)
+	}
 }
 
 gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, material_index: int) {
