@@ -70,6 +70,11 @@ command_buffer_destroy :: proc(cmd: ^Command_Buffer) {
 
 }
 
+@(require_results)
+command_buffer_end :: proc(cmd: Command_Buffer) -> vk.Result {
+	return vk.EndCommandBuffer(cmd.buffer)
+}
+
 command_buffer_reset :: proc(cmd: ^Command_Buffer) {
 	// TODO: implement the rest of resource cleaning in the future.
 	cmd.resource_binding_state = {}

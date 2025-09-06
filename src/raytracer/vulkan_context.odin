@@ -106,7 +106,7 @@ vulkan_context_init :: proc(
 	return nil
 }
 
-ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
+vulkan_context_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
 	for &f in ctx.frames {
 		buffer_pool_destroy(&f.ubo_buffer_pool)
 		buffer_pool_destroy(&f.staging_buffer_pool)
@@ -121,6 +121,10 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
 
 	device_destroy(ctx.device)
 	free(ctx.device)
+}
+
+vulkan_context_device_wait_idle :: proc(ctx: Vulkan_Context) {
+	vk.DeviceWaitIdle(ctx.device.logical_device.ptr)
 }
 
 @(require_results)

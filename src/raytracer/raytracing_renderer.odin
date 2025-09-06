@@ -67,7 +67,7 @@ raytracing_renderer_init :: proc(
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 	// TODO: remove this DeviceWaitIdle to the vulkan_context 
-	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
+	vulkan_context_device_wait_idle(renderer.ctx)
 
 	if renderer.scene != nil {
 		gpu_scene_destroy(&renderer.gpu_scene, &renderer.ctx)
@@ -80,7 +80,7 @@ raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 		shader_module_destroy(&shader)
 	}
 	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
-	ctx_destroy(&renderer.ctx)
+	vulkan_context_destroy(&renderer.ctx)
 }
 
 raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Scene) {
@@ -277,7 +277,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 }
 
 raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
-	_ = vk_check(vk.EndCommandBuffer(renderer.current_cmd.buffer), "Failed to end command buffer")
+	_ = vk_check(command_buffer_end(renderer.current_cmd), "Failed to end command buffer")
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 
 	command_buffer_reset(&renderer.current_cmd)
