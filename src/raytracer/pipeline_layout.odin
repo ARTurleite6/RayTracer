@@ -16,7 +16,7 @@ Pipeline_Layout :: struct {
 	shader_resources:       map[string]Shader_Resource,
 	// map for each set and the resources it owns
 	shader_sets:            map[u32][dynamic]Shader_Resource,
-	descriptor_set_layouts: [dynamic]^Descriptor_Set_Layout2,
+	descriptor_set_layouts: [dynamic]^Descriptor_Set_Layout,
 }
 
 pipeline_layout_init2 :: proc(
@@ -62,7 +62,7 @@ pipeline_layout_init2 :: proc(
 		append_elem(&layout.descriptor_set_layouts, descriptor_set_layout)
 	}
 	// sort descriptor set layouts (I think odin's map foreach does not garantee order)
-	slice.sort_by_key(layout.descriptor_set_layouts[:], proc(l: ^Descriptor_Set_Layout2) -> u32 {
+	slice.sort_by_key(layout.descriptor_set_layouts[:], proc(l: ^Descriptor_Set_Layout) -> u32 {
 		return l.set_index
 	})
 
@@ -168,35 +168,4 @@ pipeline_layout_get_push_constant_range_stages :: proc(
 		}
 	}
 	return stages
-}
-
-// make_pipeline_layout :: proc(
-// 	ctx: ^Vulkan_Context,
-// 	shaders: []^Shader,
-// ) -> (
-// 	layout: Pipeline_Layout,
-// ) {
-// }
-
-pipeline_layout_init :: proc(
-	ctx: ^Vulkan_Context,
-	descriptor_set_layouts: []vk.DescriptorSetLayout,
-	push_constant_ranges: []vk.PushConstantRange,
-) -> (
-	layout: vk.PipelineLayout,
-) {
-	create_info := vk.PipelineLayoutCreateInfo {
-		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount         = u32(len(descriptor_set_layouts)),
-		pSetLayouts            = raw_data(descriptor_set_layouts),
-		pushConstantRangeCount = u32(len(push_constant_ranges)),
-		pPushConstantRanges    = raw_data(push_constant_ranges),
-	}
-
-	_ = vk_check(
-		vk.CreatePipelineLayout(vulkan_get_device_handle(ctx), &create_info, nil, &layout),
-		"Failed to create pipeline layout",
-	)
-
-	return layout
 }

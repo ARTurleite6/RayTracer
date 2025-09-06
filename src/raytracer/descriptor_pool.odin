@@ -11,12 +11,12 @@ Descriptor_Pool :: struct {
 	pool_index:            u32,
 	pool_sizes:            [dynamic]vk.DescriptorPoolSize,
 	set_pool_mapping:      map[vk.DescriptorSet]u32,
-	descriptor_set_layout: ^Descriptor_Set_Layout2,
+	descriptor_set_layout: ^Descriptor_Set_Layout,
 }
 
 descriptor_pool2_init :: proc(
 	pool: ^Descriptor_Pool,
-	descriptor_set_layout: ^Descriptor_Set_Layout2,
+	descriptor_set_layout: ^Descriptor_Set_Layout,
 	pool_size := MAX_SETS_PER_POOL,
 ) {
 	pool^ = {}

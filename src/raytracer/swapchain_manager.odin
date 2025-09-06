@@ -134,36 +134,6 @@ swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	manager^ = {}
 }
 
-swapchain_recreate :: proc(
-	manager: ^Swapchain_Manager,
-	new_width, new_height: u32,
-	allocator := context.allocator,
-) -> (
-	err: Swapchain_Error,
-) {
-	old_swapchain := manager.handle
-	old_images := manager.images
-	old_image_views := manager.image_views
-	defer if old_swapchain != nil {
-		vkb.swapchain_destroy_image_views(old_swapchain, old_image_views)
-		delete(old_images)
-		delete(old_image_views)
-		vkb.destroy_swapchain(old_swapchain)
-	}
-
-	config := Swapchain_Config {
-		extent = {width = new_width, height = new_height},
-		preferred_mode = manager.present_mode,
-		vsync = manager.present_mode == .FIFO,
-	}
-
-	if err = swapchain_init(manager, config, resizing = true, allocator = allocator); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 Acquire_Result :: struct {
 	image_index: u32,
 	suboptimal:  bool,

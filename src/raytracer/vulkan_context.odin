@@ -1,12 +1,21 @@
 #+feature dynamic-literals
 
 package raytracer
+import "core:fmt"
 import "core:log"
+import "core:os"
 import vkb "external:odin-vk-bootstrap"
 import vk "vendor:vulkan"
 _ :: log
 
 MAX_FRAMES_IN_FLIGHT :: 1
+
+Render_Error :: union {
+	Pipeline_Error,
+	Shader_Error,
+	Swapchain_Error,
+}
+
 
 Vulkan_Error :: union {
 	Device_Error,
@@ -27,7 +36,7 @@ Vulkan_Context :: struct {
 	device:            ^Device,
 	device_properties: vk.PhysicalDeviceProperties,
 	swapchain_manager: Swapchain_Manager,
-	descriptor_pool:   vk.DescriptorPool,
+	// descriptor_pool:   vk.DescriptorPool,
 	//frames
 	frames:            [MAX_FRAMES_IN_FLIGHT]Internal_Frame_Data,
 	current_frame:     int,
@@ -65,13 +74,6 @@ vulkan_context_init :: proc(
 	) or_return
 
 	frames_data_init(ctx) or_return
-
-	descriptor_pool_init(
-		&ctx.descriptor_pool,
-		ctx.device,
-		{{.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT}},
-		1000,
-	)
 
 	resource_cache_init(ctx, allocator)
 
@@ -113,39 +115,12 @@ ctx_destroy :: proc(ctx: ^Vulkan_Context, allocator := context.allocator) {
 
 	resource_cache_destroy(ctx, allocator)
 
-	vk.DestroyDescriptorPool(ctx.device.logical_device.ptr, ctx.descriptor_pool, nil)
 	frames_data_destroy(ctx)
 
 	swapchain_manager_destroy(&ctx.swapchain_manager)
 
 	device_destroy(ctx.device)
 	free(ctx.device)
-}
-
-@(require_results)
-vulkan_context_request_storage_buffer :: proc(
-	ctx: ^Vulkan_Context,
-	size: vk.DeviceSize,
-) -> Buffer_Allocation {
-	frame := &ctx.frames[ctx.current_frame]
-
-	// TODO: add error handling in this implementation
-	pool := &frame.storage_buffer_pool
-	block := buffer_pool_request_buffer_block(pool, ctx, size)
-	return buffer_block_allocate(block, pool.alignment, size)
-}
-
-@(require_results)
-vulkan_context_request_uniform_buffer :: proc(
-	ctx: ^Vulkan_Context,
-	size: vk.DeviceSize,
-) -> Buffer_Allocation {
-	frame := &ctx.frames[ctx.current_frame]
-
-	// TODO: add error handling in this implementation
-	pool := &frame.ubo_buffer_pool
-	block := buffer_pool_request_buffer_block(pool, ctx, size)
-	return buffer_block_allocate(block, pool.alignment, size)
 }
 
 @(require_results)
@@ -180,23 +155,6 @@ vulkan_get_raytracing_pipeline_properties :: proc(
 	vk.GetPhysicalDeviceProperties2(ctx.device.physical_device.ptr, &properties)
 
 	return props
-}
-
-vulkan_copy_buffer_with_staging_buffer :: proc(
-	ctx: ^Vulkan_Context,
-	dst: Buffer_Allocation,
-	data: rawptr,
-) {
-	staging_buffer := vulkan_context_request_staging_buffer(ctx, dst.size)
-	buffer_allocation_update(&staging_buffer, data, dst.size)
-	device_copy_buffer(
-		ctx.device,
-		staging_buffer.buffer.handle,
-		dst.buffer.handle,
-		dst.size,
-		src_offset = staging_buffer.offset,
-		dst_offset = dst.offset,
-	)
 }
 
 ctx_request_command_buffer :: proc(ctx: ^Vulkan_Context) -> (cmd: Command_Buffer) {
@@ -343,23 +301,6 @@ ctx_swapchain_present :: proc(
 	return nil
 }
 
-ctx_handle_resize :: proc(
-	ctx: ^Vulkan_Context,
-	new_width, new_height: u32,
-	allocator := context.allocator,
-) -> (
-	err: Swapchain_Error,
-) {
-	_ = vk_check(vk.DeviceWaitIdle(ctx.device.logical_device.ptr), "Failed to wait on device")
-
-	swapchain_recreate(&ctx.swapchain_manager, new_width, new_height, allocator) or_return
-
-	frames_data_destroy(ctx)
-	frames_data_init(ctx)
-
-	return nil
-}
-
 frames_data_init :: proc(ctx: ^Vulkan_Context) -> Frame_Error {
 	graphics_queue_index := vkb.device_get_queue_index(ctx.device.logical_device, .Graphics)
 
@@ -429,4 +370,15 @@ frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)
 	}
+}
+
+@(private)
+@(require_results)
+vk_check :: proc(result: vk.Result, message: string) -> vk.Result {
+	if result != .SUCCESS {
+		log.errorf(fmt.tprintf("%s: \x1b[31m%v\x1b[0m", message, result))
+		os.exit(1)
+		// return result
+	}
+	return nil
 }

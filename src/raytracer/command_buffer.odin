@@ -375,7 +375,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 		// we need to get another pipeline
 		defer cmd.pipeline_state.dirty = false
 
-		pipeline: ^Pipeline2
+		pipeline: ^Pipeline
 
 		#partial switch bind_point {
 		case .RAY_TRACING_KHR:

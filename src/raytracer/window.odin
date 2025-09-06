@@ -104,10 +104,6 @@ window_get_surface :: proc(
 	return window.surface, .SUCCESS
 }
 
-window_wait_events :: proc(window: Window) {
-	glfw.WaitEvents()
-}
-
 framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
 	context = runtime.default_context()
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)

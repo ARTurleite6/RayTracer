@@ -15,26 +15,18 @@ Pipeline_Error :: enum {
 	Shader_Creation_Failed,
 }
 
-Pipeline2 :: struct {
+Pipeline :: struct {
 	handle: vk.Pipeline,
 	state:  Pipeline_State,
 }
 
-Raytracing_Pipeline2 :: struct {
-	using pipeline: Pipeline2,
+Raytracing_Pipeline :: struct {
+	using pipeline: Pipeline,
 	sbt:            Shader_Binding_Table,
 }
 
 Graphics_Pipeline :: struct {
-	using pipeline: Pipeline2,
-}
-
-Pipeline :: struct {
-	handle:                 vk.Pipeline,
-	layout:                 vk.PipelineLayout,
-	shaders:                [dynamic]vk.PipelineShaderStageCreateInfo,
-	descriptor_set_layouts: [dynamic]vk.DescriptorSetLayout,
-	push_constant_ranges:   [dynamic]vk.PushConstantRange,
+	using pipeline: Pipeline,
 }
 
 Vertex_Input_State :: struct {
@@ -115,7 +107,7 @@ Pipeline_State :: struct {
 }
 
 raytracing_pipeline_init :: proc(
-	pipeline: ^Raytracing_Pipeline2,
+	pipeline: ^Raytracing_Pipeline,
 	ctx: ^Vulkan_Context,
 	state: Pipeline_State,
 ) -> (
@@ -209,7 +201,7 @@ raytracing_pipeline_init :: proc(
 	return nil
 }
 
-raytracing_pipeline_destroy :: proc(pipeline: ^Raytracing_Pipeline2, ctx: ^Vulkan_Context) {
+raytracing_pipeline_destroy :: proc(pipeline: ^Raytracing_Pipeline, ctx: ^Vulkan_Context) {
 	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
 	shader_binding_table_destroy(&pipeline.sbt)
 }
@@ -381,58 +373,6 @@ graphics_pipeline_destroy :: proc(pipeline: ^Graphics_Pipeline, ctx: ^Vulkan_Con
 	vk.DestroyPipeline(vulkan_get_device_handle(ctx), pipeline.handle, nil)
 	delete(pipeline.state.color_attachment_formats)
 	delete(pipeline.state.color_blend.attachments)
-}
-
-pipeline_add_shader :: proc(self: ^Pipeline, shader: Shader) {
-	append(
-		&self.shaders,
-		vk.PipelineShaderStageCreateInfo {
-			sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-			stage = shader.type,
-			module = shader.module,
-			pName = strings.clone_to_cstring(shader.name),
-		},
-	)
-}
-
-pipeline_add_descriptor_set_layout :: proc(self: ^Pipeline, layout: vk.DescriptorSetLayout) {
-	append(&self.descriptor_set_layouts, layout)
-}
-
-pipeline_add_push_constant_range :: proc(self: ^Pipeline, range: vk.PushConstantRange) {
-	append(&self.push_constant_ranges, range)
-}
-
-pipeline_destroy :: proc(self: ^Pipeline, device: vk.Device) {
-	if self.handle != 0 {
-		vk.DestroyPipeline(device, self.handle, nil)
-	}
-
-	if self.layout != 0 {
-		vk.DestroyPipelineLayout(device, self.layout, nil)
-	}
-
-	delete(self.descriptor_set_layouts)
-	delete(self.push_constant_ranges)
-	for shader in self.shaders {
-		delete(shader.pName)
-	}
-	delete(self.shaders)
-}
-
-pipeline_build_layout :: proc(self: ^Pipeline, device: vk.Device) -> (result: vk.Result) {
-	create_info := vk.PipelineLayoutCreateInfo {
-		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		setLayoutCount         = u32(len(self.descriptor_set_layouts)),
-		pSetLayouts            = raw_data(self.descriptor_set_layouts),
-		pushConstantRangeCount = u32(len(self.push_constant_ranges)),
-		pPushConstantRanges    = raw_data(self.push_constant_ranges),
-	}
-
-	return vk_check(
-		vk.CreatePipelineLayout(device, &create_info, nil, &self.layout),
-		"Failed to create pipeline layout",
-	)
 }
 
 @(private)

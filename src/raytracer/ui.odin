@@ -21,10 +21,8 @@ UI_Context :: struct {
 }
 
 ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
-	descriptor_pool_init(
-		&ctx.pool,
-		device,
-		{
+	{
+		pool_sizes := [?]vk.DescriptorPoolSize {
 			{.SAMPLER, 1000},
 			{.COMBINED_IMAGE_SAMPLER, 1000},
 			{.SAMPLED_IMAGE, 1000},
@@ -36,10 +34,20 @@ ui_context_init :: proc(ctx: ^UI_Context, device: ^Device, window: Window) {
 			{.UNIFORM_BUFFER_DYNAMIC, 1000},
 			{.STORAGE_BUFFER_DYNAMIC, 1000},
 			{.INPUT_ATTACHMENT, 1000},
-		},
-		1000,
-		{.FREE_DESCRIPTOR_SET},
-	)
+		}
+		create_info := vk.DescriptorPoolCreateInfo {
+			sType         = .DESCRIPTOR_POOL_CREATE_INFO,
+			poolSizeCount = u32(len(pool_sizes)),
+			pPoolSizes    = raw_data(pool_sizes[:]),
+			maxSets       = 1000,
+			flags         = {.FREE_DESCRIPTOR_SET},
+		}
+
+		assert(
+			vk.CreateDescriptorPool(device.logical_device.ptr, &create_info, nil, &ctx.pool) ==
+			.SUCCESS,
+		)
+	}
 
 	imgui.CHECKVERSION()
 	imgui.CreateContext()

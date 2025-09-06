@@ -13,9 +13,9 @@ Binding_Map :: struct($T: typeid) {
 	allocator: mem.Allocator,
 }
 
-Descriptor_Set2 :: struct {
+Descriptor_Set :: struct {
 	handle:                       vk.DescriptorSet,
-	descriptor_set_layout:        ^Descriptor_Set_Layout2,
+	descriptor_set_layout:        ^Descriptor_Set_Layout,
 	descriptor_pool:              ^Descriptor_Pool,
 	buffer_infos:                 Binding_Map(vk.DescriptorBufferInfo),
 	image_infos:                  Binding_Map(vk.DescriptorImageInfo),
@@ -66,9 +66,9 @@ binding_map_set_binding :: proc(
 }
 
 descriptor_set_init :: proc(
-	set: ^Descriptor_Set2,
+	set: ^Descriptor_Set,
 	ctx: ^Vulkan_Context,
-	layout: ^Descriptor_Set_Layout2,
+	layout: ^Descriptor_Set_Layout,
 	pool: ^Descriptor_Pool,
 	buffer_infos: Binding_Map(vk.DescriptorBufferInfo),
 	image_infos: Binding_Map(vk.DescriptorImageInfo),
@@ -87,7 +87,7 @@ descriptor_set_init :: proc(
 	return nil
 }
 
-descriptor_set_destroy :: proc(set: ^Descriptor_Set2) {
+descriptor_set_destroy :: proc(set: ^Descriptor_Set) {
 	binding_map_destroy(&set.buffer_infos)
 	binding_map_destroy(&set.image_infos)
 	binding_map_destroy(&set.acceleration_structure_infos)
@@ -95,7 +95,7 @@ descriptor_set_destroy :: proc(set: ^Descriptor_Set2) {
 	delete(set.updated_bindings)
 }
 
-descriptor_set_prepare :: proc(set: ^Descriptor_Set2, ctx: ^Vulkan_Context) {
+descriptor_set_prepare :: proc(set: ^Descriptor_Set, ctx: ^Vulkan_Context) {
 	assert(
 		len(set.write_descriptor_sets) == 0,
 		"We should not prepare the same descriptor set twice",
@@ -202,7 +202,7 @@ descriptor_set_prepare :: proc(set: ^Descriptor_Set2, ctx: ^Vulkan_Context) {
 }
 
 descriptor_set_update2 :: proc(
-	set: ^Descriptor_Set2,
+	set: ^Descriptor_Set,
 	ctx: ^Vulkan_Context,
 	bindings_to_update: ..u32,
 ) {

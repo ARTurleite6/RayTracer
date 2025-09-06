@@ -172,7 +172,7 @@ hash_param_descriptor_image_info :: proc(
 
 hash_param_descriptor_set_layout :: proc(
 	state: ^xxhash.XXH32_state,
-	layout: Descriptor_Set_Layout2,
+	layout: Descriptor_Set_Layout,
 ) {
 	xxhash.XXH32_update(state, mem.any_to_bytes(layout.handle))
 }

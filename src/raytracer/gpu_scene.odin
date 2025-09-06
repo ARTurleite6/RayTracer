@@ -5,7 +5,7 @@ import "core:log"
 import vk "vendor:vulkan"
 _ :: log
 
-GPU_Scene2 :: struct {
+GPU_Scene :: struct {
 	tlas:                                            Acceleration_Structure,
 	tlas_infos:                                      [dynamic]vk.AccelerationStructureInstanceKHR,
 	acceleration_structures:                         [dynamic]Acceleration_Structure,
@@ -13,11 +13,37 @@ GPU_Scene2 :: struct {
 	objects_buffer, lights_buffer, materials_buffer: Storage_Buffer_Set,
 }
 
-gpu_scene2_init :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
-	gpu_scene2_bake(gpu_scene, ctx, scene)
+Material_Data :: struct {
+	albedo:                                                 Vec3,
+	emission_color:                                         Vec3,
+	emission_power, roughness, metallic, transmission, ior: f32,
 }
 
-gpu_scene2_destroy :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context) {
+Object_GPU_Data :: struct {
+	vertex_buffer_address: vk.DeviceAddress,
+	index_buffer_address:  vk.DeviceAddress,
+	material_index:        u32,
+	mesh_index:            u32,
+}
+
+Light_GPU_Data :: struct {
+	transform:     [16]f32,
+	object_index:  u32,
+	num_triangles: u32,
+}
+
+// Change this in the future
+Mesh_GPU_Data :: struct {
+	vertex_buffer, index_buffer: Buffer,
+	num_vertices, num_indices:   int,
+}
+
+
+gpu_scene_init :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene_bake(gpu_scene, ctx, scene)
+}
+
+gpu_scene_destroy :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context) {
 	device := vulkan_get_device_handle(ctx)
 
 	{ 	// Destroying Bottom Level Acceleration Structure
@@ -45,7 +71,7 @@ gpu_scene2_destroy :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context) {
 	storage_buffer_set_destroy(ctx, &gpu_scene.materials_buffer)
 }
 
-gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+gpu_scene_bake :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	gpu_scene.meshes_data = make([]Mesh_GPU_Data, len(scene.meshes))
 
 	for mesh, i in scene.meshes {
@@ -82,17 +108,13 @@ gpu_scene2_bake :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Sce
 		}
 	}
 
-	gpu_scene2_compile_objects_data(gpu_scene, ctx, scene)
-	gpu_scene2_compile_materials(gpu_scene, ctx, scene)
-	gpu_scene2_compile_bottom_level_as(gpu_scene, ctx)
-	gpu_scene2_compile_top_level_as(gpu_scene, ctx, scene)
+	gpu_scene_compile_objects_data(gpu_scene, ctx, scene)
+	gpu_scene_compile_materials(gpu_scene, ctx, scene)
+	gpu_scene_compile_bottom_level_as(gpu_scene, ctx)
+	gpu_scene_compile_top_level_as(gpu_scene, ctx, scene)
 }
 
-gpu_scene2_compile_top_level_as :: proc(
-	gpu_scene: ^GPU_Scene2,
-	ctx: ^Vulkan_Context,
-	scene: Scene,
-) {
+gpu_scene_compile_top_level_as :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	tlas := &gpu_scene.tlas_infos
 	tlas^ = make([dynamic]vk.AccelerationStructureInstanceKHR, 0, len(scene.objects))
 
@@ -114,11 +136,11 @@ gpu_scene2_compile_top_level_as :: proc(
 		append(tlas, ray_inst)
 	}
 
-	gpu_scene2_build_tlas(gpu_scene, ctx, tlas[:], flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE})
+	gpu_scene_build_tlas(gpu_scene, ctx, tlas[:], flags = {.PREFER_FAST_TRACE, .ALLOW_UPDATE})
 }
 
-gpu_scene2_build_tlas :: proc(
-	gpu_scene: ^GPU_Scene2,
+gpu_scene_build_tlas :: proc(
+	gpu_scene: ^GPU_Scene,
 	ctx: ^Vulkan_Context,
 	instances: []vk.AccelerationStructureInstanceKHR,
 	flags: vk.BuildAccelerationStructureFlagsKHR = {.PREFER_FAST_TRACE},
@@ -158,7 +180,7 @@ gpu_scene2_build_tlas :: proc(
 	}
 }
 
-gpu_scene2_compile_bottom_level_as :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context) {
+gpu_scene_compile_bottom_level_as :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context) {
 	inputs := make(
 		[dynamic]Bottom_Level_Input,
 		0,
@@ -171,11 +193,11 @@ gpu_scene2_compile_bottom_level_as :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_
 		append(&inputs, mesh_to_geometry(&mesh, device^))
 	}
 
-	gpu_scene2_build_blas(gpu_scene, ctx, inputs[:], {.PREFER_FAST_TRACE})
+	gpu_scene_build_blas(gpu_scene, ctx, inputs[:], {.PREFER_FAST_TRACE})
 }
 
-gpu_scene2_build_blas :: proc(
-	gpu_scene: ^GPU_Scene2,
+gpu_scene_build_blas :: proc(
+	gpu_scene: ^GPU_Scene,
 	ctx: ^Vulkan_Context,
 	inputs: []Bottom_Level_Input,
 	flags: vk.BuildAccelerationStructureFlagsKHR,
@@ -282,11 +304,7 @@ gpu_scene2_build_blas :: proc(
 	}
 }
 
-gpu_scene2_compile_objects_data :: proc(
-	gpu_scene: ^GPU_Scene2,
-	ctx: ^Vulkan_Context,
-	scene: Scene,
-) {
+gpu_scene_compile_objects_data :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	objects_data := make([]Object_GPU_Data, len(scene.objects), context.temp_allocator)
 	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
 
@@ -346,7 +364,7 @@ gpu_scene2_compile_objects_data :: proc(
 	}
 }
 
-gpu_scene2_compile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+gpu_scene_compile_materials :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	materials_data := make([]Material_Data, len(scene.materials), context.temp_allocator)
 	for material, i in scene.materials {
 		materials_data[i] = {
@@ -377,21 +395,21 @@ gpu_scene2_compile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Contex
 	}
 }
 
-gpu_scene_add_material :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+gpu_scene_add_material :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	gpu_scene_recompile_materials(gpu_scene, ctx, scene)
 }
 
-gpu_scene_remove_material :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+gpu_scene_remove_material :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	gpu_scene_recompile_materials(gpu_scene, ctx, scene)
 }
 
-gpu_scene_recompile_materials :: proc(gpu_scene: ^GPU_Scene2, ctx: ^Vulkan_Context, scene: Scene) {
+gpu_scene_recompile_materials :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
 	storage_buffer_set_destroy(ctx, &gpu_scene.materials_buffer)
-	gpu_scene2_compile_materials(gpu_scene, ctx, scene)
+	gpu_scene_compile_materials(gpu_scene, ctx, scene)
 }
 
 gpu_scene_update_object_transform :: proc(
-	gpu_scene: ^GPU_Scene2,
+	gpu_scene: ^GPU_Scene,
 	ctx: ^Vulkan_Context,
 	scene: Scene,
 	object_index: int,
@@ -402,7 +420,7 @@ gpu_scene_update_object_transform :: proc(
 		object.transform.model_matrix,
 	)
 
-	gpu_scene2_build_tlas(
+	gpu_scene_build_tlas(
 		gpu_scene,
 		ctx,
 		gpu_scene.tlas_infos[:],
@@ -411,188 +429,7 @@ gpu_scene_update_object_transform :: proc(
 	)
 }
 
-GPU_Scene :: struct {
-	meshes_data:                                     []Mesh_GPU_Data,
-	objects_buffer, lights_buffer, materials_buffer: Buffer_Allocation,
-
-	// descriptors
-	descriptor_set:                                  vk.DescriptorSet,
-	descriptor_set_layout:                           ^Descriptor_Set_Layout,
-	vulkan_ctx:                                      ^Vulkan_Context,
-}
-
-Material_Data :: struct {
-	albedo:                                                 Vec3,
-	emission_color:                                         Vec3,
-	emission_power, roughness, metallic, transmission, ior: f32,
-}
-
-Object_GPU_Data :: struct {
-	vertex_buffer_address: vk.DeviceAddress,
-	index_buffer_address:  vk.DeviceAddress,
-	material_index:        u32,
-	mesh_index:            u32,
-}
-
-Light_GPU_Data :: struct {
-	transform:     [16]f32,
-	object_index:  u32,
-	num_triangles: u32,
-}
-
-// Change this in the future
-Mesh_GPU_Data :: struct {
-	vertex_buffer, index_buffer: Buffer,
-	num_vertices, num_indices:   int,
-}
-
-gpu_scene_init :: proc(
-	scene: ^GPU_Scene,
-	scene_descriptor_set_layout: ^Descriptor_Set_Layout,
-	ctx: ^Vulkan_Context,
-) {
-	scene.vulkan_ctx = ctx
-
-	scene.descriptor_set = descriptor_set_allocate(scene_descriptor_set_layout)
-	scene.descriptor_set_layout = scene_descriptor_set_layout
-}
-
-scene_bake_storage_buffers :: proc(gpu_scene: ^GPU_Scene, scene: Scene, cmd: Command_Buffer) {
-	gpu_scene_create_materials_buffer(gpu_scene, scene)
-
-	objects_data := make([]Object_GPU_Data, len(scene.objects), context.temp_allocator)
-	lights_data := make([dynamic]Light_GPU_Data, context.temp_allocator)
-
-	for object, i in scene.objects {
-		gpu_object: Object_GPU_Data
-		mesh := gpu_scene.meshes_data[object.mesh_index]
-
-		gpu_object.vertex_buffer_address = buffer_get_device_address(mesh.vertex_buffer)
-		gpu_object.index_buffer_address = buffer_get_device_address(mesh.index_buffer)
-		gpu_object.material_index = u32(object.material_index)
-		gpu_object.mesh_index = u32(object.mesh_index)
-
-		objects_data[i] = gpu_object
-
-		if scene.materials[object.material_index].emission_power > 0 {
-			append(
-				&lights_data,
-				Light_GPU_Data {
-					transform = intrinsics.matrix_flatten(object.transform.model_matrix),
-					object_index = u32(i),
-					num_triangles = u32(len(scene.meshes[object.mesh_index].indices) / 3),
-				},
-			)
-		}
-	}
-
-	gpu_scene.objects_buffer = vulkan_context_request_storage_buffer(
-		gpu_scene.vulkan_ctx,
-		vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
-	)
-	buffer_allocation_update(
-		&gpu_scene.objects_buffer,
-		raw_data(objects_data),
-		vk.DeviceSize(size_of(Object_GPU_Data) * len(objects_data)),
-	)
-
-	gpu_scene.lights_buffer = vulkan_context_request_storage_buffer(
-		gpu_scene.vulkan_ctx,
-		vk.DeviceSize(size_of(Light_GPU_Data) * len(lights_data)),
-	)
-	buffer_allocation_update(
-		&gpu_scene.lights_buffer,
-		raw_data(lights_data),
-		gpu_scene.lights_buffer.size,
-	)
-
-	descriptor_set_update(
-		gpu_scene.descriptor_set,
-		gpu_scene.vulkan_ctx,
-		gpu_scene.descriptor_set_layout^,
-		{binding = 1, write_info = buffer_allocation_descriptor_info(gpu_scene.objects_buffer)},
-		{binding = 3, write_info = buffer_allocation_descriptor_info(gpu_scene.lights_buffer)},
-	)
-}
-
-scene_compile :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
-	gpu_scene.meshes_data = make([]Mesh_GPU_Data, len(scene.meshes))
-
-	for mesh, i in scene.meshes {
-		gpu_mesh: Mesh_GPU_Data
-		gpu_mesh.num_vertices = len(mesh.vertices)
-		gpu_mesh.num_indices = len(mesh.indices)
-
-		buffer_init_with_staging_buffer(
-			&gpu_mesh.vertex_buffer,
-			gpu_scene.vulkan_ctx,
-			raw_data(mesh.vertices),
-			u64(size_of(Vertex) * len(mesh.vertices)),
-			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
-		)
-
-		buffer_init_with_staging_buffer(
-			&gpu_mesh.index_buffer,
-			gpu_scene.vulkan_ctx,
-			raw_data(mesh.indices),
-			u64(size_of(u32) * len(mesh.indices)),
-			{.SHADER_DEVICE_ADDRESS, .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR},
-		)
-
-		gpu_scene.meshes_data[i] = gpu_mesh
-	}
-
-	// scene_bake_storage_buffers(gpu_scene, scene)
-}
-
-gpu_scene_destroy :: proc(scene: ^GPU_Scene) {
-	for &mesh in scene.meshes_data {
-		buffer_destroy(&mesh.vertex_buffer)
-		buffer_destroy(&mesh.index_buffer)
-	}
-
-	delete(scene.meshes_data)
-}
-
-gpu_scene_create_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
-	materials_data := make([]Material_Data, len(scene.materials), context.temp_allocator)
-	for material, i in scene.materials {
-		materials_data[i] = {
-			albedo         = material.albedo,
-			emission_color = material.emission_color,
-			emission_power = material.emission_power,
-			roughness      = material.roughness,
-			metallic       = material.metallic,
-			transmission   = material.transmission,
-			ior            = material.ior,
-		}
-	}
-
-	gpu_scene.materials_buffer = vulkan_context_request_storage_buffer(
-		gpu_scene.vulkan_ctx,
-		vk.DeviceSize(size_of(Material_Data) * len(materials_data)),
-	)
-
-	vulkan_copy_buffer_with_staging_buffer(
-		gpu_scene.vulkan_ctx,
-		gpu_scene.materials_buffer,
-		raw_data(materials_data),
-	)
-
-	descriptor_set_update(
-		gpu_scene.descriptor_set,
-		gpu_scene.vulkan_ctx,
-		gpu_scene.descriptor_set_layout^,
-		{binding = 2, write_info = buffer_allocation_descriptor_info(gpu_scene.materials_buffer)},
-	)
-}
-
-gpu_scene_recreate_materials_buffer :: proc(gpu_scene: ^GPU_Scene, scene: Scene) {
-	// buffer_destroy(&gpu_scene.materials_buffer)
-	gpu_scene_create_materials_buffer(gpu_scene, scene)
-}
-
-gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene2, scene: ^Scene, object_index: int) {
+gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, object_index: int) {
 	object := &scene.objects[object_index]
 	mesh := &gpu_scene.meshes_data[object.mesh_index]
 
@@ -608,7 +445,7 @@ gpu_scene_update_object :: proc(gpu_scene: ^GPU_Scene2, scene: ^Scene, object_in
 	storage_buffer_set_write(&gpu_scene.objects_buffer, &object_data, offset)
 }
 
-gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene2, scene: ^Scene, material_index: int) {
+gpu_scene_update_material :: proc(gpu_scene: ^GPU_Scene, scene: ^Scene, material_index: int) {
 	material := &scene.materials[material_index]
 
 	material_data := Material_Data {

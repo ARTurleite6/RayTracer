@@ -4,7 +4,7 @@ import "core:slice"
 
 import vk "vendor:vulkan"
 
-Descriptor_Set_Layout2 :: struct {
+Descriptor_Set_Layout :: struct {
 	handle:               vk.DescriptorSetLayout,
 	bindings:             [dynamic]vk.DescriptorSetLayoutBinding,
 	binding_flags:        [dynamic]vk.DescriptorBindingFlagsEXT,
@@ -15,8 +15,8 @@ Descriptor_Set_Layout2 :: struct {
 	set_index:            u32,
 }
 
-descriptor_set_layout2_init :: proc(
-	layout: ^Descriptor_Set_Layout2,
+descriptor_set_layout_init :: proc(
+	layout: ^Descriptor_Set_Layout,
 	ctx: ^Vulkan_Context,
 	set_index: u32,
 	shader_modules: []^Shader_Module,
@@ -83,8 +83,8 @@ descriptor_set_layout2_init :: proc(
 	)
 }
 
-descriptor_set_layout2_destroy :: proc(
-	layout: ^Descriptor_Set_Layout2,
+descriptor_set_layout_destroy :: proc(
+	layout: ^Descriptor_Set_Layout,
 	ctx: ^Vulkan_Context,
 	allocator := context.allocator,
 ) {

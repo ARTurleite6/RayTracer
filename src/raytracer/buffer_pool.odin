@@ -26,12 +26,6 @@ Buffer_Allocation :: struct {
 	size:   vk.DeviceSize,
 }
 
-buffer_allocation_descriptor_info :: proc(
-	allocation: Buffer_Allocation,
-) -> vk.DescriptorBufferInfo {
-	return {buffer = allocation.buffer.handle, offset = allocation.offset, range = allocation.size}
-}
-
 buffer_allocation_update :: proc(alloc: ^Buffer_Allocation, data: rawptr, size: vk.DeviceSize) {
 	buffer_map(&alloc.buffer)
 	defer buffer_unmap(&alloc.buffer)
@@ -131,9 +125,4 @@ buffer_block_can_allocate :: proc(block: Buffer_Block, alignment, size: vk.Devic
 		aligned = vk.DeviceSize(align_up(u32(block.offset), u32(alignment)))
 	}
 	return aligned + size <= block.buffer.size
-}
-
-@(require_results)
-buffer_pool_descriptor_info :: proc(allocation: Buffer_Allocation) -> vk.DescriptorBufferInfo {
-	return {buffer = allocation.buffer.handle, range = allocation.size, offset = allocation.offset}
 }

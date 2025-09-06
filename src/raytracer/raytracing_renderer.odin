@@ -10,7 +10,7 @@ import vk "vendor:vulkan"
 Raytracing_Renderer :: struct {
 	ctx:                 Vulkan_Context,
 	scene:               ^Scene,
-	gpu_scene:           GPU_Scene2,
+	gpu_scene:           GPU_Scene,
 	camera_ubo:          Uniform_Buffer_Set,
 	output_images:       Image_Set,
 	window:              ^Window,
@@ -21,11 +21,15 @@ Raytracing_Renderer :: struct {
 	accumulation_frame:  u32,
 
 	// different render passes
-	restir_render_pass:  Restir_Render_Pass,
 	ui_ctx:              UI_Context,
 
 	// resources
 	shaders:             [4]Shader_Module,
+}
+
+Raytracing_Push_Constant :: struct {
+	clear_color:        Vec3,
+	accumulation_frame: u32,
 }
 
 
@@ -58,8 +62,6 @@ raytracing_renderer_init :: proc(
 	shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
 	shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
 
-	restir_render_pass_init(&renderer.restir_render_pass, &renderer.ctx)
-
 	ui_context_init(&renderer.ui_ctx, renderer.ctx.device, window^)
 }
 
@@ -67,27 +69,27 @@ raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
 	// TODO: remove this DeviceWaitIdle to the vulkan_context 
 	vk.DeviceWaitIdle(renderer.ctx.device.logical_device.ptr)
 
-	restir_render_pass_destroy(&renderer.restir_render_pass)
-
 	if renderer.scene != nil {
-		gpu_scene2_destroy(&renderer.gpu_scene, &renderer.ctx)
+		gpu_scene_destroy(&renderer.gpu_scene, &renderer.ctx)
 	}
 
 	uniform_buffer_set_destroy(&renderer.ctx, &renderer.camera_ubo)
+	image_set_destroy(&renderer.ctx, &renderer.output_images)
 
 	for &shader in renderer.shaders {
 		shader_module_destroy(&shader)
 	}
+	ui_context_destroy(&renderer.ui_ctx, renderer.ctx.device)
 	ctx_destroy(&renderer.ctx)
 }
 
 raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Scene) {
 	assert(scene != nil)
 	if renderer.scene != nil {
-		gpu_scene2_destroy(&renderer.gpu_scene, &renderer.ctx)
+		gpu_scene_destroy(&renderer.gpu_scene, &renderer.ctx)
 	}
 	renderer.scene = scene
-	gpu_scene2_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+	gpu_scene_init(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
 	clear(&renderer.scene.changes)
 }
 

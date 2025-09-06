@@ -133,7 +133,3 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 
 	camera_update_matrices(camera)
 }
-
-camera_get_view_proj :: proc(camera: Camera) -> Mat4 {
-	return camera.proj * camera.view
-}
