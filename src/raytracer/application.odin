@@ -8,6 +8,7 @@ _ :: log
 
 Error :: union #shared_nil {
 	Window_Error,
+	Scene_Load_Error,
 }
 
 @(private = "file")
@@ -28,12 +29,19 @@ Application :: struct {
 application_init :: proc(
 	window_width, window_height: c.int,
 	window_title: cstring,
+	scene_path: Maybe(string) = nil,
 ) -> (
 	app: ^Application,
 	err: Error,
 ) {
 	app = &g_application
 	app.running = true
+	// TODO: change this
+	if scene_path, ok := scene_path.?; ok {
+		app.scene = load_scene_from_file(scene_path) or_return
+	} else {
+		app.scene = create_scene()
+	}
 	app.window = new(Window)
 	window_init(app.window, window_width, window_height, window_title) or_return
 	camera_controller_init(&app.camera_controller, {0, 0, -3}, window_aspect_ratio(app.window^))
@@ -41,8 +49,6 @@ application_init :: proc(
 	window_set_event_handler(app.window, application_event_handler(app))
 
 	raytracing_renderer_init(&app.renderer, app.window)
-	// TODO: change this
-	app.scene = create_scene()
 	raytracing_renderer_set_scene(&app.renderer, &app.scene)
 
 	return

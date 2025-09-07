@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:mem"
+import "core:os/os2"
 import "raytracer"
 _ :: mem
 _ :: fmt
@@ -26,7 +27,13 @@ main :: proc() {
 			mem.tracking_allocator_destroy(&track)
 		}
 	}
-	app, err := raytracer.application_init(1280, 1020, "Raytracer")
+
+	scene_path: Maybe(string)
+	if len(os2.args) > 1 {
+		scene_path = os2.args[1]
+	}
+
+	app, err := raytracer.application_init(1280, 1020, "Raytracer", scene_path = scene_path)
 	if err != nil {
 		log.errorf("Application: Error launching application %v", err)
 		return

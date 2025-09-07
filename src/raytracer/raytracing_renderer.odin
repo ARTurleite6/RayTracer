@@ -103,7 +103,7 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 
 		for change in renderer.scene.changes {
 			//TODO: remove partial
-			#partial switch change.type {
+			switch change.type {
 			case .Material_Changed:
 				gpu_scene_update_material(&renderer.gpu_scene, renderer.scene, change.index)
 			case .Object_Material_Changed:
@@ -125,6 +125,10 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 					renderer.scene^,
 					change.index,
 				)
+			case .Object_Added:
+				gpu_scene_add_object(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
+			case .Object_Removed:
+				gpu_scene_remove_object(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
 			}
 		}
 	}

@@ -17,8 +17,9 @@ Scene_Change_Type :: enum {
 	Material_Added,
 	Material_Removed,
 	Object_Material_Changed,
+	Object_Added,
+	Object_Removed,
 	Object_Transform_Changed,
-	Mesh_Changed,
 }
 
 Scene_Change :: struct {
@@ -74,6 +75,9 @@ scene_init :: proc(scene: ^Scene, allocator := context.allocator) {
 scene_destroy :: proc(scene: ^Scene) {
 	for &mesh in scene.meshes {
 		mesh_destroy(&mesh)
+	}
+	for &object in scene.objects {
+		delete(object.name)
 	}
 
 	delete(scene.meshes)
@@ -153,13 +157,14 @@ scene_add_object :: proc(
 	}
 
 	object := Object {
-		name           = name,
+		name           = strings.clone(name),
 		transform      = transform,
 		mesh_index     = mesh_index,
 		material_index = material_index,
 	}
 	object_update_model_matrix(&object)
 
+	append(&scene.changes, Scene_Change{type = .Object_Added})
 	append(&scene.objects, object)
 	return len(scene.objects) - 1
 }

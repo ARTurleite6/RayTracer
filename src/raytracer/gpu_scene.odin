@@ -425,6 +425,21 @@ gpu_scene_recompile_materials :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Contex
 	gpu_scene_compile_materials(gpu_scene, ctx, scene)
 }
 
+gpu_scene_add_object :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene_recompile_objects(gpu_scene, ctx, scene)
+}
+
+gpu_scene_remove_object :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
+	gpu_scene_recompile_objects(gpu_scene, ctx, scene)
+}
+
+gpu_scene_recompile_objects :: proc(gpu_scene: ^GPU_Scene, ctx: ^Vulkan_Context, scene: Scene) {
+	storage_buffer_set_destroy(ctx, &gpu_scene.objects_buffer)
+	storage_buffer_set_destroy(ctx, &gpu_scene.lights_buffer)
+	gpu_scene_compile_objects_data(gpu_scene, ctx, scene)
+	gpu_scene_compile_lights(gpu_scene, ctx, scene)
+}
+
 gpu_scene_update_object_transform :: proc(
 	gpu_scene: ^GPU_Scene,
 	ctx: ^Vulkan_Context,
