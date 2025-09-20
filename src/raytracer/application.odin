@@ -100,6 +100,7 @@ application_render :: proc(app: ^Application) {
 
 application_run :: proc(app: ^Application) {
 	for app.running {
+		free_all(context.temp_allocator)
 		application_update(app)
 		application_render(app)
 	}

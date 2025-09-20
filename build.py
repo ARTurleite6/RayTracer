@@ -100,7 +100,7 @@ def main():
 
     (options, _) = parser.parse_args()
 
-    build_shaders()
+    # build_shaders()
 
     command = get_build_command(options.build_mode)
     print("Building raytracer...")
