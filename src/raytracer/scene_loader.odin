@@ -5,6 +5,8 @@ import "core:fmt"
 import "core:log"
 import "core:os/os2"
 import "core:strings"
+import "core:time"
+import "core:path/filepath"
 
 Scene_Loader :: struct {
 	materials: map[string]Material,
@@ -28,9 +30,13 @@ Scene_Load_Error :: enum {
 }
 
 @(require_results)
-load_scene_from_file :: proc(filepath: string) -> (scene: Scene, err: Scene_Load_Error) {
+load_scene_from_file :: proc(scenepath: string) -> (scene: Scene, err: Scene_Load_Error) {
+	start := time.tick_now()
+	defer {
+		log.infof("Scene %s loaded in %d", filepath.base(scenepath), time.tick_since(start))
+	}
 	scene_loader: Scene_Loader
-	data, file_err := os2.read_entire_file(filepath, context.temp_allocator)
+	data, file_err := os2.read_entire_file(scenepath, context.temp_allocator)
 	if file_err != nil {
 		return {}, .Invalid_File
 	}

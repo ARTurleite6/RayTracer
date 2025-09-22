@@ -9,10 +9,9 @@ _ :: mem
 _ :: fmt
 
 main :: proc() {
+	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
+	defer log.destroy_console_logger(context.logger)
 	when ODIN_DEBUG {
-		context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
-		defer log.destroy_console_logger(context.logger)
-
 		track: mem.Tracking_Allocator
 		mem.tracking_allocator_init(&track, context.allocator)
 		context.allocator = mem.tracking_allocator(&track)
