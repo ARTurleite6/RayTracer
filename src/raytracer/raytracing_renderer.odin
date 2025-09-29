@@ -24,7 +24,7 @@ Raytracing_Renderer :: struct {
 	ui_ctx:              UI_Context,
 
 	// resources
-	shaders:             [4]Shader_Module,
+	shaders:             [5]Shader_Module,
 }
 
 Raytracing_Push_Constant :: struct {
@@ -61,12 +61,18 @@ raytracing_renderer_init :: proc(
 	shader_module_init(&renderer.shaders[1], {.MISS_KHR}, "shaders/rmiss.spv", "main")
 	shader_module_init(&renderer.shaders[2], {.MISS_KHR}, "shaders/shadow.spv", "main")
 	shader_module_init(&renderer.shaders[3], {.CLOSEST_HIT_KHR}, "shaders/rchit.spv", "main")
+	shader_module_init(
+		&renderer.shaders[4],
+		{.CLOSEST_HIT_KHR},
+		"shaders/shadow_rchit.spv",
+		"main",
+	)
 
 	ui_context_init(&renderer.ui_ctx, &renderer.ctx, window^)
 }
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
-	// TODO: remove this DeviceWaitIdle to the vulkan_context 
+	// TODO: remove this DeviceWaitIdle to the vulkan_context
 	vulkan_context_device_wait_idle(renderer.ctx)
 
 	if renderer.scene != nil {

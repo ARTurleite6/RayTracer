@@ -21,6 +21,12 @@ struct RayPayload {
     bool isSpecular;
 };
 
+struct ShadowPayload {
+  bool occluded;
+  bool hitLight;
+  uint lightIndex;
+};
+
 struct ObjectData {
     uint64_t vertex_address;
     uint64_t index_address;

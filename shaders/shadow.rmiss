@@ -5,8 +5,10 @@
 
 #include "ray_common.glsl"
 
-layout(location = 1) rayPayloadInEXT bool isShadowed;
+layout(location = 1) rayPayloadInEXT ShadowPayload payload;
 
 void main() {
-    isShadowed = false;
+  payload.occluded = false;
+  payload.hitLight = false;
+  payload.lightIndex = 0xFFu;
 }
