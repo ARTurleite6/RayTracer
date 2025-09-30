@@ -2,6 +2,8 @@
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_ray_query : require
+
 #extension GL_GOOGLE_include_directive : enable
 
 #define USE_DIRECT_LIGHTING 1
@@ -341,34 +343,63 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
     return result;
 }
 
-// Test visibility between two points
-bool isVisible(vec3
-    from, vec3
-    to, vec3
-    normal, uint instanceMask) {
-    vec3 direction = to - from;
-    float distance = length(direction);
-    if(distance <= 0) return false;
-    direction /= distance;
-
-    vec3 offsetFrom = from + normal * 0.001;
-
-    uint cullMask = 0xFFu & ~instanceMask;
-
-    shadowPayload.occluded = false;
-    traceRayEXT(
-        topLevelAS,
-        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT | gl_RayFlagsSkipClosestHitShaderEXT,
-        cullMask,
-        1, 0, 1,
-        offsetFrom,
-        0.001,
-        direction,
-        distance,
-        1
+bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
+                             out uint instanceCustomIndex)
+{
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(
+        rq, topLevelAS,
+        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+        mask,
+        origin, 0.001,
+        dir, 1e20
     );
 
-    return !shadowPayload.occluded;
+    while (rayQueryProceedEXT(rq)) { /* traverse */ }
+
+    if (rayQueryGetIntersectionTypeEXT(rq, true)
+        == gl_RayQueryCommittedIntersectionTriangleEXT)
+    {
+        instanceCustomIndex =
+            rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
+        return true;
+    }
+    return false;
+}
+
+bool isVisibleRQ(vec3 origin, vec3 target, vec3 normal, uint lightInstanceCustomIndex)
+{
+    vec3 offsetFrom = origin + normal * 0.001;
+    vec3 dir = target - offsetFrom;
+    float dist = length(dir);
+    if (dist <= 0.0) return false;
+    dir /= dist;
+
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(
+        rq, topLevelAS,
+        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
+        0xFFu,
+        offsetFrom, 0.001,
+        dir, dist * 0.999
+    );
+
+    // proceed until first hit or miss
+    while (rayQueryProceedEXT(rq)) { /* nothing */ }
+
+    uint committedType = rayQueryGetIntersectionTypeEXT(rq, true);
+
+    // No committed intersection -> visible
+    if (committedType == gl_RayQueryCommittedIntersectionNoneEXT)
+        return true;
+
+    if (committedType == gl_RayQueryCommittedIntersectionTriangleEXT) {
+        uint instIdx = rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
+        if (instIdx == lightInstanceCustomIndex)
+            return true;
+    }
+
+    return false;
 }
 
 struct BSDFSample {
@@ -433,7 +464,7 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
   LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
 
   if (lightSample.valid && dot(lightSample.direction, normal) > 0.0) {
-    if (isVisible(hitPos, lightSample.position, normal, lightSample.instance_mask)) {
+    if (isVisibleRQ(hitPos, lightSample.position, normal, light.object_index)) {
       vec3 wiLocal = worldToLocal(lightSample.direction, basis);
 
       if (cosTheta(wiLocal) > 0.0) {
@@ -464,21 +495,11 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
 
       vec3 origin = hitPos + normal * 0.001;
       vec3 hitPosLight;
-      bool hitLight = false;
 
-      traceRayEXT(
-        topLevelAS,
-        gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT,
-        0xFF,
-        1, 0, 1,
-        origin,
-        0.001,
-        wiWorld,
-        1e20,
-        1
-      );
+      uint hitInstIdx =  0xFFFFFFFFu;
+      bool hit = brdfHitsSelectedLightRQ(origin, wiWorld, 0xFFu, hitInstIdx);
 
-      if (shadowPayload.hitLight && light.object_index == shadowPayload.lightIndex) {
+      if (hit && hitInstIdx == light.object_index) {
         // Compute light PDF for this direction
         float lightPdf = calculateLightPdfForDirection(hitPos, wiWorld, lightIdx) * lightSelectionPdf;
 
@@ -574,13 +595,19 @@ vec3 estimateDirectLightingMIS_VisibilityAware(vec3 hitPos, vec3 normal, Materia
         vec3 lightDir = toLight / distance;
 
         // Quick visibility test
-        visible[i] = dot(normal, lightDir) > 0.0;
+        if(dot(normal, lightDir) <= 0.0) {
+            visible[i] = false;
+            weights[i] = 0.0;
+            continue;
+        }
 
-        if (visible[i]) {
+        if (isVisibleRQ(hitPos, lightCenter, normal, light.object_index)) {
+            visible[i] = true;
             float power = luminance(lightMaterial.emission_color) * lightMaterial.emission_power;
             float cosTheta = dot(normal, lightDir);
             weights[i] = power * cosTheta / (distance * distance);
         } else {
+            visible[i] = false;
             weights[i] = 0.0;
         }
 
@@ -690,7 +717,7 @@ vec3 estimateDirectLightingMIS_MultipleLights(vec3 hitPos, vec3 normal, Material
 
 // Main MIS function with automatic strategy selection
 vec3 estimateDirectLightingMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
-    return estimateDirectLightingMIS_PowerImportance(hitPos, normal, material, viewDir, seed);
+    return estimateDirectLightingMIS_MultipleLights(hitPos, normal, material, viewDir, seed);
 }
 
 void main() {

@@ -83,6 +83,7 @@ device_init :: proc(
 		}
 
 		vkb.selector_add_required_extension(&selector, vk.KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+		vkb.selector_add_required_extension(&selector, vk.KHR_RAY_QUERY_EXTENSION_NAME)
 		vkb.selector_add_required_extension(
 			&selector,
 			vk.KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
@@ -99,6 +100,10 @@ device_init :: proc(
 			&selector,
 			{dynamicRendering = true, synchronization2 = true},
 		)
+		vkb.selector_add_required_extension_features(&selector, vk.PhysicalDeviceRayQueryFeaturesKHR {
+			sType = .PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+			rayQuery = true,
+		})
 		vkb.selector_add_required_extension_features(
 			&selector,
 			vk.PhysicalDeviceRayTracingPipelineFeaturesKHR {

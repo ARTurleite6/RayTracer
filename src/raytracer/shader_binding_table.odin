@@ -10,6 +10,7 @@ Shader_Region :: enum {
 	Ray_Gen,
 	Miss,
 	Hit,
+	Any_Hit,
 	Callable,
 }
 
@@ -114,6 +115,12 @@ shader_binding_table_build :: proc(
 		deviceAddress = hit_offset,
 		stride        = vk.DeviceSize(stride),
 		size          = vk.DeviceSize(stride * self.group_counts[.Hit]),
+	}
+
+	self.regions[.Any_Hit] = {
+		deviceAddress = hit_offset,
+		stride        = vk.DeviceSize(stride),
+		size          = vk.DeviceSize(stride * self.group_counts[.Any_Hit]),
 	}
 
 	self.regions[.Callable] = {

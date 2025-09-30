@@ -397,7 +397,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 	sphere_mesh_idx := scene_add_mesh(&scene, create_sphere())
 
 	// Light (on the ceiling)
-	light_size: f32 = 1.0
+	light_size: f32 = 0.1
 	scene_add_object(
 		&scene,
 		"Light Center",

@@ -425,6 +425,8 @@ render_statistics :: proc(renderer: ^Raytracing_Renderer, scene: Scene) {
 			imgui.Text("- Pipeline layouts : %d", len(cache.pipeline_layouts))
 			imgui.Text("- Raytracing pipelines: %d", len(cache.raytracing_pipelines))
 			imgui.Text("- Graphics Pipelines: %d", len(cache.graphics_pipelines))
+
+			imgui.Text("- Renderered accumulated frames: %d", renderer.accumulation_frame)
 		}
 
 	}

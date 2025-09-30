@@ -38,30 +38,6 @@ shaders = [
         "src": "shaders/shadow.rchit",
         "out": "shaders/shadow_rchit.spv",
     },
-    {
-        "src": "shaders/restir.rgen",
-        "out": "shaders/restir_rgen.spv",
-    },
-    {
-        "src": "shaders/restir.rmiss",
-        "out": "shaders/restir_rmiss.spv",
-    },
-    {
-        "src": "shaders/restir.rchit",
-        "out": "shaders/restir_rchit.spv",
-    },
-    {
-        "src": "shaders/restir/gbuffer.vert",
-        "out": "shaders/restir/gbuffer_vert.spv",
-    },
-    {
-        "src": "shaders/restir/gbuffer.frag",
-        "out": "shaders/restir/gbuffer_frag.spv",
-    },
-    {
-        "src": "shaders/restir/restir_di.rgen",
-        "out": "shaders/restir/restir_di_rgen.spv",
-    },
 ]
 
 def print_command_result(result: subprocess.CompletedProcess[str]):
@@ -101,19 +77,23 @@ def main():
     parser.add_option("-r", "--run", action="store_true",
                   dest="run", default=False,
                   help="Run program when finished building")
+    parser.add_option('-s', '--skip-executable', action='store_true',
+                      dest='skip_executable', default=False,
+                      help='Skip building the executable')
 
     (options, _) = parser.parse_args()
 
     build_shaders()
 
-    command = get_build_command(options.build_mode)
-    print("Building raytracer...")
-    print(command)
-    result = subprocess.run(command.split(), capture_output=True, text=True)
-    print_command_result(result)
+    if not options.skip_executable:
+        command = get_build_command(options.build_mode)
+        print("Building raytracer...")
+        print(command)
+        result = subprocess.run(command.split(), capture_output=True, text=True)
+        print_command_result(result)
 
-    if options.run:
-        subprocess.run(["./raytracer"])
+        if options.run:
+            subprocess.run(["./raytracer"])
 
 if __name__ == "__main__":
     main()
