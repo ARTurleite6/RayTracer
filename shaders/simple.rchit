@@ -7,6 +7,9 @@
 #extension GL_GOOGLE_include_directive : enable
 
 #define USE_DIRECT_LIGHTING 1
+#define USE_LIGHT_SAMPLING_ONLY 1
+#define USE_BRDF_SAMPLING_ONLY 0
+#define USE_MIS 0
 
 #include "ray_common.glsl"
 #include "random.glsl"
@@ -56,6 +59,11 @@ struct BRDFEval {
     float specularPdf;
 };
 
+const float EPS_PDF  = 1e-6;
+const float EPS_COS  = 1e-4;
+const float EPS_VOH  = 1e-4;
+const float MIN_ROUGHNESS = 0.03; // tweak per scene
+
 // Get selection probability for specular vs diffuse sampling
 float getSpecularProbability(Material material) {
     vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
@@ -63,18 +71,20 @@ float getSpecularProbability(Material material) {
 }
 
 float D_GGX(float NoH, float roughness) {
-    float alpha = roughness * roughness;
-    float alpha2 = alpha * alpha;
-    float denom = NoH * NoH * (alpha2 - 1.0) + 1.0;
-    return alpha2 / (M_PI * denom * denom);
+    float a = max(roughness, MIN_ROUGHNESS);
+    float a2 = a * a;
+    float nh = clamp(NoH, 0.0, 1.0);
+    float denom = nh * nh * (a2 - 1.0) + 1.0;
+    return a2 / (M_PI * denom * denom);
 }
 
-// GGX Smith geometric shadowing function
 float G_Smith(float NoV, float NoL, float roughness) {
-    float alpha = roughness * roughness;
-    float k = alpha * 0.5;
-    float G1V = NoV / (NoV * (1.0 - k) + k);
-    float G1L = NoL / (NoL * (1.0 - k) + k);
+    float a = max(roughness, MIN_ROUGHNESS);
+    float k = a * 0.5;
+    float nv = clamp(NoV, EPS_COS, 1.0);
+    float nl = clamp(NoL, EPS_COS, 1.0);
+    float G1V = nv / (nv * (1.0 - k) + k);
+    float G1L = nl / (nl * (1.0 - k) + k);
     return G1V * G1L;
 }
 
@@ -207,14 +217,10 @@ vec3 microfacetF(vec3 wo, vec3 wi, vec3 h, Material material) {
 }
 
 float microfacetPDF(vec3 wo, vec3 h, float roughness) {
-    float NoH = max(0.0, cosTheta(h));
-    float VoH = max(0.0, dot(wo, h));
-
-    if (NoH <= 0.0 || VoH <= 0.0) return 0.0;
-
-    float D = D_GGX(NoH, roughness);
-
-    return D * NoH / (4.0 * VoH);
+    float nh = max(cosTheta(h), EPS_COS);
+    float voh = max(dot(wo, h), EPS_VOH);
+    float D = D_GGX(nh, roughness);
+    return max(D * nh / (4.0 * voh), EPS_PDF);
 }
 
 vec3 sampleGGX(vec2 random, float roughness) {
@@ -344,7 +350,7 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 }
 
 bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
-                             out uint instanceCustomIndex)
+                             out uint instanceCustomIndex, out uint primIdx, out float tHit)
 {
     rayQueryEXT rq;
     rayQueryInitializeEXT(
@@ -362,6 +368,8 @@ bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
     {
         instanceCustomIndex =
             rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
+        primIdx = rayQueryGetIntersectionPrimitiveIndexEXT(rq, true);
+        tHit = rayQueryGetIntersectionTEXT(rq, true);
         return true;
     }
     return false;
@@ -442,6 +450,20 @@ BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
     return result;
 }
 
+// Overload taking triangle area, cos at light, and dist to avoid recomputing.
+float lightPdfFromTriangleHitParams(uint numTris, float triArea,
+                                    float cosThetaLight, float dist)
+{
+    if (triArea <= 0.0 || cosThetaLight <= 1e-6) return 0.0;
+
+    float triangleSelectionPdf = 1.0 / float(max(numTris, 1u));
+    float areaPdf              = 1.0 / max(triArea, 1e-4);
+    // Convert area pdf to solid-angle pdf at shading point:
+    // p_dir = p_area * (dist^2 / cosThetaLight)
+    float p_dir = triangleSelectionPdf * areaPdf * (dist * dist) / cosThetaLight;
+    return max(p_dir, 1e-6);
+}
+
 // Calculate full PDF for a given direction
 float calculatePDF(vec3 wo, vec3 wi, Material material) {
     BRDFEval eval = evaluateBRDFComponents(wo, wi, material);
@@ -461,6 +483,7 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
   ObjectData lightObject = objects_data.objects[light.object_index];
   Material lightMaterial = materials_data.materials[lightObject.material_index];
 
+  #if USE_LIGHT_SAMPLING_ONLY || USE_MIS
   LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
 
   if (lightSample.valid && dot(lightSample.direction, normal) > 0.0) {
@@ -468,50 +491,90 @@ vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir,
       vec3 wiLocal = worldToLocal(lightSample.direction, basis);
 
       if (cosTheta(wiLocal) > 0.0) {
-        vec3 hLocal = normalize(woLocal + wiLocal);
+        vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
+        float lightPdf = lightSample.pdf * lightSelectionPdf;
+
+    #if USE_MIS
         float specularProb = getSpecularProbability(material);
+        vec3 hLocal = normalize(woLocal + wiLocal);
         float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
         float diffusePdf = cosTheta(wiLocal) / M_PI;
         float brdfPdf = specularProb * specularPdf + (1.0 - specularProb) * diffusePdf;
+        float weight = misWeightPower(lightPdf, brdfPdf);
+    #else
+        float weight = 1.0;
+    #endif
 
-        if (brdfPdf > 0.0) {
-          vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
-          float lightPdf = lightSample.pdf * lightSelectionPdf;
-          float weight = misWeightPower(lightPdf, brdfPdf);
-
-          vec3 Li = lightSample.emission;
-          radiance += brdf * Li * cosTheta(wiLocal) * weight / lightPdf;
-        }
+        vec3 Li = lightSample.emission;
+        radiance += brdf * Li * cosTheta(wiLocal) * weight / max(lightPdf, 1e-6);
       }
     }
   }
+  #endif
 
+  #if USE_BRDF_SAMPLING_ONLY || USE_MIS
   {
     vec2 u = vec2(rnd(seed), rnd(seed));
-    BSDFSample brdfSample = sampleBRDF(woLocal, material, u, basis);
+    BSDFSample bs = sampleBRDF(woLocal, material, u, basis);
 
-    if(brdfSample.pdf > 0.0 && cosTheta(brdfSample.direction) > 0.0) {
-      vec3 wiWorld = localToWorld(brdfSample.direction, basis);
+    float cosWi = cosTheta(bs.direction);
+    if (bs.pdf > 0.0 && cosWi > 0.0) {
+        vec3 wiWorld = localToWorld(bs.direction, basis);
+        vec3 origin  = hitPos + normal * 0.001;
 
-      vec3 origin = hitPos + normal * 0.001;
-      vec3 hitPosLight;
+        uint hitInstIdx, primIdx;
+        float tHit;
+        bool hit = brdfHitsSelectedLightRQ(origin, wiWorld, 0xFFu, hitInstIdx, primIdx, tHit);
 
-      uint hitInstIdx =  0xFFFFFFFFu;
-      bool hit = brdfHitsSelectedLightRQ(origin, wiWorld, 0xFFu, hitInstIdx);
+        if (hit && hitInstIdx == light.object_index) {
+            // Build exact p_light at this direction from the *hit triangle*
+            // Fetch triangle and compute its area & cos at light:
+            Indices I = Indices(lightObject.index_address);
+            Vertices V = Vertices(lightObject.vertex_address);
+            ivec3 indT = I.indices[primIdx];
+            Vertex v0T = V.v[indT.x];
+            Vertex v1T = V.v[indT.y];
+            Vertex v2T = V.v[indT.z];
 
-      if (hit && hitInstIdx == light.object_index) {
-        // Compute light PDF for this direction
-        float lightPdf = calculateLightPdfForDirection(hitPos, wiWorld, lightIdx) * lightSelectionPdf;
+            vec3 p0 = vec3(light.transform * vec4(v0T.pos, 1.0));
+            vec3 p1 = vec3(light.transform * vec4(v1T.pos, 1.0));
+            vec3 p2 = vec3(light.transform * vec4(v2T.pos, 1.0));
 
-        if (lightPdf > 0.0) {
-          float weight = misWeightPower(brdfSample.pdf, lightPdf);
-          vec3 Li = lightMaterial.emission_color * lightMaterial.emission_power;
+            float triArea = 0.5 * length(cross(p1 - p0, p2 - p0));
+            // Light-facing cosine at the hit: use shading point→light direction
+            // (our wiWorld points from P to light, so light normal should face -wiWorld)
+            vec3 nL = normalize(cross(p1 - p0, p2 - p0));
+            float cosThetaLight = max(0.0, dot(-wiWorld, nL));
 
-          radiance += brdfSample.value * Li * cosTheta(brdfSample.direction) * weight / brdfSample.pdf;
+            float dist = max(tHit, 0.0); // rayQuery gives unit-length ray param
+            float p_light_dir = lightPdfFromTriangleHitParams(light.num_triangles,
+                                                              triArea, cosThetaLight, dist);
+            // Include per-light selection probability (same as in light branch):
+            float lightPdf = p_light_dir * lightSelectionPdf;
+            lightPdf     = max(lightPdf, 1e-6);
+            float p_brdf = max(bs.pdf, 1e-6);
+            // Robustness guards
+            #if USE_MIS
+            // MIS weight (power heuristic)
+            float w = (p_brdf * p_brdf) / (p_brdf * p_brdf + lightPdf * lightPdf);
+            #else
+            float w = 1.0;
+            #endif
+
+            vec3 Li = lightMaterial.emission_color * lightMaterial.emission_power;
+
+            vec3 contrib = bs.value * Li * cosWi * w / p_brdf;
+
+            // Optional firefly clamp (comment out to be fully unbiased)
+            // float lum = dot(contrib, vec3(0.2126, 0.7152, 0.0722));
+            // if (lum > 50.0) contrib *= 50.0 / lum;
+
+            if (!(any(isnan(contrib)) || any(isinf(contrib)))) 
+                radiance += contrib;
         }
-      }
     }
   }
+  #endif
 
   return radiance;
 }
@@ -649,7 +712,7 @@ vec3 estimateDirectLightingMIS_MultipleLights(vec3 hitPos, vec3 normal, Material
     // For scenes with few lights, sample all lights
     if (numLights <= 4) {
         for (int i = 0; i < numLights; i++) {
-            float lightSelectionPdf = 1.0; // Not random selection
+            float lightSelectionPdf = 1.0 / float(numLights); // Not random selection
             totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, i, lightSelectionPdf, seed);
         }
         return totalRadiance;
@@ -717,11 +780,10 @@ vec3 estimateDirectLightingMIS_MultipleLights(vec3 hitPos, vec3 normal, Material
 
 // Main MIS function with automatic strategy selection
 vec3 estimateDirectLightingMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
-    return estimateDirectLightingMIS_MultipleLights(hitPos, normal, material, viewDir, seed);
+    return estimateDirectLightingMIS_PowerImportance(hitPos, normal, material, viewDir, seed);
 }
 
 void main() {
-    uint seed = payload.seed;
     ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
     Material mat = materials_data.materials[object.material_index];
     //
@@ -762,7 +824,7 @@ void main() {
   #endif
 
   #if USE_DIRECT_LIGHTING
-    vec3 directLight = estimateDirectLightingMIS(worldPos, worldNrm, mat, incomingRayDir, seed);
+    vec3 directLight = estimateDirectLightingMIS(worldPos, worldNrm, mat, incomingRayDir, payload.seed);
     payload.color += payload.throughput * directLight;
   #endif
 
