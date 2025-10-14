@@ -1,5 +1,6 @@
 package raytracer
 
+import "core:fmt"
 import vk "vendor:vulkan"
 
 Storage_Buffer_Set :: struct {
@@ -11,11 +12,13 @@ make_storage_buffer_set :: proc(
 	size: u64,
 	frames_in_flight: int,
 	allocator := context.allocator,
+	loc := #caller_location,
 ) -> (
 	bs: Storage_Buffer_Set,
 ) {
 	bs.buffers = make([]Buffer, frames_in_flight, allocator)
 
+	fmt.eprintfln("Size = %v, loc = %v", size, loc)
 	for &b in bs.buffers {
 		buffer_init(
 			&b,

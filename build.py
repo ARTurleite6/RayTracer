@@ -61,7 +61,7 @@ def get_build_command(build_mode):
     if build_mode == "debug":
         command += " -debug"
     else:
-        command += " -o:speed"
+        command += " -o:speed -no-bounds-check"
 
     return command
 

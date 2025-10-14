@@ -1,7 +1,7 @@
 package raytracer
 
 import "core:fmt"
-import glm "core:math/linalg"
+import glm "core:math/linalg/glsl"
 import "core:mem"
 import vk "vendor:vulkan"
 _ :: fmt

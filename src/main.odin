@@ -1,12 +1,12 @@
 package main
 
-import "core:fmt"
+@(require) import "core:fmt"
 import "core:log"
-import "core:mem"
+@(require) import "core:mem"
 import "core:os/os2"
 import "raytracer"
-_ :: mem
-_ :: fmt
+_ :: os2
+_ :: raytracer
 
 main :: proc() {
 	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
@@ -27,17 +27,22 @@ main :: proc() {
 		}
 	}
 
-	scene_path: Maybe(string)
-	if len(os2.args) > 1 {
-		scene_path = os2.args[1]
-	}
+	// if err != nil {
+	// 	fmt.printfln("Error loading scene: %v", err)
+	// }
+	// _ = scene
+	//
+	// scene_path: Maybe(string)
+	// if len(os2.args) > 1 {
+	// 	scene_path = os2.args[1]
+	// }
 
-	app, err := raytracer.application_init(1280, 1020, "Raytracer", scene_path = scene_path)
+	app, err := raytracer.application_init(1280, 1020, "Raytracer")
 	if err != nil {
 		log.errorf("Application: Error launching application %v", err)
 		return
 	}
-	_ = app
+	fmt.println(app.scene.objects)
 	defer raytracer.application_destroy(app)
 
 	raytracer.application_run(app)

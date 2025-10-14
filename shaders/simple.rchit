@@ -9,7 +9,7 @@
 #define USE_DIRECT_LIGHTING 1
 #define USE_LIGHT_SAMPLING_ONLY 1
 #define USE_BRDF_SAMPLING_ONLY 0
-#define USE_MIS 0
+#define USE_MIS 1
 
 #include "ray_common.glsl"
 #include "random.glsl"
@@ -103,36 +103,6 @@ vec3 generateCosineWeightedDirection(vec2 random) {
     float z = cosTheta;
 
     return vec3(x, y, z);
-}
-
-// Calculate PDF for sampling a specific light in a given direction
-float calculateLightPdfForDirection(vec3 hitPos, vec3 direction, uint lightIdx) {
-    if (lightIdx >= lights_data.lights.length()) return 0.0;
-
-    LightData light = lights_data.lights[lightIdx];
-    ObjectData lightObject = objects_data.objects[light.object_index];
-
-    // Cast ray to find intersection with light (simplified approximation)
-    vec3 lightCenter = vec3(light.transform[3]);
-    vec3 toLight = lightCenter - hitPos;
-    float distance = length(toLight);
-
-    // For area lights, we need to calculate the PDF of hitting that specific point
-    // This is a simplified version - in practice you'd need to:
-    // 1. Find the exact intersection point on the light surface
-    // 2. Calculate the area PDF at that point
-    // 3. Convert to solid angle measure
-
-    // Approximate area (assuming spherical light for simplicity)
-    float approximateArea = 4.0 * M_PI; // Placeholder
-    float cosTheta = max(0.0, dot(-direction, normalize(toLight)));
-
-    if (cosTheta <= 1e-8) return 0.0;
-
-    // Convert area PDF to solid angle PDF
-    float solidAnglePdf = (distance * distance) / (approximateArea * cosTheta);
-
-    return solidAnglePdf;
 }
 
 // Utility functions
@@ -322,7 +292,9 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 
             // Calculate direction and distance
             vec3 toLight = result.position - hitPos;
-            result.distance = length(toLight);
+
+            float safeDist = max(length(toLight), 0.05);
+            result.distance = safeDist;
             result.direction = toLight / result.distance;
 
             // Calculate triangle area in world space
@@ -337,7 +309,8 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 
             float areaPdf = 1.0 / triangleArea;
             float triangleSelectionPdf = 1.0 / float(numTriangles);
-            result.pdf = triangleSelectionPdf * areaPdf * (result.distance * result.distance) / cosTheta;
+
+            result.pdf = triangleSelectionPdf * areaPdf / cosTheta;
 
             result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
             result.valid = true;
@@ -460,7 +433,7 @@ float lightPdfFromTriangleHitParams(uint numTris, float triArea,
     float areaPdf              = 1.0 / max(triArea, 1e-4);
     // Convert area pdf to solid-angle pdf at shading point:
     // p_dir = p_area * (dist^2 / cosThetaLight)
-    float p_dir = triangleSelectionPdf * areaPdf * (dist * dist) / cosThetaLight;
+    float p_dir = triangleSelectionPdf * areaPdf / cosThetaLight;
     return max(p_dir, 1e-6);
 }
 

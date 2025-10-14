@@ -21,9 +21,6 @@ Application :: struct {
 	renderer:                    Raytracing_Renderer,
 	delta_time, last_frame_time: f64,
 	running:                     bool,
-
-	// Vulkan stuff
-	vk_ctx:                      Vulkan_Context,
 }
 
 application_init :: proc(
@@ -37,11 +34,13 @@ application_init :: proc(
 	app = &g_application
 	app.running = true
 	// TODO: change this
-	if scene_path, ok := scene_path.?; ok {
-		app.scene = load_scene_from_file(scene_path) or_return
-	} else {
-		app.scene = create_scene()
-	}
+	// if scene_path, ok := scene_path.?; ok {
+	// 	app.scene = load_scene_from_file(scene_path) or_return
+	// } else {
+	// 	app.scene = create_scene()
+	// }
+
+	app.scene, _ = load_scene_from_gltf("models/cornell_box/scene_with_light.glb")
 	app.window = new(Window)
 	window_init(app.window, window_width, window_height, window_title) or_return
 	camera_controller_init(&app.camera_controller, {0, 0, -3}, window_aspect_ratio(app.window^))
@@ -90,12 +89,6 @@ application_render :: proc(app: ^Application) {
 	defer raytracing_renderer_end_frame(&app.renderer)
 	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
 	ui_render(&app.renderer)
-	// renderer_begin_frame(&app.renderer)
-	//
-	// renderer_render(&app.renderer, &app.camera_controller.camera)
-	// renderer_render_ui(&app.renderer)
-	//
-	// renderer_end_frame(&app.renderer)
 }
 
 application_run :: proc(app: ^Application) {

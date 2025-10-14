@@ -1,16 +1,16 @@
 package raytracer
 
 import "core:log"
-import glm "core:math/linalg"
+import glm "core:math/linalg/glsl"
 _ :: log
 
 CAMERA_SPEED :: f32(5.0)
 CAMERA_SENSIVITY :: f32(0.001)
 
-Vec2 :: glm.Vector2f32
-Vec3 :: glm.Vector3f32
-Vec4 :: glm.Vector4f32
-Mat4 :: glm.Matrix4f32
+Vec2 :: glm.vec2
+Vec3 :: glm.vec3
+Vec4 :: glm.vec4
+Mat4 :: glm.mat4
 
 Camera_UBO :: struct {
 	projection:         Mat4,
@@ -72,14 +72,14 @@ camera_on_resize :: proc(camera: ^Camera, aspect_ratio: f32) {
 }
 
 camera_update_matrices :: proc(camera: ^Camera) {
-	camera.view = glm.matrix4_look_at(camera.position, camera.position + camera.forward, camera.up)
+	camera.view = glm.mat4LookAt(camera.position, camera.position + camera.forward, camera.up)
 	// camera.proj = glm.matrix_ortho3d_f32(-camera.aspect, camera.aspect, 1, -1, -1, 1)
-	fov := glm.to_radians(f32(45.0)) // 45 degree field of view
+	fov := glm.radians(f32(45.0)) // 45 degree field of view
 	near := f32(0.1)
 	far := f32(1000.0)
-	camera.proj = glm.matrix4_perspective_f32(fov, camera.aspect, near, far)
-	camera.inverse_view = glm.matrix4_inverse_f32(camera.view)
-	camera.inverse_proj = glm.matrix4_inverse_f32(camera.proj)
+	camera.proj = glm.mat4Perspective(fov, camera.aspect, near, far)
+	camera.inverse_view = glm.inverse_mat4(camera.view)
+	camera.inverse_proj = glm.inverse_mat4(camera.proj)
 
 	camera.dirty = true
 }
@@ -99,13 +99,10 @@ camera_process_mouse :: proc(camera: ^Camera, x, y: f32, move: bool) {
 	yaw_delta := delta.x * camera.sensivity
 
 	rotation := glm.normalize(
-		glm.cross(
-			glm.quaternion_angle_axis_f32(-pitch_delta, camera.right),
-			glm.quaternion_angle_axis_f32(-yaw_delta, {0, 1, 0}),
-		),
+		glm.quatAxisAngle(camera.right, -pitch_delta) * glm.quatAxisAngle({0, 1, 0}, -yaw_delta),
 	)
 
-	camera.forward = glm.quaternion_mul_vector3(rotation, camera.forward)
+	camera.forward = glm.quatMulVec3(rotation, camera.forward)
 	camera.right = glm.cross(camera.forward, camera.up)
 
 	camera_update_matrices(camera)

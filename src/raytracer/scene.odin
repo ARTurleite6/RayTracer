@@ -2,7 +2,7 @@ package raytracer
 
 import "core:log"
 import "core:math"
-import glm "core:math/linalg"
+import glm "core:math/linalg/glsl"
 import "core:slice"
 import "core:strings"
 _ :: log
@@ -176,16 +176,15 @@ object_update_position :: proc(object: ^Object, new_pos: Vec3) {
 
 object_update_model_matrix :: proc(object: ^Object) {
 	transform := &object.transform
-	transform.model_matrix =
-		glm.matrix4_translate(transform.position) *
-		glm.matrix4_from_euler_angles_xyz_f32(
-			glm.to_radians(object.transform.rotation.x),
-			glm.to_radians(object.transform.rotation.y),
-			glm.to_radians(object.transform.rotation.z),
-		) *
-		glm.matrix4_scale_f32(transform.scale)
+	rot :=
+		glm.mat4Rotate({1, 0, 0}, glm.radians(object.transform.rotation.x)) *
+		glm.mat4Rotate({0, 1, 0}, glm.radians(object.transform.rotation.y)) *
+		glm.mat4Rotate({0, 0, 1}, glm.radians(object.transform.rotation.z))
 
-	transform.normal_matrix = glm.matrix4_inverse_transpose_f32(transform.model_matrix)
+	transform.model_matrix =
+		glm.mat4Translate(transform.position) * rot * glm.mat4Scale(transform.scale)
+
+	transform.normal_matrix = glm.inverse_transpose(transform.model_matrix)
 }
 
 mesh_init :: proc(mesh: ^Mesh, vertices: []Vertex, indices: []u32, name: string) -> Mesh_Error {
@@ -287,15 +286,6 @@ create_plane :: proc(width: f32 = 1.0, height: f32 = 1.0) -> (mesh: Mesh) {
 @(private)
 create_scene :: proc() -> (scene: Scene) {
 	return create_cornell_box()
-	// scene_init(&scene)
-
-	// sphere_index := scene_add_mesh(&scene, create_sphere(stacks = 100, slices = 100))
-
-	// scene_add_object(&scene, "Sphere 1", sphere_index, 1, position = {8.0, 1, 0})
-	// scene_add_object(&scene, "Sphere 2", sphere_index, 2, position = {0, 0, 0})
-	// scene_add_object(&scene, "Ground", sphere_index, 0, position = {2.5, 0, 0})
-
-	// return scene
 }
 
 @(private)
@@ -397,7 +387,7 @@ create_cornell_box :: proc() -> (scene: Scene) {
 	sphere_mesh_idx := scene_add_mesh(&scene, create_sphere())
 
 	// Light (on the ceiling)
-	light_size: f32 = 0.1
+	light_size: f32 = 1.0
 	scene_add_object(
 		&scene,
 		"Light Center",
