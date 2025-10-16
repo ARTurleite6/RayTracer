@@ -1,0 +1,77 @@
+// raddbg 0.9.21 project file
+
+recent_file: path: "src/raytracer/vulkan_context.odin"
+recent_file: path: "src/raytracer/command_pool.odin"
+recent_file: path: "src/raytracer/raytracing_renderer.odin"
+recent_file: path: "src/raytracer/application.odin"
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/gs/amd64/amdsecgs.asm"
+recent_file: path: "src/raytracer/window.odin"
+recent_file: path: "../Odin/base/runtime/core.odin"
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/string/amd64/memset.asm"
+recent_file: path: "src/raytracer/swapchain_manager.odin"
+recent_file: path: "../Odin/base/runtime/internal.odin"
+recent_file: path: "../Odin/core/mem/tracking_allocator.odin"
+recent_file: path: "../Odin/base/runtime/core_builtin.odin"
+recent_file: path: "external/odin-vk-bootstrap/vkb/swapchain.odin"
+recent_file: path: "../Odin/base/runtime/heap_allocator.odin"
+recent_file: path: "src/raytracer/gpu_scene.odin"
+recent_file: path: "src/raytracer/storage_buffer_set.odin"
+recent_file: path: "src/raytracer/buffer.odin"
+recent_file: path: "../Odin/base/runtime/heap_allocator_windows.odin"
+recent_file: path: "external/odin-vk-bootstrap/vkb/swapchain_builder.odin"
+recent_file: path: "../../../../SDKBuild/build-X64-1.4.321.0/Vulkan-Utility-Libraries/include/vulkan/utility/vk_concurrent_unordered_map.hpp"
+recent_file: path: "src/raytracer/descriptor_set.odin"
+recent_file: path: "src/raytracer/resource_cache.odin"
+recent_file: path: "src/raytracer/command_buffer.odin"
+recent_file: path: "../../../../src/llvm_package_18.1.8/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp"
+recent_file: path: "../Odin/base/runtime/entry_windows.odin"
+target:
+{
+  executable: "pathtracer.exe"
+  working_directory: ""
+}
+breakpoint:
+{
+  source_location: "src/raytracer/raytracing_renderer.odin:239:1"
+  hit_count: 0
+  enabled: 0
+}
+breakpoint:
+{
+  source_location: "src/raytracer/command_buffer.odin:430:1"
+  hit_count: 0
+  enabled: 0
+}
+breakpoint:
+{
+  source_location: "src/raytracer/resource_cache.odin:255:1"
+  hit_count: 0
+  enabled: 0
+}
+breakpoint:
+{
+  source_location: "src/raytracer/resource_cache.odin:269:1"
+  hit_count: 0
+  enabled: 0
+}
+target:
+{
+  executable: "pathtracer.exe"
+  working_directory: ""
+}
+target:
+{
+  executable: "pathtracer.exe"
+  working_directory: ""
+  enabled: 1
+}
+breakpoint:
+{
+  source_location: "src/raytracer/raytracing_renderer.odin:121:1"
+  hit_count: 2
+}
+breakpoint:
+{
+  source_location: "src/raytracer/vulkan_context.odin:166:1"
+  hit_count: 1
+}

@@ -1,5 +1,6 @@
 package raytracer
 
+import "base:runtime"
 import "core:c"
 import "core:log"
 import imgui "external:odin-imgui"
@@ -21,6 +22,8 @@ Application :: struct {
 	renderer:                    Raytracing_Renderer,
 	delta_time, last_frame_time: f64,
 	running:                     bool,
+	minimized:                   bool,
+	ctx:                         runtime.Context,
 }
 
 application_init :: proc(
@@ -41,7 +44,9 @@ application_init :: proc(
 	// }
 
 	app.scene, _ = load_scene_from_gltf("models/cornell_box/scene_with_light.glb")
+	app.ctx = context
 	app.window = new(Window)
+	app.minimized = false
 	window_init(app.window, window_width, window_height, window_title) or_return
 	camera_controller_init(&app.camera_controller, {0, 0, -3}, window_aspect_ratio(app.window^))
 	window_set_window_user_pointer(app.window, app.window)
@@ -79,12 +84,20 @@ application_update :: proc(app: ^Application) {
 		app.running = false
 	}
 
+	if is_key_pressed(.F11) {
+		window_set_fullscreen(app.window)
+	}
+
 	dt := f32(app.delta_time)
 
 	camera_controller_on_update(&app.camera_controller, dt)
 }
 
 application_render :: proc(app: ^Application) {
+	if app.minimized {
+		return
+	}
+
 	raytracing_renderer_begin_frame(&app.renderer)
 	defer raytracing_renderer_end_frame(&app.renderer)
 	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
@@ -93,14 +106,15 @@ application_render :: proc(app: ^Application) {
 
 application_run :: proc(app: ^Application) {
 	for app.running {
-		free_all(context.temp_allocator)
 		application_update(app)
 		application_render(app)
+		free_all(context.temp_allocator)
 	}
 }
 
-application_on_event :: proc(handler: ^Event_Handler, event: Event) {
+application_on_event :: proc "contextless" (handler: ^Event_Handler, event: Event) {
 	app := (^Application)(handler.data)
+	context = app.ctx
 
 	#partial switch v in event {
 	case Resize_Event:
@@ -112,9 +126,12 @@ application_on_event :: proc(handler: ^Event_Handler, event: Event) {
 	camera_controller_on_event(&app.camera_controller, event)
 }
 
-application_on_resize :: proc(app: ^Application, width, height: i32) -> bool {
-	// app := (^Application)(user_data)
-	// renderer_on_resize(&app.renderer, u32(event.width), u32(event.height))
+application_on_resize :: proc(app: ^Application, width, height: int) -> bool {
+	if width == 0 || height == 0 {
+		app.minimized = true
+	} else {
+		app.minimized = false
+	}
 	return true
 }
 

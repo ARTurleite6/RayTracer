@@ -10,17 +10,21 @@ import vk "vendor:vulkan"
 MAX_PUSH_CONSTANT_SIZE :: 256
 
 Command_Buffer :: struct {
-	buffer:                 vk.CommandBuffer,
-	ctx:                    ^Vulkan_Context,
+	buffer:      vk.CommandBuffer,
+	ctx:         ^Vulkan_Context,
 
 	// TODO: Consider to use an arena allocator to manage this state.
 
 	// state management,
+	using state: Command_Buffer_State,
+	allocator:   mem.Allocator,
+}
+
+Command_Buffer_State :: struct {
 	pipeline_state:         Pipeline_State,
 	push_constant_state:    Push_Constant_State,
 	resource_binding_state: map[u32]Resource_Binding_State, // map from set to resource binding of that set
 	sbt:                    ^Shader_Binding_Table,
-	allocator:              mem.Allocator,
 }
 
 Render_Pass_Info :: struct {
@@ -57,10 +61,6 @@ Raytracing_Spec :: struct {
 
 command_buffer_init :: proc(cmd: ^Command_Buffer, ctx: ^Vulkan_Context, buffer: vk.CommandBuffer) {
 	cmd^ = {}
-	cmd.pipeline_state.color_blend.attachments = make(
-		[dynamic]Color_Blend_Attachment_State,
-		context.temp_allocator,
-	)
 	cmd.buffer = buffer
 	cmd.ctx = ctx
 	cmd.allocator = context.temp_allocator
@@ -76,11 +76,7 @@ command_buffer_end :: proc(cmd: Command_Buffer) -> vk.Result {
 }
 
 command_buffer_reset :: proc(cmd: ^Command_Buffer) {
-	// TODO: implement the rest of resource cleaning in the future.
-	cmd.resource_binding_state = {}
-	cmd.pipeline_state = {}
-	cmd.push_constant_state = {}
-	cmd.sbt = nil
+	cmd.state = {}
 }
 
 command_buffer_bind_vertex_buffers :: proc(
@@ -89,10 +85,11 @@ command_buffer_bind_vertex_buffers :: proc(
 	buffers: []Buffer,
 	offsets: []vk.DeviceSize,
 ) {
+	context.temp_allocator = cmd.allocator
 	raw_buffers := slice.mapper(
 		buffers,
 		proc(buffer: Buffer) -> vk.Buffer {return buffer.handle},
-		allocator = cmd.allocator,
+		context.temp_allocator,
 	)
 
 	vk.CmdBindVertexBuffers(
@@ -452,7 +449,7 @@ command_buffer_flush :: proc(cmd: ^Command_Buffer, bind_point: vk.PipelineBindPo
 			) or_return
 
 			descriptor_set_update2(descriptor_set, cmd.ctx)
-			// TODO: in here we could check actually what bindings we need to update, for example only 
+			// TODO: in here we could check actually what bindings we need to update, for example only
 			// update a specific buffer
 
 			assert(

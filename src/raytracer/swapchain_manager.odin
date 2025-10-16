@@ -60,17 +60,10 @@ swapchain_manager_init :: proc(
 		return .Invalid_Surface
 	}
 
+	manager^ = {}
 	manager.device = device
 	manager.surface = surface
-
-	if create_err := swapchain_init(manager, config, resizing = false, allocator = allocator);
-	   create_err != nil {
-		// TODO: DESTROY swapchain
-		return create_err
-	}
-
-
-	return nil
+	return swapchain_init(manager, config, resizing = false, allocator = allocator)
 }
 
 @(private)
@@ -80,16 +73,20 @@ swapchain_init :: proc(
 	resizing: bool,
 	allocator := context.allocator,
 ) -> Swapchain_Error {
+	context.allocator = allocator
 	builder, ok := vkb.init_swapchain_builder(manager.device.logical_device)
 	if !ok {
 		return .Creation_Failed
 	}
-
 	vkb.swapchain_builder_add_image_usage_flags(&builder, {.TRANSFER_DST})
-
 	defer vkb.destroy_swapchain_builder(&builder)
 
-	vkb.swapchain_builder_set_old_swapchain(&builder, manager.handle)
+	// Save old swapchain for cleanup
+	old_swapchain := manager.handle
+	old_images := manager.images
+	old_image_views := manager.image_views
+
+	vkb.swapchain_builder_set_old_swapchain(&builder, old_swapchain)
 	vkb.swapchain_builder_set_desired_extent(&builder, config.extent.width, config.extent.height)
 	vkb.swapchain_builder_use_default_format_selection(&builder)
 
@@ -99,14 +96,18 @@ swapchain_init :: proc(
 		vkb.swapchain_builder_set_present_mode(&builder, config.preferred_mode)
 	}
 
+	// Build new swapchain
 	ok = false
 	if manager.handle, ok = vkb.build_swapchain(&builder); !ok {
 		return .Creation_Failed
 	}
 
+	// Get new images and views
 	ok = false
-
 	if manager.images, ok = vkb.swapchain_get_images(manager.handle, allocator = allocator); !ok {
+		// Clean up the new swapchain we just created
+		vkb.destroy_swapchain(manager.handle)
+		manager.handle = old_swapchain
 		return .Image_Acquisition_Failed
 	}
 
@@ -114,12 +115,25 @@ swapchain_init :: proc(
 		manager.handle,
 		allocator = allocator,
 	); !ok {
+		// Clean up what we've created
+		delete(manager.images, allocator)
+		vkb.destroy_swapchain(manager.handle)
+		manager.handle = old_swapchain
 		return .Image_View_Creation_Failed
+	}
+
+	// Now that new swapchain is successfully created, clean up old resources
+	if resizing && old_swapchain != nil {
+		vkb.swapchain_destroy_image_views(old_swapchain, old_image_views)
+		delete(old_image_views, allocator)
+		delete(old_images, allocator)
+		vkb.destroy_swapchain(old_swapchain)
 	}
 
 	manager.extent = manager.handle.extent
 	manager.format = manager.handle.image_format
 	manager.present_mode = manager.handle.present_mode
+
 	return nil
 }
 
@@ -128,10 +142,8 @@ swapchain_manager_destroy :: proc(manager: ^Swapchain_Manager) {
 	vkb.destroy_swapchain(manager.handle)
 
 	vk.DestroySurfaceKHR(manager.device.instance.ptr, manager.surface, nil)
-	// delete(manager.images)
-	// delete(manager.image_views)
-
-	manager^ = {}
+	delete(manager.images)
+	delete(manager.image_views)
 }
 
 Acquire_Result :: struct {

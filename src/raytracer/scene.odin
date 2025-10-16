@@ -20,6 +20,7 @@ Scene_Change_Type :: enum {
 	Object_Added,
 	Object_Removed,
 	Object_Transform_Changed,
+	Object_Mesh_Changed,
 }
 
 Scene_Change :: struct {
@@ -80,6 +81,10 @@ scene_destroy :: proc(scene: ^Scene) {
 		delete(object.name)
 	}
 
+	for material in scene.materials {
+		delete(material.name)
+	}
+
 	delete(scene.meshes)
 	delete(scene.objects)
 	delete(scene.materials)
@@ -136,6 +141,27 @@ scene_update_object_position :: proc(scene: ^Scene, object_index: int, new_posit
 	append(&scene.changes, Scene_Change{type = .Object_Transform_Changed, index = object_index})
 }
 
+scene_update_object_rotation :: proc(scene: ^Scene, object_index: int, new_rotation: Vec3) {
+	object := &scene.objects[object_index]
+	object_update_rotation(object, new_rotation)
+
+	append(&scene.changes, Scene_Change{type = .Object_Transform_Changed, index = object_index})
+}
+
+scene_update_object_scale :: proc(scene: ^Scene, object_index: int, new_scale: Vec3) {
+	object := &scene.objects[object_index]
+	object_update_scale(object, new_scale)
+
+	append(&scene.changes, Scene_Change{type = .Object_Transform_Changed, index = object_index})
+}
+
+scene_update_object_mesh :: proc(scene: ^Scene, object_index: int, mesh_index: int) {
+	object := &scene.objects[object_index]
+	object.mesh_index = mesh_index
+
+	append(&scene.changes, Scene_Change{type = .Object_Mesh_Changed, index = object_index})
+}
+
 scene_add_object :: proc(
 	scene: ^Scene,
 	name: string,
@@ -171,6 +197,16 @@ scene_add_object :: proc(
 
 object_update_position :: proc(object: ^Object, new_pos: Vec3) {
 	object.transform.position = new_pos
+	object_update_model_matrix(object)
+}
+
+object_update_rotation :: proc(object: ^Object, new_rotation: Vec3) {
+	object.transform.rotation = new_rotation
+	object_update_model_matrix(object)
+}
+
+object_update_scale :: proc(object: ^Object, new_scale: Vec3) {
+	object.transform.scale = new_scale
 	object_update_model_matrix(object)
 }
 

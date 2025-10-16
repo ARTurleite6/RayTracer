@@ -233,13 +233,13 @@ ctx_begin_frame :: proc(ctx: ^Vulkan_Context) -> (image_index: u32, err: Render_
 		"Failed to wait on frame fences",
 	)
 
-	result := swapchain_acquire_next_image(&ctx.swapchain_manager, frame.image_available) or_return
-	ctx.current_image = result.image_index
-
 	_ = vk_check(
 		vk.ResetFences(device, 1, &frame.in_flight_fence),
 		"Error reseting in_flight_fence",
 	)
+
+	result := swapchain_acquire_next_image(&ctx.swapchain_manager, frame.image_available) or_return
+	ctx.current_image = result.image_index
 
 	buffer_pool_reset(&frame.ubo_buffer_pool)
 	buffer_pool_reset(&frame.storage_buffer_pool)
@@ -376,6 +376,10 @@ frames_data_destroy :: proc(ctx: ^Vulkan_Context) {
 		vk.DestroySemaphore(device, f.image_available, nil)
 		vk.DestroySemaphore(device, f.render_finished, nil)
 	}
+}
+
+vulkan_device_wait_idle :: proc(ctx: Vulkan_Context) {
+	vk.DeviceWaitIdle(ctx.device.logical_device.ptr)
 }
 
 @(private)

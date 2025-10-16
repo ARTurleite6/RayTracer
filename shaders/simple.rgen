@@ -74,7 +74,7 @@ void main() {
         );
 
         if (!payload.hit) {
-            // payload.color += payload.throughput * push.clear_color;
+            payload.color += payload.throughput * push.clear_color;
             break;
         }
 

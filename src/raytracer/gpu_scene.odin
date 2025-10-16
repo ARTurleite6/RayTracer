@@ -466,6 +466,35 @@ gpu_scene_update_object_transform :: proc(
 	)
 }
 
+gpu_scene_update_object_mesh :: proc(
+	gpu_scene: ^GPU_Scene,
+	ctx: ^Vulkan_Context,
+	scene: Scene,
+	object_index: int,
+) {
+	object := scene.objects[object_index]
+
+	gpu_scene.tlas_infos[object_index].accelerationStructureReference = u64(
+		get_blas_device_address(
+			gpu_scene.acceleration_structures[object.mesh_index],
+			ctx.device.logical_device.ptr,
+		),
+	)
+
+	if scene.materials[object.material_index].emission_power > 0 {
+		storage_buffer_set_destroy(ctx, &gpu_scene.lights_buffer)
+		gpu_scene_compile_lights(gpu_scene, ctx, scene)
+	}
+
+	gpu_scene_build_tlas(
+		gpu_scene,
+		ctx,
+		gpu_scene.tlas_infos[:],
+		{.PREFER_FAST_TRACE, .ALLOW_UPDATE},
+		update = true,
+	)
+}
+
 gpu_scene_update_object :: proc(
 	gpu_scene: ^GPU_Scene,
 	ctx: ^Vulkan_Context,

@@ -19,7 +19,7 @@ Key_Event :: struct {
 }
 
 Resize_Event :: struct {
-	width, height: i32,
+	width, height: int,
 }
 
 Mouse_Event :: struct {

@@ -44,12 +44,14 @@ make_image_set :: proc(
 
 image_set_destroy :: proc(ctx: ^Vulkan_Context, is: ^Image_Set, allocator := context.allocator) {
 	for &img, idx in is.images {
-		image_destroy(&img, ctx^)
 		image_view_destroy(is.image_views[idx], ctx^)
+		image_destroy(&img, ctx^)
 	}
 
 	delete(is.images, allocator)
 	delete(is.image_views, allocator)
+	is.images = nil
+	is.image_views = nil
 }
 
 image_set_get :: proc(is: ^Image_Set, frame: int) -> ^Image {

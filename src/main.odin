@@ -1,12 +1,8 @@
 package main
 
-@(require) import "core:fmt"
 import "core:log"
 @(require) import "core:mem"
-import "core:os/os2"
 import "raytracer"
-_ :: os2
-_ :: raytracer
 
 main :: proc() {
 	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
@@ -18,9 +14,9 @@ main :: proc() {
 
 		defer {
 			if len(track.allocation_map) > 0 {
-				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+				log.warnf("=== %v allocations not freed: ===", len(track.allocation_map))
 				for _, entry in track.allocation_map {
-					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+					log.warnf("- %v bytes @ %v", entry.size, entry.location)
 				}
 			}
 			mem.tracking_allocator_destroy(&track)
@@ -42,7 +38,6 @@ main :: proc() {
 		log.errorf("Application: Error launching application %v", err)
 		return
 	}
-	fmt.println(app.scene.objects)
 	defer raytracer.application_destroy(app)
 
 	raytracer.application_run(app)

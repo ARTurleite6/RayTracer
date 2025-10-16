@@ -99,7 +99,34 @@ raytracing_renderer_set_scene :: proc(renderer: ^Raytracing_Renderer, scene: ^Sc
 	clear(&renderer.scene.changes)
 }
 
+raytracing_renderer_on_resize :: proc(renderer: ^Raytracing_Renderer, width, height: int) {
+	vulkan_device_wait_idle(renderer.ctx)
+
+	image_set_destroy(&renderer.ctx, &renderer.output_images)
+	renderer.output_images = make_image_set(
+		&renderer.ctx,
+		.R32G32B32A32_SFLOAT,
+		{width = u32(width), height = u32(height)},
+		MAX_FRAMES_IN_FLIGHT,
+	)
+
+	swapchain_init(
+		&renderer.ctx.swapchain_manager,
+		{extent = {width = u32(width), height = u32(height)}, preferred_mode = .MAILBOX},
+		resizing = true,
+	)
+}
+
 raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
+	if renderer.window.framebuffer_resized {
+		raytracing_renderer_on_resize(
+			renderer,
+			int(renderer.window.width),
+			int(renderer.window.height),
+		)
+		renderer.window.framebuffer_resized = false
+	}
+
 	renderer.current_image_index, _ = ctx_begin_frame(&renderer.ctx)
 	renderer.current_cmd = ctx_request_command_buffer(&renderer.ctx)
 
@@ -126,6 +153,13 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 				gpu_scene_remove_material(&renderer.gpu_scene, &renderer.ctx, renderer.scene^)
 			case .Object_Transform_Changed:
 				gpu_scene_update_object_transform(
+					&renderer.gpu_scene,
+					&renderer.ctx,
+					renderer.scene^,
+					change.index,
+				)
+			case .Object_Mesh_Changed:
+				gpu_scene_update_object_mesh(
 					&renderer.gpu_scene,
 					&renderer.ctx,
 					renderer.scene^,
@@ -160,15 +194,7 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 	}
 	command_buffer_set_raytracing_program(cmd, spec)
 
-	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
-	// TODO: maybe add also layout tracking into the image
-	command_buffer_bind_resource(
-		cmd,
-		2,
-		0,
-		vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
-	)
-	command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+	// Set 0
 	command_buffer_bind_resource(
 		cmd,
 		0,
@@ -196,6 +222,17 @@ raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera:
 		0,
 		3,
 		buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
+	)
+	// Set 1
+	command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+
+	// Set 2
+	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+	command_buffer_bind_resource(
+		cmd,
+		2,
+		0,
+		vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
 	)
 
 	command_buffer_push_constant_range(
@@ -285,7 +322,6 @@ raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 
 	command_buffer_reset(&renderer.current_cmd)
-	// command_buffer_destroy(&renderer.current_cmd)
 	renderer.accumulation_frame += 1
 }
 

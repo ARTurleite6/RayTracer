@@ -4,7 +4,6 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import glm "core:math/linalg/glsl"
-_ :: glm
 import "core:os/os2"
 import "core:path/filepath"
 import "core:strings"
@@ -49,6 +48,7 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 		err = .Invalid_File
 		return
 	}
+	defer cgltf.free(data)
 
 	if load_buffers_result := cgltf.load_buffers(options, data, scenepath);
 	   load_buffers_result != .success {
@@ -139,10 +139,12 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 		// tr, rot, scale: Vec3
 		mat4: Mat4
 
-		// TODO: check if I need to change Mat4 to row_major
+		obj.transform.position = n.translation
+		obj.transform.rotation = {90, n.rotation.y, n.rotation.z}
+		obj.transform.scale = n.scale
+
 		cgltf.node_transform_local(&n, &mat4[0, 0])
 		obj.transform.model_matrix = glm.mat4Rotate({1, 0, 0}, glm.radians(f32(90.0))) * mat4
-		// obj.transform.position = extrag
 		obj.transform.normal_matrix = glm.inverse_transpose_matrix4x4(mat4)
 		mesh_index, ok := index_by_name(
 			scene.meshes[:],
@@ -158,10 +160,6 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 		obj.material_index = material_index
 		append(&scene.objects, obj)
 	}
-
-	fmt.println(scene.meshes)
-	fmt.println(scene.materials)
-	fmt.println(scene.objects)
 
 	return
 }

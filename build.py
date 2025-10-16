@@ -51,17 +51,17 @@ def get_build_command(build_mode):
     os = platform.system()
     file = ""
     if os == "Windows":
-        file = "raytracer.exe"
+        file = "pathtracer.exe"
     elif os == "Linux":
-        file = "raytracer"
+        file = "pathtracer"
     else:
         raise RuntimeError(f"Unsupported os #{os}")
 
-    command = f"odin build src -vet -strict-style -collection:external=external -out:{file} -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
+    command = f"odin build src -vet -strict-style -collection:external=external -out:{file} -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors" 
     if build_mode == "debug":
         command += " -debug"
     else:
-        command += " -o:speed -no-bounds-check"
+        command += " -o:aggressive -no-bounds-check"
 
     return command
 

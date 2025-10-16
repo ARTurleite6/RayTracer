@@ -71,6 +71,7 @@ ui_context_init :: proc(ctx: ^UI_Context, vk_ctx: ^Vulkan_Context, window: Windo
 		vk_ctx.device.instance.ptr,
 	)
 
+
 	imgui_glfw.InitForVulkan(window.handle, true)
 	@(static) format: vk.Format = .B8G8R8A8_SRGB
 	init_info := imgui_vulkan.InitInfo {
@@ -335,6 +336,16 @@ render_transform_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: i
 	if imgui.DragFloat3("Position", &new_position, 0.01) {
 		scene_update_object_position(scene, obj_index, new_position)
 	}
+
+	new_rotation := object.transform.rotation
+	if imgui.DragFloat3("Rotation", &new_rotation) {
+		scene_update_object_rotation(scene, obj_index, new_rotation)
+	}
+
+	new_scale := object.transform.scale
+	if imgui.DragFloat3("Scale", &new_scale) {
+		scene_update_object_scale(scene, obj_index, new_scale)
+	}
 }
 
 render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: int) {
@@ -374,8 +385,7 @@ render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: 
 		for mesh, i in scene.meshes {
 			is_selected := object.mesh_index == i
 			if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
-				// TODO
-				// scene_update_object_mesh(scene, obj_index, i)
+				scene_update_object_mesh(scene, obj_index, i)
 			}
 
 			if is_selected {

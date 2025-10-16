@@ -1,6 +1,5 @@
 package raytracer
 
-import "base:runtime"
 import "core:c"
 import "core:log"
 import vkb "external:odin-vk-bootstrap"
@@ -20,16 +19,16 @@ Cursor_Mode :: enum {
 }
 
 Window :: struct {
-	handle:        glfw.WindowHandle,
-	surface:       vk.SurfaceKHR,
-	width, height: c.int,
-	event_handler: Event_Handler,
-	logger:        log.Logger,
+	handle:              glfw.WindowHandle,
+	surface:             vk.SurfaceKHR,
+	width, height:       c.int,
+	event_handler:       Event_Handler,
+	framebuffer_resized: bool,
 }
 
 Event_Handler :: struct {
 	data:     rawptr,
-	on_event: #type proc(handler: ^Event_Handler, event: Event),
+	on_event: #type proc "contextless" (handler: ^Event_Handler, event: Event),
 }
 
 window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (err: Window_Error) {
@@ -38,26 +37,24 @@ window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (e
 		return .Initializing
 	}
 
+	// monitor := glfw.GetPrimaryMonitor()
+	// mode := glfw.GetVideoMode(monitor)
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-	glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
-	window.handle = glfw.CreateWindow(width, height, title, nil, nil)
+	// glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
+	window.width, window.height = width, height
+	window.handle = glfw.CreateWindow(window.width, window.height, title, nil, nil)
 	if window.handle == nil {
 		log.error("GLFW: Error creating window")
 		return .Creating_Window
 	}
 
-	window.width, window.height = width, height
-
-	window.logger = context.logger
-
 	glfw.SetWindowCloseCallback(window.handle, proc "c" (handle: glfw.WindowHandle) {
-		context = runtime.default_context()
 		window := cast(^Window)glfw.GetWindowUserPointer(handle)
 
 		window.event_handler->on_event(Window_Close_Event{})
 	})
 
-	glfw.SetFramebufferSizeCallback(window.handle, framebuffer_resize)
+	glfw.SetWindowSizeCallback(window.handle, window_size_resize)
 	glfw.SetKeyCallback(window.handle, key_callback)
 	glfw.SetCursorPosCallback(window.handle, cursor_position_callback)
 	glfw.SetMouseButtonCallback(window.handle, mouse_button_callback)
@@ -104,21 +101,31 @@ window_get_surface :: proc(
 	return window.surface, .SUCCESS
 }
 
-framebuffer_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
-	context = runtime.default_context()
+window_size_resize :: proc "c" (window_handle: glfw.WindowHandle, width, height: c.int) {
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
-	context.logger = window.logger
 
-	window.width = width
-	window.height = height
-	window.event_handler->on_event(Resize_Event{width = window.width, height = window.height})
+	window_on_resize(window, width, height)
+}
+
+window_set_fullscreen :: proc(w: ^Window) {
+	monitor := glfw.GetPrimaryMonitor()
+	mode := glfw.GetVideoMode(monitor)
+	glfw.SetWindowMonitor(w.handle, monitor, 0, 0, mode.width, mode.height, mode.refresh_rate)
+
+	window_on_resize(w, mode.width, mode.height)
+}
+
+@(private = "file")
+window_on_resize :: proc "contextless" (w: ^Window, width, height: c.int) {
+	w.width = width
+	w.height = height
+	w.framebuffer_resized = true
+	w.event_handler->on_event(Resize_Event{width = int(w.width), height = int(w.height)})
 }
 
 @(private = "file")
 key_callback :: proc "c" (window_handle: glfw.WindowHandle, key, scancode, action, mods: c.int) {
-	context = runtime.default_context()
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
-	context.logger = window.logger
 	window.event_handler->on_event(
 		Key_Event {
 			key = Key_Code(key),
@@ -130,18 +137,14 @@ key_callback :: proc "c" (window_handle: glfw.WindowHandle, key, scancode, actio
 
 @(private = "file")
 cursor_position_callback :: proc "c" (window_handle: glfw.WindowHandle, x_pos: f64, y_pos: f64) {
-	context = runtime.default_context()
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
-	context.logger = window.logger
 
 	window.event_handler->on_event(Mouse_Event{x = f32(x_pos), y = f32(y_pos)})
 }
 
 @(private = "file")
 mouse_button_callback :: proc "c" (window_handle: glfw.WindowHandle, button, action, mods: c.int) {
-	context = runtime.default_context()
 	window := cast(^Window)glfw.GetWindowUserPointer(window_handle)
-	context.logger = window.logger
 
 	window.event_handler.on_event(
 		&window.event_handler,
