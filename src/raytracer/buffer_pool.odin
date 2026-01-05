@@ -87,7 +87,7 @@ buffer_pool_request_buffer_block :: proc(
 		// allocate new block and return it
 		block = new(Buffer_Block)
 		// TODO: handle alignment
-		buffer_init(
+		_ = buffer_init(
 			&block.buffer,
 			ctx,
 			u64(max(int(size), pool.block_size)),
@@ -126,3 +126,4 @@ buffer_block_can_allocate :: proc(block: Buffer_Block, alignment, size: vk.Devic
 	}
 	return aligned + size <= block.buffer.size
 }
+

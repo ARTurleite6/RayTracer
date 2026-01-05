@@ -5,14 +5,14 @@
 #include "random.glsl"
 #include "ray_common.glsl"
 
-layout(binding = 0, set = 2, rgba32f) uniform image2D image;
-layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 0, set = 1) uniform CameraProperties {
+layout(set = 0, binding = 0) uniform accelerationStructureEXT topLevelAS;
+layout(set = 1, binding = 0) uniform CameraProperties {
     mat4 proj;
     mat4 view;
     mat4 inverse_view;
     mat4 inverse_proj;
 } cam;
+layout(set = 2, binding = 0, rgba32f) uniform image2D image;
 layout(location = 0) rayPayloadEXT RayPayload payload;
 
 layout(push_constant) uniform Push {
@@ -20,43 +20,73 @@ layout(push_constant) uniform Push {
     uint frame_number;
 } push;
 
-const int MAX_DEPTH = 5;
+const int MAX_DEPTH = 3;
+
+vec2 getSampleOffset(inout uint seed, uint frame) {
+    // For first frame, use center of pixel
+    if (frame == 0) {
+        return vec2(0.5, 0.5);
+    }
+
+    // Use low-amplitude jitter to avoid obvious patterns
+    // but keep it small enough to not cause flickering during camera movement
+    float r1 = rnd(seed);
+    float r2 = rnd(seed);
+
+    // Small offset from center (reduces visible noise while moving)
+    return vec2(0.5, 0.5) + (vec2(r1, r2) - 0.5) * 0.4;
+}
+
+// Calculate primary ray
+void calculateCameraRay(in vec2 pixelCenter, in vec2 dimensions, out vec3 origin, out vec3 direction) {
+    // Convert to normalized device coordinates
+    vec2 inUV = pixelCenter / dimensions;
+    vec2 d = inUV * 2.0 - 1.0;
+
+    // Calculate ray direction using inverse matrices
+    vec4 origin_local = cam.inverse_view * vec4(0, 0, 0, 1);
+    vec4 target = cam.inverse_proj * vec4(d.xy, 1, 1);
+    vec4 direction_local = cam.inverse_view * vec4(normalize(target.xyz), 0);
+
+    origin = origin_local.xyz;
+    direction = normalize(direction_local.xyz);
+}
+
+bool russianRoulette(inout vec3 throughput, inout uint seed, int depth) {
+    if (depth < 3) return true; // Always continue for first few bounces
+
+    // Use luminance-based probability for more accurate termination
+    float luminance = dot(throughput, vec3(0.2126, 0.7152, 0.0722));
+    float p = min(max(luminance, 0.05), 0.95);
+
+    if (rnd(seed) > p) {
+        return false;
+    }
+
+    throughput /= p;
+    return true;
+}
 
 void main() {
     uint seed = tea(gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.x, push.frame_number);
-    float r1 = rnd(seed);
-    float r2 = rnd(seed);
-    vec2 subpixel_jitter = push.frame_number == 0 ? vec2(0.5, 0.5) : vec2(r1, r2);
 
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + subpixel_jitter;
-    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
-    vec2 d = inUV * 2.0 - 1.0;
+    vec2 jitter = getSampleOffset(seed, push.frame_number);
+    vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + jitter;
 
-    vec4 origin = cam.inverse_view * vec4(0, 0, 0, 1);
-    vec4 target = cam.inverse_proj * vec4(d.xy, 1, 1);
-    vec4 direction = cam.inverse_view * vec4(normalize(target.xyz), 0);
-
-    vec3 rayOrigin = origin.xyz;
-    vec3 rayDirection = direction.xyz;
+    vec3 rayOrigin, rayDirection;
+    calculateCameraRay(pixelCenter, vec2(gl_LaunchSizeEXT.xy), rayOrigin, rayDirection);
 
     payload.seed = seed;
     payload.color = vec3(0.0);
     payload.throughput = vec3(1.0);
     payload.firstBounce = true;
     payload.isSpecular = false;
-
-    const float RR_START_DEPTH = 3;
+    payload.previousBrdfPdf = 1.0;
+    payload.didDirectIllumination = false;
 
     for (int depth = 0; depth < MAX_DEPTH; depth++) {
-        if (depth >= RR_START_DEPTH) {
-            float maxThroughput = max(payload.throughput.r, max(payload.throughput.g, payload.throughput.b));
-            float p = min(max(maxThroughput, 0.05), 0.95);
-
-            if (rnd(seed) > p) {
-                break;
-            }
-
-            payload.throughput /= p;
+        if (!russianRoulette(payload.throughput, seed, depth)) {
+            break;
         }
 
         traceRayEXT(
@@ -88,21 +118,20 @@ void main() {
         }
     }
 
-    // Sanitize final color
-    vec3 finalColor = payload.color;
+    vec3 finalColor = min(payload.color, vec3(5.0));
+
     if (any(isnan(finalColor)) || any(isinf(finalColor))) {
-        finalColor = vec3(0.0); // Default to black for invalid colors
+        finalColor = vec3(0.0);
     }
 
-    // Clamp to reasonable values to avoid bright spots
-    // finalColor = clamp(finalColor, vec3(0.0), vec3(10.0));
-    finalColor = pow(finalColor, vec3(1.0 / 2.2));
-
     if (push.frame_number == 0) {
-        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(payload.color, 1.f));
+        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(finalColor, 1.f));
     } else {
         float a = 1.0 / float(push.frame_number + 1);
         vec3 old_color = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;
-        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(mix(old_color, payload.color, a), 1.f));
+        vec3 new_color = mix(old_color, finalColor, a);
+
+        // Store accumulated result
+        imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(new_color, 1.0));
     }
 }

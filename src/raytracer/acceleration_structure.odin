@@ -112,7 +112,7 @@ cmd_create_tlas :: proc(
 	}
 
 
-	buffer_init(
+	_ = buffer_init(
 		scratch_buffer,
 		ctx,
 		u64(size_info.buildScratchSize),
@@ -213,7 +213,7 @@ create_acceleration :: proc(
 ) -> (
 	as: Acceleration_Structure,
 ) {
-	buffer_init(
+	_ = buffer_init(
 		&as.buffer,
 		ctx,
 		u64(create_info.size),
@@ -255,3 +255,4 @@ get_blas_device_address :: proc(
 
 	return vk.GetAccelerationStructureDeviceAddressKHR(device, &info)
 }
+

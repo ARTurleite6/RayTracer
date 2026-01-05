@@ -1,5 +1,6 @@
 package raytracer
 
+import "base:intrinsics"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -27,6 +28,7 @@ Mesh_Variant :: enum {
 }
 
 Scene_Load_Error :: enum {
+	None = 0,
 	Invalid_File,
 	Object_Material_Not_Found,
 }
@@ -38,26 +40,43 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 		log.infof("Scene %s loaded in %d", filepath.base(scenepath), time.tick_since(start))
 	}
 
-	scenepath := strings.clone_to_cstring(scenepath)
-	defer delete(scenepath)
-	options := cgltf.options {
-		type = .glb,
+	scenepath_c := strings.clone_to_cstring(scenepath)
+	defer delete(scenepath_c)
+
+	ext := filepath.ext(scenepath)
+	ft := cgltf.file_type.invalid
+	switch (ext) {
+	case ".gltf":
+		ft = .gltf
+	case ".glb":
+		ft = .glb
+	case:
+		ft = .invalid
 	}
-	data, result := cgltf.parse_file(options, scenepath)
+
+	options := cgltf.options {
+		type = ft,
+	}
+
+	data, result := cgltf.parse_file(options, scenepath_c)
 	if result != .success {
 		err = .Invalid_File
 		return
 	}
 	defer cgltf.free(data)
 
-	if load_buffers_result := cgltf.load_buffers(options, data, scenepath);
-	   load_buffers_result != .success {
+	// load buffers using directory of the glTF file
+	// base_dir := filepath.dir(scenepath)
+	// base_c := strings.clone_to_cstring(base_dir)
+	// defer delete(base_c)
+	if cgltf.load_buffers(options, data, scenepath_c) != .success {
 		err = .Invalid_File
 		return
 	}
+
 	assert(cgltf.validate(data) == .success)
 
-
+	// ---------- Materials ----------
 	for material in data.materials {
 		mat: Material
 		mat.name = strings.clone_from_cstring(material.name)
@@ -69,19 +88,32 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 			mat.metallic = pbr.metallic_factor
 		}
 
-		mat.emission_power = material.emissive_strength.emissive_strength
 		mat.emission_color = material.emissive_factor
+		if material.has_emissive_strength {
+			mat.emission_power = material.emissive_strength.emissive_strength
+		} else {
+			mat.emission_power = 0.0
+		}
 
 		append(&scene.materials, mat)
 	}
 
+	// ---------- Meshes + Objects ----------
+	for &n in data.nodes {
+		if n.mesh == nil {
+			continue
+		}
 
-	for mesh in data.meshes {
-		m: Mesh
-		m.name = strings.clone_from_cstring(mesh.name)
+		world: Mat4
+		cgltf.node_transform_local(&n, &world[0, 0])
 
-		for p in mesh.primitives {
-			pos_accessor, norm_accessor: ^cgltf.accessor
+		for p in n.mesh.primitives {
+			m: Mesh
+			m.name = strings.clone_from_cstring(n.mesh.name)
+
+			// --- Attributes ---
+			pos_accessor: ^cgltf.accessor = nil
+			norm_accessor: ^cgltf.accessor = nil
 
 			for a in p.attributes {
 				#partial switch a.type {
@@ -92,73 +124,66 @@ load_scene_from_gltf :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 				}
 			}
 
-			vertices_count := pos_accessor.count
-			vertices := make([]Vertex, vertices_count)
+			assert(pos_accessor != nil)
+			vertex_count := pos_accessor.count
+			verts := make([]Vertex, vertex_count)
 
-			for v in 0 ..< vertices_count {
+			for v in 0 ..< vertex_count {
 				pos: [3]f32
 				_ = cgltf.accessor_read_float(pos_accessor, v, raw_data(pos[:]), 3)
-				vertices[v].pos = pos
+				verts[v].pos = pos
 
 				if norm_accessor != nil {
-					norm: [3]f32
-					_ = cgltf.accessor_read_float(norm_accessor, v, raw_data(norm[:]), 3)
-					vertices[v].normal = norm
+					nrm: [3]f32
+					_ = cgltf.accessor_read_float(norm_accessor, v, raw_data(nrm[:]), 3)
+					verts[v].normal = nrm
 				}
 			}
 
-			indices := make([]u32, p.indices.count)
-			for j in 0 ..< p.indices.count {
-				indices[j] = u32(cgltf.accessor_read_index(p.indices, j))
+			inds: []u32
+			if p.indices != nil {
+				inds = make([]u32, p.indices.count)
+				for j in 0 ..< p.indices.count {
+					inds[j] = u32(cgltf.accessor_read_index(p.indices, j))
+				}
+			} else {
+				inds = make([]u32, vertex_count)
+				for j in 0 ..< vertex_count {
+					inds[j] = u32(j)
+				}
 			}
 
-			m.vertices = vertices
-			m.indices = indices
-		}
+			m.vertices = verts
+			m.indices = inds
 
-		append(&scene.meshes, m)
-	}
+			append(&scene.meshes, m)
+			mesh_index := len(scene.meshes) - 1
 
-	index_by_name :: proc(s: []$T, name: string) -> (int, bool) {
-		for m, i in s {
-			if m.name == name {
-				return i, true
+			// --- Material index (by pointer offset) ---
+			mat_index := -1
+			if p.material != nil {
+				mat_index = int(
+					(uintptr(p.material) - uintptr(&data.materials[0])) / size_of(cgltf.material),
+				)
 			}
+
+			// --- Object instance ---
+			obj: Object
+			obj.name = strings.clone_from_cstring(n.name)
+			obj.transform = {
+				model_matrix  = world,
+				normal_matrix = glm.inverse_transpose_matrix4x4(world),
+				position      = n.translation,
+				scale         = n.scale,
+				rotation      = n.rotation.xyz,
+			}
+
+			// object_update_model_matrix(&obj)
+
+			obj.mesh_index = u32(mesh_index)
+			if mat_index >= 0 {obj.material_index = u32(mat_index)}
+			append(&scene.objects, obj)
 		}
-
-		return {}, false
-	}
-
-	for &n in data.nodes {
-		if n.mesh == nil {
-			continue
-		}
-
-		obj: Object
-		obj.name = strings.clone_from_cstring(n.name)
-		// tr, rot, scale: Vec3
-		mat4: Mat4
-
-		obj.transform.position = n.translation
-		obj.transform.rotation = {90, n.rotation.y, n.rotation.z}
-		obj.transform.scale = n.scale
-
-		cgltf.node_transform_local(&n, &mat4[0, 0])
-		obj.transform.model_matrix = glm.mat4Rotate({1, 0, 0}, glm.radians(f32(90.0))) * mat4
-		obj.transform.normal_matrix = glm.inverse_transpose_matrix4x4(mat4)
-		mesh_index, ok := index_by_name(
-			scene.meshes[:],
-			strings.clone_from_cstring(n.mesh.name, context.temp_allocator),
-		)
-		assert(ok)
-		obj.mesh_index = mesh_index
-		material_index, material_ok := index_by_name(
-			scene.materials[:],
-			strings.clone_from_cstring(n.mesh.primitives[0].material.name, context.temp_allocator),
-		)
-		assert(material_ok)
-		obj.material_index = material_index
-		append(&scene.objects, obj)
 	}
 
 	return
@@ -226,3 +251,4 @@ load_scene_from_file :: proc(scenepath: string) -> (scene: Scene, err: Scene_Loa
 	}
 	return scene, nil
 }
+

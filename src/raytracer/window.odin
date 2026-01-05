@@ -31,21 +31,40 @@ Event_Handler :: struct {
 	on_event: #type proc "contextless" (handler: ^Event_Handler, event: Event),
 }
 
-window_init :: proc(window: ^Window, width, height: c.int, title: cstring) -> (err: Window_Error) {
+window_init :: proc(
+	window: ^Window,
+	width, height: c.int,
+	title: cstring,
+	fullscreen := false,
+) -> (
+	err: Window_Error,
+) {
 	if !glfw.Init() {
 		log.error("GLFW: Error while initialization")
 		return .Initializing
 	}
 
-	// monitor := glfw.GetPrimaryMonitor()
-	// mode := glfw.GetVideoMode(monitor)
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-	// glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
 	window.width, window.height = width, height
 	window.handle = glfw.CreateWindow(window.width, window.height, title, nil, nil)
 	if window.handle == nil {
 		log.error("GLFW: Error creating window")
 		return .Creating_Window
+	}
+
+	if fullscreen {
+		monitor := glfw.GetPrimaryMonitor()
+		mode := glfw.GetVideoMode(monitor)
+		glfw.SetWindowMonitor(
+			window.handle,
+			monitor,
+			0,
+			0,
+			mode.width,
+			mode.height,
+			mode.refresh_rate,
+		)
+		window.width, window.height = mode.width, mode.height
 	}
 
 	glfw.SetWindowCloseCallback(window.handle, proc "c" (handle: glfw.WindowHandle) {

@@ -73,11 +73,11 @@ camera_on_resize :: proc(camera: ^Camera, aspect_ratio: f32) {
 
 camera_update_matrices :: proc(camera: ^Camera) {
 	camera.view = glm.mat4LookAt(camera.position, camera.position + camera.forward, camera.up)
-	// camera.proj = glm.matrix_ortho3d_f32(-camera.aspect, camera.aspect, 1, -1, -1, 1)
 	fov := glm.radians(f32(45.0)) // 45 degree field of view
 	near := f32(0.1)
 	far := f32(1000.0)
 	camera.proj = glm.mat4Perspective(fov, camera.aspect, near, far)
+	camera.proj[1][1] *= -1
 	camera.inverse_view = glm.inverse_mat4(camera.view)
 	camera.inverse_proj = glm.inverse_mat4(camera.proj)
 
@@ -95,7 +95,7 @@ camera_process_mouse :: proc(camera: ^Camera, x, y: f32, move: bool) {
 	}
 
 
-	pitch_delta := -(delta.y * camera.sensivity)
+	pitch_delta := delta.y * camera.sensivity
 	yaw_delta := delta.x * camera.sensivity
 
 	rotation := glm.normalize(
@@ -114,9 +114,9 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 	direction_vector: Vec3
 	switch direction {
 	case .Up:
-		direction_vector = -camera.up
-	case .Down:
 		direction_vector = camera.up
+	case .Down:
+		direction_vector = -camera.up
 	case .Forward:
 		direction_vector = camera.forward
 	case .Backwards:
@@ -130,3 +130,4 @@ camera_move :: proc(camera: ^Camera, direction: Direction, delta_time: f32) {
 
 	camera_update_matrices(camera)
 }
+

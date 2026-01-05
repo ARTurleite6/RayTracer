@@ -3,113 +3,82 @@
 recent_project: path: project
 window:
 {
-  size: 1536 822
+  size: 1229 658
+  pos: 345 187
+  monitor: "\\\\.\\DISPLAY1"
   panels:
   {
-    0.351715:
+    0.407332:
     {
-      0.385570:
+      0.417973:
       {
         watch:
         {
-          watch: "renderer.ctx.frames"
           selected
           expression: ""
-          watch: "renderer.ctx.frames[renderer.ctx.current_frame].command_pool.buffers"
-        }
-        watch: expression: "query:types"
+          normal: 0.350000 0.400000 0.250000
+        watch: "users_soa]"
+        watch: swapchain
+        watch: window_handle
       }
-      0.207235:
+      watch: expression: "query:types"
+      memory:
       {
-        watch: selected expression: "query:threads"
-        watch: expression: "query:targets"
-        watch: expression: "query:breakpoints"
-        watch: expression: "query:watch_pins"
-      }
-      0.157195:
-      {
-        disasm:
+        expression: ""
+        cursor: 0x490
+        mark: 0x490
+        query:
         {
-          selected
-          expression: ""
-          query: input: ""
+          cmd: search
+          input: 200
         }
-        text:
-        {
-          expression: "query:output"
-          query: input: ""
-          cursor_line: 1
-          cursor_column: 1
-          mark_line: 1
-          mark_column: 1
-        }
-      }
-      0.25:
-      {
-        watch: selected expression: "query:call_stack"
-        watch: expression: "query:modules"
       }
     }
-    0.648283:
+    0.582027: text:
     {
       selected
-      text:
-      {
-        expression: "file:\"C:/Users/Artur Leite/dev/RayTracer/src/raytracer/command_buffer.odin\".data"
-        project: "C:/Users/Artur Leite/dev/Raytracer/project"
-        query: input: ""
-        cursor_line: 267
-        cursor_column: 27
-        mark_line: 267
-        mark_column: 27
-      }
-      text:
-      {
-        expression: "file:\"C:/Users/Artur Leite/dev/RayTracer/src/raytracer/raytracing_renderer.odin\".data"
-        project: "C:/Users/Artur Leite/dev/Raytracer/project"
-        query: input: ""
-        cursor_line: 121
-        cursor_column: 1
-        mark_line: 121
-        mark_column: 1
-      }
-      text:
-      {
-        expression: "file:\"C:/Users/Artur Leite/dev/RayTracer/src/raytracer/swapchain_manager.odin\".data"
-        project: "C:/Users/Artur Leite/dev/Raytracer/project"
-        query: input: ""
-        cursor_line: 154
-        cursor_column: 38
-        mark_line: 154
-        mark_column: 38
-      }
-      text:
-      {
-        expression: "file:\"C:/Users/Artur Leite/dev/RayTracer/src/raytracer/application.odin\".data"
-        project: "C:/Users/Artur Leite/dev/RayTracer/project"
-        query: input: ""
-        cursor_line: 93
-        cursor_column: 1
-        mark_line: 93
-        mark_column: 1
-      }
-      text:
-      {
-        selected
-        expression: "file:\"C:/Users/Artur Leite/dev/RayTracer/src/raytracer/vulkan_context.odin\".data"
-        auto: 1
-        query: input: ""
-        cursor_line: 166
-        cursor_column: 1
-        mark_line: 166
-        mark_column: 1
-      }
+      expression: "file:\"C:/Users/Artur Leite/dev/demo/main.odin\".data"
+      auto: 1
+      query: input: ""
+      cursor_line: 51
+      cursor_column: 1
+      mark_line: 51
+      mark_column: 1
     }
   }
-  split_x
-  pos: 192 105
-  monitor: "\\\\.\\DISPLAY3"
-  maximized
+  0.157960:
+  {
+    watch: selected expression: "query:threads"
+    watch: expression: "query:targets"
+    watch: expression: "query:breakpoints"
+    watch: expression: "query:watch_pins"
+  }
+  0.184708:
+  {
+    disasm:
+    {
+      selected
+      expression: ""
+      query: input: ""
+    }
+    text:
+    {
+      expression: "query:output"
+      query: input: ""
+      cursor_line: 1
+      cursor_column: 1
+      mark_line: 1
+      mark_column: 1
+    }
+  }
+  0.25:
+  {
+    selected
+    watch: selected expression: "query:call_stack"
+    watch: expression: "query:modules"
+  }
+}
+font_size: 10
 }
 keybindings:
 {
@@ -229,5 +198,6 @@ keybindings:
   { open_palette p ctrl shift }
   { log_marker m ctrl shift alt }
   { toggle_dev_menu d ctrl shift alt }
+  { memory u }
 }
-current_path: "C:/Users/Artur Leite/dev/RayTracer"
+current_path: "C:/Users/Artur Leite/dev/demo"

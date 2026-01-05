@@ -7,9 +7,10 @@
 #extension GL_GOOGLE_include_directive : enable
 
 #define USE_DIRECT_LIGHTING 1
-#define USE_LIGHT_SAMPLING_ONLY 1
-#define USE_BRDF_SAMPLING_ONLY 0
+#define USE_LIGHT_SAMPLING_ONLY 0
 #define USE_MIS 1
+
+const int MAXLIGHTS = 256;
 
 #include "ray_common.glsl"
 #include "random.glsl"
@@ -18,9 +19,9 @@
 hitAttributeEXT vec2 attribs;
 
 layout(location = 0) rayPayloadInEXT RayPayload payload;
-layout(location = 1) rayPayloadEXT ShadowPayload shadowPayload;
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+
 layout(buffer_reference, scalar) buffer Vertices {
     Vertex v[];
 };
@@ -59,15 +60,18 @@ struct BRDFEval {
     float specularPdf;
 };
 
-const float EPS_PDF  = 1e-6;
-const float EPS_COS  = 1e-4;
-const float EPS_VOH  = 1e-4;
-const float MIN_ROUGHNESS = 0.03; // tweak per scene
+const float EPS_PDF = 1e-6;
+const float EPS_COS = 1e-4;
+const float EPS_VOH = 1e-4;
+const float MIN_ROUGHNESS = 0.02; // tweak per scene
 
 // Get selection probability for specular vs diffuse sampling
 float getSpecularProbability(Material material) {
     vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
-    return max3(F0);
+    float baseProb = max3(F0);
+
+    float roughnessInfluence = smoothstep(0.0, 1.0, material.roughness * 0.7);
+    return mix(baseProb, baseProb * 0.5, roughnessInfluence);
 }
 
 float D_GGX(float NoH, float roughness) {
@@ -110,6 +114,7 @@ float luminance(vec3 color) {
     return dot(color, vec3(0.299, 0.587, 0.114));
 }
 
+// Replace evaluateBRDFComponents with this faster version
 BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
     BRDFEval result;
 
@@ -131,9 +136,14 @@ BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
     float NoH = cosTheta(h);
     float VoH = dot(wo, h);
 
+    // Fresnel term
+    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+    vec3 F = F_Schlick(F0, VoH);
+
     // Calculate diffuse term (Lambert)
     float nonMetalWeight = 1.0 - material.metallic;
-    result.diffuse = material.albedo * nonMetalWeight / M_PI;
+    vec3 diffuseAlbedo = material.albedo * nonMetalWeight;
+    result.diffuse = diffuseAlbedo * (vec3(1.0) - F) / M_PI;
     result.diffusePdf = NoL / M_PI;
 
     // Calculate specular microfacet term
@@ -142,10 +152,6 @@ BRDFEval evaluateBRDFComponents(vec3 wo, vec3 wi, Material material) {
 
     // G term (geometric shadowing)
     float G = G_Smith(NoV, NoL, material.roughness);
-
-    // Fresnel term
-    vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
-    vec3 F = F_Schlick(F0, VoH);
 
     result.specular = D * G * F / (4.0 * NoV * NoL);
     result.specularPdf = D * NoH / (4.0 * VoH);
@@ -279,13 +285,12 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
         vec3 toSurface = hitPos - worldPos;
 
         float cosL = dot(worldNormal, normalize(toSurface));
-        if(cosL < 0) {
-          cosL = abs(cosL);
-          worldNormal = -worldNormal;
+        if (cosL < 0) {
+            cosL = abs(cosL);
+            worldNormal = -worldNormal;
         }
 
         if (cosL > 0.0) {
-
             // Transform to world space
             result.position = worldPos;
             result.normal = worldNormal;
@@ -293,24 +298,18 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
             // Calculate direction and distance
             vec3 toLight = result.position - hitPos;
 
-            float safeDist = max(length(toLight), 0.05);
+            float safeDist = max(length(toLight), 0.01);
             result.distance = safeDist;
             result.direction = toLight / result.distance;
-
-            // Calculate triangle area in world space
-            vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
-            vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
-            vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
             float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+            float cosTheta = max(0.0, dot(-result.direction, result.normal));
+            if (cosTheta <= 1e-6) continue; // Back-facing
 
             // Calculate PDF in solid angle measure
-            float cosTheta = max(0.0, dot(-result.direction, result.normal));
-            if (cosTheta <= 1e-8) return result; // Back-facing
-
             float areaPdf = 1.0 / triangleArea;
             float triangleSelectionPdf = 1.0 / float(numTriangles);
 
-            result.pdf = triangleSelectionPdf * areaPdf / cosTheta;
+            result.pdf = triangleSelectionPdf * areaPdf * (result.distance * result.distance) / cosTheta;
 
             result.emission = lightMaterial.emission_color * lightMaterial.emission_power;
             result.valid = true;
@@ -323,7 +322,7 @@ LightSample sampleLight(uint lightIdx, vec3 hitPos, inout uint seed) {
 }
 
 bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
-                             out uint instanceCustomIndex, out uint primIdx, out float tHit)
+    out uint instanceCustomIndex, out uint primIdx, out float tHit)
 {
     rayQueryEXT rq;
     rayQueryInitializeEXT(
@@ -337,7 +336,7 @@ bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
     while (rayQueryProceedEXT(rq)) { /* traverse */ }
 
     if (rayQueryGetIntersectionTypeEXT(rq, true)
-        == gl_RayQueryCommittedIntersectionTriangleEXT)
+            == gl_RayQueryCommittedIntersectionTriangleEXT)
     {
         instanceCustomIndex =
             rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true);
@@ -350,7 +349,11 @@ bool brdfHitsSelectedLightRQ(vec3 origin, vec3 dir, uint mask,
 
 bool isVisibleRQ(vec3 origin, vec3 target, vec3 normal, uint lightInstanceCustomIndex)
 {
-    vec3 offsetFrom = origin + normal * 0.001;
+    float distToTarget = length(target - origin);
+    float epsilon = 0.001;
+
+    vec3 toLight = normalize(target - origin);
+    vec3 offsetFrom = origin + normal * epsilon * sign(dot(normal, toLight));
     vec3 dir = target - offsetFrom;
     float dist = length(dir);
     if (dist <= 0.0) return false;
@@ -365,12 +368,10 @@ bool isVisibleRQ(vec3 origin, vec3 target, vec3 normal, uint lightInstanceCustom
         dir, dist * 0.999
     );
 
-    // proceed until first hit or miss
     while (rayQueryProceedEXT(rq)) { /* nothing */ }
 
     uint committedType = rayQueryGetIntersectionTypeEXT(rq, true);
 
-    // No committed intersection -> visible
     if (committedType == gl_RayQueryCommittedIntersectionNoneEXT)
         return true;
 
@@ -407,33 +408,55 @@ BSDFSample sampleBRDF(vec3 wo, Material material, vec2 random, mat3 basis) {
     if (rnd(payload.seed) < specularWeight) {
         vec3 h = sampleGGX(random, material.roughness);
         vec3 wiLocal = reflect(-wo, h);
-        result.isSpecular = true;
-        result.value = microfacetF(wo, wiLocal, h, material); // Specular value
-        result.direction = wiLocal;
+
+        if (cosTheta(wiLocal) <= 0) {
+            wiLocal = generateCosineWeightedDirection(random);
+            result.isSpecular = false;
+
+            // Calculate proper diffuse BRDF with Fresnel
+            vec3 hDiffuse = normalize(wo + wiLocal);
+            float VoH = clamp(dot(wo, hDiffuse), 0.0, 1.0);
+            vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+            vec3 F = F_Schlick(F0, VoH);
+            vec3 diffuseAlbedo = material.albedo * (1.0 - material.metallic);
+            result.value = diffuseAlbedo * (vec3(1.0) - F) / M_PI;
+            result.direction = wiLocal;
+        } else {
+            result.isSpecular = true;
+            result.value = microfacetF(wo, wiLocal, h, material); // Specular value
+            result.direction = wiLocal;
+        }
     } else {
+        // Sample diffuse (cosine-weighted)
         result.direction = generateCosineWeightedDirection(random);
         result.isSpecular = false;
-        result.value = material.albedo / M_PI;
+
+        // Calculate proper diffuse BRDF with Fresnel
+        vec3 h = normalize(wo + result.direction);
+        float VoH = clamp(dot(wo, h), 0.0, 1.0);
+        vec3 F0 = mix(vec3(0.04), material.albedo, material.metallic);
+        vec3 F = F_Schlick(F0, VoH);
+        vec3 diffuseAlbedo = material.albedo * (1.0 - material.metallic);
+        result.value = diffuseAlbedo * (vec3(1.0) - F) / M_PI;
     }
 
     vec3 h = normalize(wo + result.direction);
     float specularPdf = microfacetPDF(wo, h, material.roughness);
-    float diffusePdf = cosTheta(result.direction) / M_PI;
-    result.pdf = specularWeight * specularPdf + diffuseWeight * diffusePdf;
+    float diffusePdf = max(cosTheta(result.direction), 0.0) / M_PI;
+    result.pdf = specularWeight * specularPdf + (1.0 - specularWeight) * diffusePdf;
+    result.pdf = max(result.pdf, EPS_PDF);
     return result;
 }
 
 // Overload taking triangle area, cos at light, and dist to avoid recomputing.
 float lightPdfFromTriangleHitParams(uint numTris, float triArea,
-                                    float cosThetaLight, float dist)
+    float cosThetaLight, float dist)
 {
     if (triArea <= 0.0 || cosThetaLight <= 1e-6) return 0.0;
 
     float triangleSelectionPdf = 1.0 / float(max(numTris, 1u));
-    float areaPdf              = 1.0 / max(triArea, 1e-4);
-    // Convert area pdf to solid-angle pdf at shading point:
-    // p_dir = p_area * (dist^2 / cosThetaLight)
-    float p_dir = triangleSelectionPdf * areaPdf / cosThetaLight;
+    float areaPdf = 1.0 / max(triArea, 1e-4);
+    float p_dir = triangleSelectionPdf * areaPdf * (dist * dist) / cosThetaLight;
     return max(p_dir, 1e-6);
 }
 
@@ -447,306 +470,114 @@ float calculatePDF(vec3 wo, vec3 wi, Material material) {
 
 // Helper function to evaluate MIS for a specific light
 vec3 evaluateLightMIS(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, uint lightIdx, float lightSelectionPdf, inout uint seed) {
-  vec3 radiance = vec3(0.0);
+    vec3 radiance = vec3(0.0);
 
-  mat3 basis = createBasis(normal);
-  vec3 woLocal = worldToLocal(-viewDir, basis);
+    mat3 basis = createBasis(normal);
+    vec3 woLocal = worldToLocal(-viewDir, basis);
 
-  LightData light = lights_data.lights[lightIdx];
-  ObjectData lightObject = objects_data.objects[light.object_index];
-  Material lightMaterial = materials_data.materials[lightObject.material_index];
+    LightData light = lights_data.lights[lightIdx];
+    ObjectData lightObject = objects_data.objects[light.object_index];
+    Material lightMaterial = materials_data.materials[lightObject.material_index];
 
-  #if USE_LIGHT_SAMPLING_ONLY || USE_MIS
-  LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
+    LightSample lightSample = sampleLight(lightIdx, hitPos, seed);
+    vec3 wiLocal = worldToLocal(lightSample.direction, basis);
 
-  if (lightSample.valid && dot(lightSample.direction, normal) > 0.0) {
-    if (isVisibleRQ(hitPos, lightSample.position, normal, light.object_index)) {
-      vec3 wiLocal = worldToLocal(lightSample.direction, basis);
-
-      if (cosTheta(wiLocal) > 0.0) {
+    if (lightSample.valid && cosTheta(wiLocal) > 1e-4 && isVisibleRQ(hitPos, lightSample.position, normal, light.object_index)) {
         vec3 brdf = evaluateFullBRDF(woLocal, wiLocal, material);
         float lightPdf = lightSample.pdf * lightSelectionPdf;
 
-    #if USE_MIS
+        #if USE_MIS
         float specularProb = getSpecularProbability(material);
         vec3 hLocal = normalize(woLocal + wiLocal);
         float specularPdf = microfacetPDF(woLocal, hLocal, material.roughness);
         float diffusePdf = cosTheta(wiLocal) / M_PI;
         float brdfPdf = specularProb * specularPdf + (1.0 - specularProb) * diffusePdf;
         float weight = misWeightPower(lightPdf, brdfPdf);
-    #else
+        #else
         float weight = 1.0;
-    #endif
+        #endif
 
         vec3 Li = lightSample.emission;
         radiance += brdf * Li * cosTheta(wiLocal) * weight / max(lightPdf, 1e-6);
-      }
     }
-  }
-  #endif
 
-  #if USE_BRDF_SAMPLING_ONLY || USE_MIS
-  {
-    vec2 u = vec2(rnd(seed), rnd(seed));
-    BSDFSample bs = sampleBRDF(woLocal, material, u, basis);
-
-    float cosWi = cosTheta(bs.direction);
-    if (bs.pdf > 0.0 && cosWi > 0.0) {
-        vec3 wiWorld = localToWorld(bs.direction, basis);
-        vec3 origin  = hitPos + normal * 0.001;
-
-        uint hitInstIdx, primIdx;
-        float tHit;
-        bool hit = brdfHitsSelectedLightRQ(origin, wiWorld, 0xFFu, hitInstIdx, primIdx, tHit);
-
-        if (hit && hitInstIdx == light.object_index) {
-            // Build exact p_light at this direction from the *hit triangle*
-            // Fetch triangle and compute its area & cos at light:
-            Indices I = Indices(lightObject.index_address);
-            Vertices V = Vertices(lightObject.vertex_address);
-            ivec3 indT = I.indices[primIdx];
-            Vertex v0T = V.v[indT.x];
-            Vertex v1T = V.v[indT.y];
-            Vertex v2T = V.v[indT.z];
-
-            vec3 p0 = vec3(light.transform * vec4(v0T.pos, 1.0));
-            vec3 p1 = vec3(light.transform * vec4(v1T.pos, 1.0));
-            vec3 p2 = vec3(light.transform * vec4(v2T.pos, 1.0));
-
-            float triArea = 0.5 * length(cross(p1 - p0, p2 - p0));
-            // Light-facing cosine at the hit: use shading point→light direction
-            // (our wiWorld points from P to light, so light normal should face -wiWorld)
-            vec3 nL = normalize(cross(p1 - p0, p2 - p0));
-            float cosThetaLight = max(0.0, dot(-wiWorld, nL));
-
-            float dist = max(tHit, 0.0); // rayQuery gives unit-length ray param
-            float p_light_dir = lightPdfFromTriangleHitParams(light.num_triangles,
-                                                              triArea, cosThetaLight, dist);
-            // Include per-light selection probability (same as in light branch):
-            float lightPdf = p_light_dir * lightSelectionPdf;
-            lightPdf     = max(lightPdf, 1e-6);
-            float p_brdf = max(bs.pdf, 1e-6);
-            // Robustness guards
-            #if USE_MIS
-            // MIS weight (power heuristic)
-            float w = (p_brdf * p_brdf) / (p_brdf * p_brdf + lightPdf * lightPdf);
-            #else
-            float w = 1.0;
-            #endif
-
-            vec3 Li = lightMaterial.emission_color * lightMaterial.emission_power;
-
-            vec3 contrib = bs.value * Li * cosWi * w / p_brdf;
-
-            // Optional firefly clamp (comment out to be fully unbiased)
-            // float lum = dot(contrib, vec3(0.2126, 0.7152, 0.0722));
-            // if (lum > 50.0) contrib *= 50.0 / lum;
-
-            if (!(any(isnan(contrib)) || any(isinf(contrib)))) 
-                radiance += contrib;
-        }
-    }
-  }
-  #endif
-
-  return radiance;
+    return radiance;
 }
 
-// Method 1: Power/Distance Importance Sampling (Default - Good for most scenes)
-// Performance: 2 shadow rays per bounce, 3-5x quality improvement over uniform
-// Best for: General scenes with varied lighting
+float computeLightWeight(vec3 hitPos, uint lightIdx) {
+    LightData light = lights_data.lights[lightIdx];
+    ObjectData lightObject = objects_data.objects[light.object_index];
+    Material lightMaterial = materials_data.materials[lightObject.material_index];
+
+    vec3 lightCenter = vec3(light.transform[3]);
+    vec3 toLight = lightCenter - hitPos;
+    float distanceSq = dot(toLight, toLight);
+
+    float power = lightMaterial.emission_power;
+    float distanceFactor = 1.0 / max(distanceSq, 0.001);
+
+    return power * distanceFactor;
+}
+
+float computeTotalLightWeight(vec3 hitPos, bool skipCurrentObject) {
+    int numLights = lights_data.lights.length();
+    float totalWeight = 0.0;
+    const int maxLights = min(numLights, MAXLIGHTS);
+
+    for (int i = 0; i < maxLights; i++) {
+        if (skipCurrentObject && gl_InstanceCustomIndexEXT == lights_data.lights[i].object_index) continue;
+
+        totalWeight += computeLightWeight(hitPos, i);
+    }
+
+    return totalWeight;
+}
+
+float computeLightSelectionPdf(vec3 hitPos, uint lightIdx) {
+    float weight = computeLightWeight(hitPos, lightIdx);
+    float totalWeight = computeTotalLightWeight(hitPos, false);
+    if (totalWeight <= 0.0) return 0.0;
+    return weight / totalWeight;
+}
+
 vec3 estimateDirectLightingMIS_PowerImportance(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
     vec3 totalRadiance = vec3(0.0);
 
     int numLights = lights_data.lights.length();
     if (numLights == 0) return totalRadiance;
 
-    // Calculate importance weights for all lights
     float totalWeight = 0.0;
-    float weights[16]; // Assuming max 16 lights
+    float weights[MAXLIGHTS];
+    const int maxLights = min(numLights, MAXLIGHTS);
 
-    for (int i = 0; i < min(numLights, 16); i++) {
-        LightData light = lights_data.lights[i];
-        ObjectData lightObject = objects_data.objects[light.object_index];
-        Material lightMaterial = materials_data.materials[lightObject.material_index];
+    uint currentObjectIndex = gl_InstanceCustomIndexEXT;
 
-        vec3 lightCenter = vec3(light.transform[3]);
-        vec3 toLight = lightCenter - hitPos;
-        float distanceSq = max(0.01, dot(toLight, toLight));
+    for (int i = 0; i < maxLights; i++) {
+        if (currentObjectIndex == lights_data.lights[i].object_index)
+            continue;
 
-        // Estimate light contribution: Power / Distance^2
-        float power = luminance(lightMaterial.emission_color) * lightMaterial.emission_power;
-        float cosTheta = max(0.0, dot(normal, normalize(toLight)));
-
-        // Include surface orientation in importance
-        weights[i] = power * cosTheta / distanceSq;
+        weights[i] = computeLightWeight(hitPos, i);
         totalWeight += weights[i];
     }
 
     if (totalWeight <= 0.0) return totalRadiance;
 
-    // Sample light based on importance
-    float r = rnd(seed) * totalWeight;
-    float accumulatedWeight = 0.0;
-    uint selectedLight = 0;
+    float r1 = rnd(seed) * totalWeight;
+    uint selectedLight = -1;
 
-    for (int i = 0; i < min(numLights, 16); i++) {
-        accumulatedWeight += weights[i];
-        if (r <= accumulatedWeight) {
+    for (int i = 0; i < maxLights; i++) {
+        r1 -= weights[i];
+        if (r1 <= 0) {
             selectedLight = i;
             break;
         }
     }
 
-    float lightSelectionPdf = weights[selectedLight] / totalWeight;
+    if (selectedLight == -1) return totalRadiance;
 
-    // Apply MIS with the selected light
-    totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, selectedLight, lightSelectionPdf, seed);
+    float lightPdf = weights[selectedLight] / totalWeight;
 
-    return totalRadiance;
-}
-
-// Method 3: Visibility - Aware Light Selection ( Highest quality, more cost )
-// Performance: 3-16 shadow rays per bounce, 10-20x quality improvement
-// Best for: Complex scenes with occlusion, final quality renders
-vec3 estimateDirectLightingMIS_VisibilityAware(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
-    vec3 totalRadiance = vec3(0.0);
-
-    int numLights = lights_data.lights.length();
-    if (numLights == 0) return totalRadiance;
-
-    // Pre-compute visibility for important lights
-    float totalWeight = 0.0;
-    float weights[16];
-    bool visible[16];
-
-    for (int i = 0; i < min(numLights, 16); i++) {
-        LightData light = lights_data.lights[i];
-        ObjectData lightObject = objects_data.objects[light.object_index];
-        Material lightMaterial = materials_data.materials[lightObject.material_index];
-
-        vec3 lightCenter = vec3(light.transform[3]);
-        vec3 toLight = lightCenter - hitPos;
-        float distance = length(toLight);
-        vec3 lightDir = toLight / distance;
-
-        // Quick visibility test
-        if(dot(normal, lightDir) <= 0.0) {
-            visible[i] = false;
-            weights[i] = 0.0;
-            continue;
-        }
-
-        if (isVisibleRQ(hitPos, lightCenter, normal, light.object_index)) {
-            visible[i] = true;
-            float power = luminance(lightMaterial.emission_color) * lightMaterial.emission_power;
-            float cosTheta = dot(normal, lightDir);
-            weights[i] = power * cosTheta / (distance * distance);
-        } else {
-            visible[i] = false;
-            weights[i] = 0.0;
-        }
-
-        totalWeight += weights[i];
-    }
-
-    if (totalWeight <= 0.0) return vec3(0.0);
-
-    // Sample from visible lights only
-    float r = rnd(seed) * totalWeight;
-    float accum = 0.0;
-    uint selectedLight = 0;
-
-    for (int i = 0; i < min(numLights, 16); i++) {
-        if (visible[i]) {
-            accum += weights[i];
-            if (r <= accum) {
-                selectedLight = i;
-                break;
-            }
-        }
-    }
-
-    float lightSelectionPdf = weights[selectedLight] / totalWeight;
-    totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, selectedLight, lightSelectionPdf, seed);
-
-    return totalRadiance;
-}
-
-// Method 2: Multiple Light Sampling (Best for scenes with 2-8 lights)
-// Performance: 4-8 shadow rays per bounce, 5-10x quality improvement
-// Best for: Architectural scenes, product visualization
-vec3 estimateDirectLightingMIS_MultipleLights(vec3 hitPos, vec3 normal, Material material, vec3 viewDir, inout uint seed) {
-    vec3 totalRadiance = vec3(0.0);
-
-    int numLights = lights_data.lights.length();
-    if (numLights == 0) return totalRadiance;
-
-    // For scenes with few lights, sample all lights
-    if (numLights <= 4) {
-        for (int i = 0; i < numLights; i++) {
-            float lightSelectionPdf = 1.0 / float(numLights); // Not random selection
-            totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, i, lightSelectionPdf, seed);
-        }
-        return totalRadiance;
-    }
-
-    // For many lights, use importance sampling to pick subset
-    const int maxSamples = 2; // Sample 2 lights
-
-    float totalWeight = 0.0;
-    float weights[16];
-
-    // Calculate weights (same as power importance method)
-    for (int i = 0; i < min(numLights, 16); i++) {
-        LightData light = lights_data.lights[i];
-        ObjectData lightObject = objects_data.objects[light.object_index];
-        Material lightMaterial = materials_data.materials[lightObject.material_index];
-
-        vec3 lightCenter = vec3(light.transform[3]);
-        vec3 toLight = lightCenter - hitPos;
-        float distanceSq = max(0.01, dot(toLight, toLight));
-
-        float power = luminance(lightMaterial.emission_color) * lightMaterial.emission_power;
-        float cosTheta = max(0.0, dot(normal, normalize(toLight)));
-
-        weights[i] = power * cosTheta / distanceSq;
-        totalWeight += weights[i];
-    }
-
-    if (totalWeight <= 0.0) return totalRadiance;
-
-    // Sample multiple lights without replacement
-    bool selected[16];
-    for (int i = 0; i < 16; i++) selected[i] = false;
-
-    for (int s = 0; s < maxSamples; s++) {
-        // Weighted sampling without replacement
-        float remainingWeight = 0.0;
-        for (int i = 0; i < min(numLights, 16); i++) {
-            if (!selected[i]) remainingWeight += weights[i];
-        }
-
-        if (remainingWeight <= 0.0) break;
-
-        float r = rnd(seed) * remainingWeight;
-        float accum = 0.0;
-        uint selectedLight = 0;
-
-        for (int i = 0; i < min(numLights, 16); i++) {
-            if (!selected[i]) {
-                accum += weights[i];
-                if (r <= accum) {
-                    selectedLight = i;
-                    selected[i] = true;
-                    break;
-                }
-            }
-        }
-
-        float lightSelectionPdf = weights[selectedLight] / totalWeight;
-        totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, selectedLight, lightSelectionPdf, seed) / float(maxSamples);
-    }
+    totalRadiance += evaluateLightMIS(hitPos, normal, material, viewDir, selectedLight, lightPdf, seed);
 
     return totalRadiance;
 }
@@ -759,7 +590,7 @@ vec3 estimateDirectLightingMIS(vec3 hitPos, vec3 normal, Material material, vec3
 void main() {
     ObjectData object = objects_data.objects[gl_InstanceCustomIndexEXT];
     Material mat = materials_data.materials[object.material_index];
-    //
+
     Vertices vert = Vertices(object.vertex_address);
     Indices indices = Indices(object.index_address);
 
@@ -784,22 +615,21 @@ void main() {
 
     bool isEmissive = (mat.emission_power > 0.0);
 
-  #if USE_DIRECT_LIGHTING
-    if (isEmissive && (payload.firstBounce || payload.isSpecular)) {
-        // If the material is emissive and this is the first bounce or a specular reflection,
-        // we handle it differently to avoid double counting emission.
-        payload.color += payload.throughput * mat.emission_color * mat.emission_power;
+    #if USE_DIRECT_LIGHTING
+    #if USE_MIS
+    bool didDirectIllumination = false;
+    float p_sample_light = clamp(mat.roughness, 0.1, 0.9);
+    float p = rnd(payload.seed);
+    if (p < p_sample_light) {
+        vec3 directLight = estimateDirectLightingMIS(worldPos, worldNrm, mat, incomingRayDir, payload.seed);
+        payload.color += payload.throughput * directLight / p_sample_light;
+        didDirectIllumination = true;
     }
-  #else
-    if (isEmissive) {
-      payload.color += payload.throughput * mat.emission_color * mat.emission_power;
-    }
-  #endif
-
-  #if USE_DIRECT_LIGHTING
+    #else
     vec3 directLight = estimateDirectLightingMIS(worldPos, worldNrm, mat, incomingRayDir, payload.seed);
     payload.color += payload.throughput * directLight;
-  #endif
+    #endif
+    #endif
 
     mat3 basis = createBasis(worldNrm);
     vec3 woLocal = worldToLocal(-incomingRayDir, basis);
@@ -808,12 +638,66 @@ void main() {
     vec2 random = vec2(rnd(payload.seed), rnd(payload.seed));
     BSDFSample brdfSample = sampleBRDF(woLocal, mat, random, basis);
 
+    if (isEmissive) {
+        #if USE_DIRECT_LIGHTING
+        #if USE_MIS
+        if (payload.firstBounce || payload.isSpecular) {
+            payload.color += payload.throughput * mat.emission_color * mat.emission_power;
+        } else if (!payload.didDirectIllumination) {
+            uint lightIdx = object.light_index;
+            LightData light = lights_data.lights[lightIdx];
+
+            if (lightIdx != -1) {
+                float dist = length(worldPos - payload.previousHitPos);
+                float distSq = dist * dist;
+
+                float cosLight = max(0.0, dot(worldNrm, -incomingRayDir));
+
+                vec3 worldV0 = vec3(light.transform * vec4(v0.pos, 1.0));
+                vec3 worldV1 = vec3(light.transform * vec4(v1.pos, 1.0));
+                vec3 worldV2 = vec3(light.transform * vec4(v2.pos, 1.0));
+
+                float triangleArea = 0.5 * length(cross(worldV1 - worldV0, worldV2 - worldV0));
+                uint numTriangles = light.num_triangles;
+
+                float areaPdf = 1.0 / triangleArea;
+                float triangleSelectionPdf = 1.0 / float(numTriangles);
+
+                float pdfGeo = triangleSelectionPdf * areaPdf * distSq / cosLight;
+
+                float lightSelectionPdf = computeLightSelectionPdf(worldPos, lightIdx);
+
+                float lightPdf = lightSelectionPdf * pdfGeo;
+
+                float brdfPdf = payload.previousBrdfPdf;
+
+                float misWeight = misWeightPower(brdfPdf, lightPdf);
+                payload.color += payload.throughput * mat.emission_color * mat.emission_power * misWeight / (1 - payload.p_sample_light);
+            }
+        }
+        #else
+        if (payload.firstBounce || payload.isSpecular) {
+            payload.color += payload.throughput * mat.emission_color * mat.emission_power;
+        }
+        #endif
+        #else
+        payload.color += payload.throughput * mat.emission_color * mat.emission_power;
+        #endif
+    }
+
+    #if USE_MIS
+    payload.didDirectIllumination = didDirectIllumination;
+    payload.p_sample_light = p_sample_light;
+    #endif
+
     if (brdfSample.pdf > 0.0 && cosTheta(brdfSample.direction) > 0.0) {
         payload.throughput *= brdfSample.value * cosTheta(brdfSample.direction) / brdfSample.pdf;
         payload.nextDirection = localToWorld(brdfSample.direction, basis);
         payload.hitPosition = worldPos;
         payload.hit = true;
         payload.isSpecular = brdfSample.isSpecular;
+        payload.previousBrdfPdf = brdfSample.pdf;
+        payload.previousHitPos = worldPos;
     } else {
         payload.hit = false; // Terminate path
     }

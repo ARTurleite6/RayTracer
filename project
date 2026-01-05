@@ -1,12 +1,32 @@
 // raddbg 0.9.21 project file
 
+recent_file: path: "../demo/main.odin"
+recent_file: path: "../sidekick/src/graphics/graphics_directx.odin"
+recent_file: path: "../sidekick/src/window_windows.odin"
+recent_file: path: "../sidekick/sidekick/gfx/gfx_directx.odin"
+recent_file: path: "../sidekick/sidekick/main.odin"
+recent_file: path: "../tmp/main.odin"
+recent_file: path: "../odin-c-bindgen/src/main.odin"
+recent_file: path: "../Odin/base/runtime/entry_windows.odin"
+recent_file: path: "../demo/src/main.odin"
+recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/startup/exe_common.inl"
+recent_file: path: "../demo/src/main.cpp"
+recent_file: path: "../../../../Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include/print"
+recent_file: path: "src/raytracer/ui.odin"
+recent_file: path: "d:/os/obj/amd64fre/minkernel/crts/ucrt/src/appcrt/startup/mt/objfre/amd64/minkernel/crts/ucrt/src/appcrt/startup/abort.cpp"
+recent_file: path: "src/raytracer/gpu_scene.odin"
+recent_file: path: "../Odin/base/runtime/error_checks.odin"
+recent_file: path: "../Odin/base/runtime/procs_windows_amd64.odin"
+recent_file: path: "src/raytracer/scene_loader.odin"
+recent_file: path: "src/raytracer/buffer.odin"
 recent_file: path: "src/raytracer/vulkan_context.odin"
-recent_file: path: "src/raytracer/command_pool.odin"
 recent_file: path: "src/raytracer/raytracing_renderer.odin"
 recent_file: path: "src/raytracer/application.odin"
+recent_file: path: "../Odin/base/runtime/core.odin"
+recent_file: path: "../demo/src/main.zig"
+recent_file: path: "src/raytracer/command_pool.odin"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcstartup/src/gs/amd64/amdsecgs.asm"
 recent_file: path: "src/raytracer/window.odin"
-recent_file: path: "../Odin/base/runtime/core.odin"
 recent_file: path: "D:/a/_work/1/s/src/vctools/crt/vcruntime/src/string/amd64/memset.asm"
 recent_file: path: "src/raytracer/swapchain_manager.odin"
 recent_file: path: "../Odin/base/runtime/internal.odin"
@@ -14,9 +34,7 @@ recent_file: path: "../Odin/core/mem/tracking_allocator.odin"
 recent_file: path: "../Odin/base/runtime/core_builtin.odin"
 recent_file: path: "external/odin-vk-bootstrap/vkb/swapchain.odin"
 recent_file: path: "../Odin/base/runtime/heap_allocator.odin"
-recent_file: path: "src/raytracer/gpu_scene.odin"
 recent_file: path: "src/raytracer/storage_buffer_set.odin"
-recent_file: path: "src/raytracer/buffer.odin"
 recent_file: path: "../Odin/base/runtime/heap_allocator_windows.odin"
 recent_file: path: "external/odin-vk-bootstrap/vkb/swapchain_builder.odin"
 recent_file: path: "../../../../SDKBuild/build-X64-1.4.321.0/Vulkan-Utility-Libraries/include/vulkan/utility/vk_concurrent_unordered_map.hpp"
@@ -24,7 +42,6 @@ recent_file: path: "src/raytracer/descriptor_set.odin"
 recent_file: path: "src/raytracer/resource_cache.odin"
 recent_file: path: "src/raytracer/command_buffer.odin"
 recent_file: path: "../../../../src/llvm_package_18.1.8/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp"
-recent_file: path: "../Odin/base/runtime/entry_windows.odin"
 target:
 {
   executable: "pathtracer.exe"
@@ -63,15 +80,102 @@ target:
 {
   executable: "pathtracer.exe"
   working_directory: ""
+}
+target:
+{
+  executable: "../demo/zig-out/bin/my_program.exe"
+  working_directory: "../demo/zig-out/bin"
+}
+breakpoint:
+{
+  source_location: "../demo/src/main.zig:19:1"
+  hit_count: 0
+}
+target:
+{
+  executable: "../demo/build/windows/x64/debug/demo.exe"
+  working_directory: "../demo/build/windows/x64/debug"
+}
+target:
+{
+  executable: "pathtracer.exe"
+  working_directory: ""
+}
+breakpoint:
+{
+  source_location: "../demo/src/main.cpp:39:1"
+  hit_count: 0
+}
+target:
+{
+  executable: "../demo/build/windows/x64/debug/demo.exe"
+  working_directory: "../demo/build/windows/x64/debug"
+}
+target:
+{
+  executable: "../demo/main.exe"
+  working_directory: "../demo"
+}
+breakpoint:
+{
+  source_location: "../demo/src/main.odin:92:1"
+  hit_count: 0
+}
+target:
+{
+  executable: "../odin-c-bindgen/bindgen.exe"
+  working_directory: "../odin-c-bindgen"
+}
+target:
+{
+  executable: "../engine/build/engine.exe"
+  working_directory: "../engine/build"
+}
+target:
+{
+  executable: "../odin-c-bindgen/bindgen.exe"
+  working_directory: "../odin-c-bindgen"
+  arguments: "C:/Users/Artur Leite/dev/tmp/flecs"
+}
+target:
+{
+  executable: "../tmp/tmp.exe"
+  working_directory: "../tmp"
+}
+breakpoint:
+{
+  source_location: "../tmp/main.odin:26:1"
+  hit_count: 0
+}
+target:
+{
+  executable: "../sidekick/sidekick.exe"
+  working_directory: "../sidekick"
+}
+target:
+{
+  executable: "../sidekick/sidekick.exe"
+  working_directory: "../sidekick"
+  debug_subprocesses: 1
+}
+target:
+{
+  executable: "../sidekick/sidekick.exe"
+  working_directory: "../sidekick"
+}
+breakpoint:
+{
+  source_location: "../sidekick/sidekick/gfx/gfx_directx.odin:67:1"
+  hit_count: 0
+}
+target:
+{
+  executable: "../sidekick/sidekick.exe"
+  working_directory: "../sidekick"
+}
+target:
+{
+  executable: "../demo/demo.exe"
+  working_directory: "../demo"
   enabled: 1
-}
-breakpoint:
-{
-  source_location: "src/raytracer/raytracing_renderer.odin:121:1"
-  hit_count: 2
-}
-breakpoint:
-{
-  source_location: "src/raytracer/vulkan_context.odin:166:1"
-  hit_count: 1
 }

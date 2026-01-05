@@ -15,7 +15,7 @@ make_uniform_buffer_set :: proc(
 	bs.buffers = make([]Buffer, frames_in_flight, allocator)
 
 	for &b in bs.buffers {
-		buffer_init(
+		_ = buffer_init(
 			&b,
 			ctx,
 			size,
@@ -42,3 +42,4 @@ uniform_buffer_set_destroy :: proc(
 	}
 	delete(bs.buffers, allocator)
 }
+

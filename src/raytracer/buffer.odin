@@ -25,6 +25,7 @@ Buffer_Error :: enum {
 	Invalid_Size,
 }
 
+@(require_results)
 buffer_init :: proc(
 	buffer: ^Buffer,
 	ctx: ^Vulkan_Context,
@@ -33,8 +34,10 @@ buffer_init :: proc(
 	memory_usage: vma.Memory_Usage,
 	alignment: vk.DeviceSize = 0,
 ) -> Buffer_Error {
-	assert(size > 0, "A buffer must have a size greater than 0")
 	buffer^ = {}
+	if size == 0 {
+		return .Invalid_Size
+	}
 	buffer.ctx = ctx
 	buffer.size = vk.DeviceSize(size)
 	buffer.usage = usage | {.TRANSFER_SRC, .TRANSFER_DST, .SHADER_DEVICE_ADDRESS}
@@ -140,6 +143,9 @@ buffer_descriptor_info :: proc(buffer: Buffer) -> vk.DescriptorBufferInfo {
 }
 
 buffer_map :: proc(buffer: ^Buffer) -> (rawptr, Buffer_Error) {
+	if buffer.handle == 0 {
+		return {}, .Mapping_Failed
+	}
 	if result := vk_check(
 		vma.map_memory(buffer.ctx.device.allocator, buffer.allocation, &buffer.mapped_data),
 		"Failed to map buffer",
@@ -151,6 +157,9 @@ buffer_map :: proc(buffer: ^Buffer) -> (rawptr, Buffer_Error) {
 }
 
 buffer_unmap :: proc(buffer: ^Buffer) {
+	if buffer.handle == 0 {
+		return
+	}
 	vma.unmap_memory(buffer.ctx.device.allocator, buffer.allocation)
 }
 
@@ -164,6 +173,9 @@ buffer_write_poly :: proc(buffer: ^Buffer, data: ^$T, offset: vk.DeviceSize = 0)
 }
 
 buffer_write_rawptr :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.DeviceSize) {
+	if buffer.handle == 0 || buffer.allocation == nil {
+		return
+	}
 	assert(buffer.mapped_data != nil)
 	dst_ptr := rawptr(uintptr(buffer.mapped_data) + uintptr(offset))
 
@@ -175,6 +187,9 @@ buffer_write_rawptr :: proc(buffer: ^Buffer, data: rawptr, offset, size: vk.Devi
 }
 
 buffer_flush :: proc(buffer: ^Buffer, offset, size: vk.DeviceSize) {
+	if buffer.handle == 0 {
+		return
+	}
 	if size == vk.DeviceSize(vk.WHOLE_SIZE) {
 		_ = vk_check(
 			vma.flush_allocation(
@@ -201,3 +216,4 @@ buffer_get_device_address :: proc(buffer: Buffer) -> vk.DeviceAddress {
 
 	return vk.GetBufferDeviceAddress(vulkan_get_device_handle(buffer.ctx), &address_info)
 }
+

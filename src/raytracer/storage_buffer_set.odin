@@ -24,7 +24,7 @@ make_storage_buffer_set :: proc(
 			{.STORAGE_BUFFER},
 			.Cpu_To_Gpu,
 			ctx.device.physical_device.properties.limits.minStorageBufferOffsetAlignment,
-		)
+		) or_break
 	}
 
 	return bs
@@ -50,3 +50,4 @@ storage_buffer_set_write :: proc(bs: ^Storage_Buffer_Set, data: ^$T, offset: vk.
 		buffer_write(&buffer, data, offset = offset)
 	}
 }
+

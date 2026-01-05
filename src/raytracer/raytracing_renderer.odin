@@ -11,6 +11,7 @@ Raytracing_Renderer :: struct {
 	ctx:                 Vulkan_Context,
 	scene:               ^Scene,
 	gpu_scene:           GPU_Scene,
+	camera:              ^Camera,
 	camera_ubo:          Uniform_Buffer_Set,
 	output_images:       Image_Set,
 	window:              ^Window,
@@ -19,6 +20,8 @@ Raytracing_Renderer :: struct {
 	current_image_index: u32,
 	current_cmd:         Command_Buffer,
 	accumulation_frame:  u32,
+	accumulation_limit:  Maybe(u32),
+	background_color:    [3]f32,
 
 	// different render passes
 	ui_ctx:              UI_Context,
@@ -69,6 +72,9 @@ raytracing_renderer_init :: proc(
 	)
 
 	ui_context_init(&renderer.ui_ctx, &renderer.ctx, window^)
+
+
+	renderer.background_color = {0.53, 0.81, 0.92}
 }
 
 raytracing_renderer_destroy :: proc(renderer: ^Raytracing_Renderer) {
@@ -115,6 +121,8 @@ raytracing_renderer_on_resize :: proc(renderer: ^Raytracing_Renderer, width, hei
 		{extent = {width = u32(width), height = u32(height)}, preferred_mode = .MAILBOX},
 		resizing = true,
 	)
+
+	renderer.accumulation_frame = 0
 }
 
 raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
@@ -138,7 +146,12 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 			//TODO: remove partial
 			switch change.type {
 			case .Material_Changed:
-				gpu_scene_update_material(&renderer.gpu_scene, renderer.scene, change.index)
+				gpu_scene_update_material(
+					&renderer.gpu_scene,
+					&renderer.ctx,
+					renderer.scene,
+					change.index,
+				)
 			case .Object_Material_Changed:
 				gpu_scene_update_object(
 					&renderer.gpu_scene,
@@ -174,78 +187,87 @@ raytracing_renderer_begin_frame :: proc(renderer: ^Raytracing_Renderer) {
 	}
 }
 
-raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer, camera: ^Camera) {
+raytracing_renderer_set_camera :: proc(renderer: ^Raytracing_Renderer, camera: ^Camera) {
+	renderer.camera = camera
+}
+
+raytracing_renderer_render_scene :: proc(renderer: ^Raytracing_Renderer) {
 	cmd := &renderer.current_cmd
-
-	extent := renderer.ctx.swapchain_manager.extent
-	output_image: ^Image
-	if camera.dirty {
+	if renderer.camera.dirty {
 		renderer.accumulation_frame = 0
-		camera.dirty = false
+		renderer.camera.dirty = false
 	}
 
-	ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
-	update_camera_ubo(renderer, ubo_buffer, camera)
-	spec := Raytracing_Spec {
-		rgen_shader         = &renderer.shaders[0],
-		miss_shaders        = {&renderer.shaders[1], &renderer.shaders[2]},
-		closest_hit_shaders = {&renderer.shaders[3]},
-		max_tracing_depth   = 2,
-	}
-	command_buffer_set_raytracing_program(cmd, spec)
+	output_image: ^Image
+	extent := renderer.ctx.swapchain_manager.extent
 
-	// Set 0
-	command_buffer_bind_resource(
-		cmd,
-		0,
-		0,
-		vk.WriteDescriptorSetAccelerationStructureKHR {
-			sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
-			accelerationStructureCount = 1,
-			pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
-		},
-	)
-	command_buffer_bind_resource(
-		cmd,
-		0,
-		1,
-		buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
-	)
-	command_buffer_bind_resource(
-		cmd,
-		0,
-		2,
-		buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
-	)
-	command_buffer_bind_resource(
-		cmd,
-		0,
-		3,
-		buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
-	)
-	// Set 1
-	command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+	if limit, exists_limit := renderer.accumulation_limit.?;
+	   !exists_limit || renderer.accumulation_frame < limit {
 
-	// Set 2
-	output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
-	command_buffer_bind_resource(
-		cmd,
-		2,
-		0,
-		vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
-	)
+		ubo_buffer := uniform_buffer_set_get(&renderer.camera_ubo, renderer.ctx.current_frame)
+		update_camera_ubo(renderer, ubo_buffer, renderer.camera)
+		spec := Raytracing_Spec {
+			rgen_shader         = &renderer.shaders[0],
+			miss_shaders        = {&renderer.shaders[1], &renderer.shaders[2]},
+			closest_hit_shaders = {&renderer.shaders[3]},
+			max_tracing_depth   = 2,
+		}
+		command_buffer_set_raytracing_program(cmd, spec)
 
-	command_buffer_push_constant_range(
-		cmd,
-		0,
-		mem.any_to_bytes(
-			Raytracing_Push_Constant {
-				clear_color = {0.2, 0.2, 0.2},
-				accumulation_frame = renderer.accumulation_frame,
+		// Set 0
+		command_buffer_bind_resource(
+			cmd,
+			0,
+			0,
+			vk.WriteDescriptorSetAccelerationStructureKHR {
+				sType = .WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+				accelerationStructureCount = 1,
+				pAccelerationStructures = &renderer.gpu_scene.tlas.handle,
 			},
-		),
-	)
-	command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
+		)
+		command_buffer_bind_resource(
+			cmd,
+			0,
+			1,
+			buffer_descriptor_info(renderer.gpu_scene.objects_buffer.buffers[0]),
+		)
+		command_buffer_bind_resource(
+			cmd,
+			0,
+			2,
+			buffer_descriptor_info(renderer.gpu_scene.materials_buffer.buffers[0]),
+		)
+
+		command_buffer_bind_resource(
+			cmd,
+			0,
+			3,
+			buffer_descriptor_info(renderer.gpu_scene.lights_buffer.buffers[0]),
+		)
+		// Set 1
+		command_buffer_bind_resource(cmd, 1, 0, buffer_descriptor_info(ubo_buffer^))
+
+		// Set 2
+		output_image_view := image_set_get_view(renderer.output_images, renderer.ctx.current_frame)
+		command_buffer_bind_resource(
+			cmd,
+			2,
+			0,
+			vk.DescriptorImageInfo{imageView = output_image_view, imageLayout = .GENERAL},
+		)
+
+		command_buffer_push_constant_range(
+			cmd,
+			0,
+			mem.any_to_bytes(
+				Raytracing_Push_Constant {
+					clear_color = renderer.background_color,
+					accumulation_frame = renderer.accumulation_frame,
+				},
+			),
+		)
+		command_buffer_trace_rays(cmd, extent.width, extent.height, 1)
+	}
 	output_image = image_set_get(&renderer.output_images, renderer.ctx.current_frame)
 
 	{
@@ -322,7 +344,10 @@ raytracing_renderer_end_frame :: proc(renderer: ^Raytracing_Renderer) {
 	ctx_swapchain_present(&renderer.ctx, renderer.current_cmd.buffer, renderer.current_image_index)
 
 	command_buffer_reset(&renderer.current_cmd)
-	renderer.accumulation_frame += 1
+	if limit, exists_limit := renderer.accumulation_limit.?;
+	   !exists_limit || renderer.accumulation_frame < limit {
+		renderer.accumulation_frame += 1
+	}
 }
 
 @(private = "file")
@@ -338,3 +363,4 @@ update_camera_ubo :: proc(renderer: ^Raytracing_Renderer, ubo_buffer: ^Buffer, c
 	buffer_flush(ubo_buffer, 0, ubo_buffer.size)
 	buffer_unmap(ubo_buffer)
 }
+

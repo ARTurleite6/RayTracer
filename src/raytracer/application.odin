@@ -29,31 +29,33 @@ Application :: struct {
 application_init :: proc(
 	window_width, window_height: c.int,
 	window_title: cstring,
-	scene_path: Maybe(string) = nil,
+	scene_path: string,
+	window_fullscreen := false,
 ) -> (
 	app: ^Application,
 	err: Error,
 ) {
 	app = &g_application
 	app.running = true
-	// TODO: change this
-	// if scene_path, ok := scene_path.?; ok {
-	// 	app.scene = load_scene_from_file(scene_path) or_return
-	// } else {
-	// 	app.scene = create_scene()
-	// }
 
-	app.scene, _ = load_scene_from_gltf("models/cornell_box/scene_with_light.glb")
+	app.scene = load_scene_from_gltf(scene_path) or_return
 	app.ctx = context
 	app.window = new(Window)
 	app.minimized = false
-	window_init(app.window, window_width, window_height, window_title) or_return
+	window_init(
+		app.window,
+		window_width,
+		window_height,
+		window_title,
+		fullscreen = window_fullscreen,
+	) or_return
 	camera_controller_init(&app.camera_controller, {0, 0, -3}, window_aspect_ratio(app.window^))
 	window_set_window_user_pointer(app.window, app.window)
 	window_set_event_handler(app.window, application_event_handler(app))
 
 	raytracing_renderer_init(&app.renderer, app.window)
 	raytracing_renderer_set_scene(&app.renderer, &app.scene)
+	raytracing_renderer_set_camera(&app.renderer, &app.camera_controller.camera)
 
 	return
 }
@@ -100,7 +102,7 @@ application_render :: proc(app: ^Application) {
 
 	raytracing_renderer_begin_frame(&app.renderer)
 	defer raytracing_renderer_end_frame(&app.renderer)
-	raytracing_renderer_render_scene(&app.renderer, &app.camera_controller.camera)
+	raytracing_renderer_render_scene(&app.renderer)
 	ui_render(&app.renderer)
 }
 

@@ -3,6 +3,7 @@ package raytracer
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import glm "core:math/linalg"
 import "core:slice"
 import "core:strings"
 import imgui "external:odin-imgui"
@@ -165,10 +166,96 @@ ui_render :: proc(renderer: ^Raytracing_Renderer) {
 @(private = "file")
 render_scene_properties :: proc(renderer: ^Raytracing_Renderer, device: ^Device) {
 	if imgui.Begin("Scene Properties") {
+		bg_color := renderer.background_color
+		if imgui.ColorEdit3("Background Color", &bg_color) {
+			renderer.background_color = bg_color
+			renderer.accumulation_frame = 0
+		}
+
+		// Camera controls section
+		render_camera_controls(renderer)
+
 		render_object_properties(renderer)
 		render_material_properties(renderer)
 	}
 	imgui.End()
+}
+
+
+@(private = "file")
+render_camera_controls :: proc(renderer: ^Raytracing_Renderer) {
+	if imgui.CollapsingHeader("Camera", {.DefaultOpen}) {
+		camera := renderer.camera
+
+		// Maintain a persistent target for the camera
+		@(static) target: Vec3
+		@(static) initialized := false
+
+		// Initialize target on first run or update if camera has moved externally
+		if !initialized {
+			// Set initial target 10 units in front of camera
+			target = camera.position + camera.forward * 10
+			initialized = true
+		} else if camera.dirty {
+			// If camera moved externally (via keyboard/mouse), update the target
+			target = camera.position + camera.forward * 10
+		}
+
+		// Camera position controls
+		imgui.Text("Camera Position")
+		position := camera.position
+		position_changed := imgui.InputFloat3("Position##CamPos", &position)
+
+		// Target position controls
+		imgui.Text("Look At Target")
+		target_changed := imgui.InputFloat3("Target##CamTarget", &target)
+
+		imgui.SameLine()
+		help_marker("Define a point in the world for the camera to look at")
+
+		// Camera controls
+		imgui.Spacing()
+		if position_changed || target_changed || imgui.Button("Apply Camera Changes", {0, 0}) {
+			// Update camera position
+			camera.position = position
+
+			// Safety check to prevent position and target from being the same
+			if glm.distance(position, target) < 0.001 {
+				target = position + Vec3{0, 0, 1} // Move target slightly forward
+			}
+
+			// Make camera look at target
+			camera_look_at(camera, target, Vec3{0, 1, 0}) // Up vector is always Y-up
+			camera_update_matrices(camera)
+			renderer.accumulation_frame = 0 // Reset accumulation
+		}
+
+		imgui.SameLine()
+		if imgui.Button("Reset", {0, 0}) {
+			// Reset to default position and look at origin
+			camera.position = Vec3{5, 5, 5}
+			target = Vec3{0, 0, 0}
+			camera_look_at(camera, target, Vec3{0, 1, 0})
+			camera_update_matrices(camera)
+			renderer.accumulation_frame = 0
+			initialized = true
+		}
+
+		// Display current camera direction and target for reference
+		imgui.Spacing()
+		imgui.Text(
+			"Camera Forward: %.3f, %.3f, %.3f",
+			camera.forward.x,
+			camera.forward.y,
+			camera.forward.z,
+		)
+		imgui.Text("Current Target: %.3f, %.3f, %.3f", target.x, target.y, target.z)
+
+		// Only clear dirty flag after we've processed it
+		camera.dirty = false
+
+		imgui.Separator()
+	}
 }
 
 @(private = "file")
@@ -354,10 +441,10 @@ render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: 
 	// Material selection dropdown with preview color
 	if imgui.BeginCombo(
 		"Material",
-		temp_cstring(scene_get_material_name(scene^, object.material_index)),
+		temp_cstring(scene_get_material_name(scene^, int(object.material_index))),
 	) {
 		for material, i in scene.materials {
-			is_selected := object.material_index == i
+			is_selected := int(object.material_index) == i
 
 			// Show material color preview
 			imgui.ColorButton(
@@ -381,9 +468,9 @@ render_appearance_editor :: proc(ui_ctx: ^UI_Context, scene: ^Scene, obj_index: 
 	}
 
 	// Mesh selection dropdown
-	if imgui.BeginCombo("Mesh", temp_cstring(scene_get_mesh_name(scene, object.mesh_index))) {
+	if imgui.BeginCombo("Mesh", temp_cstring(scene_get_mesh_name(scene, int(object.mesh_index)))) {
 		for mesh, i in scene.meshes {
-			is_selected := object.mesh_index == i
+			is_selected := int(object.mesh_index) == i
 			if imgui.Selectable(temp_cstring(mesh.name), is_selected) {
 				scene_update_object_mesh(scene, obj_index, i)
 			}
@@ -413,6 +500,41 @@ render_statistics :: proc(renderer: ^Raytracing_Renderer, scene: Scene) {
 
 		imgui.PlotLines("Frame Times", &io.DeltaTime, 120, 0, nil, 0.0, 0.050, {0., 80}, 4)
 
+		imgui.Text("Renderered accumulated frames: %d", renderer.accumulation_frame)
+		if imgui.Button("Reset") {
+			renderer.accumulation_frame = 0
+		}
+
+		imgui.Separator()
+		imgui.Text("Accumulation Limit: %d", renderer.accumulation_limit)
+		imgui.SameLine()
+		if imgui.Button("Change Limit", {120, 0}) {
+			imgui.OpenPopup("Set Accumulation Limit")
+		}
+
+		if imgui.BeginPopupModal("Set Accumulation Limit", nil, {.AlwaysAutoResize}) {
+			@(static) new_limit: i32 = 0
+			imgui.Text("Set new accumulation limit:")
+			imgui.InputInt("##NewLimit", &new_limit)
+			imgui.Separator()
+			if imgui.Button("Apply", {100, 0}) {
+				if new_limit > 0 {
+					if renderer.accumulation_frame >= u32(new_limit) {
+						renderer.accumulation_frame = 0
+					}
+				} else {
+					renderer.accumulation_limit = nil
+				}
+				renderer.accumulation_limit = u32(new_limit) if new_limit > 0 else nil
+				imgui.CloseCurrentPopup()
+			}
+			imgui.SameLine()
+			if imgui.Button("Cancel", {100, 0}) {
+				imgui.CloseCurrentPopup()
+			}
+			imgui.EndPopup()
+		}
+
 		if imgui.CollapsingHeader("Detailed Statistics") {
 			imgui.Text("ImGui:")
 			imgui.Text("- Vertices: %d", io.MetricsRenderVertices)
@@ -423,6 +545,13 @@ render_statistics :: proc(renderer: ^Raytracing_Renderer, scene: Scene) {
 			imgui.Text("Renderer:")
 			imgui.Text("- Objects: %d", len(scene.objects))
 			imgui.Text("- Meshes: %d", len(scene.meshes))
+
+			triangles: int
+			for obj in scene.objects {
+				m := scene.meshes[obj.mesh_index]
+				triangles += len(m.indices) / 3
+			}
+			imgui.Text("- Triangles: %d", triangles)
 
 			cache := &renderer.ctx.cache
 			imgui.Separator()
@@ -435,8 +564,6 @@ render_statistics :: proc(renderer: ^Raytracing_Renderer, scene: Scene) {
 			imgui.Text("- Pipeline layouts : %d", len(cache.pipeline_layouts))
 			imgui.Text("- Raytracing pipelines: %d", len(cache.raytracing_pipelines))
 			imgui.Text("- Graphics Pipelines: %d", len(cache.graphics_pipelines))
-
-			imgui.Text("- Renderered accumulated frames: %d", renderer.accumulation_frame)
 		}
 
 	}
@@ -519,7 +646,7 @@ render_emission_properties_tab :: proc(material: ^Material) -> bool {
 		{.Float, .PickerHueWheel},
 	)
 
-	update |= imgui.SliderFloat("Emission Power", &material.emission_power, 0.0, 20.0)
+	update |= imgui.SliderFloat("Emission Power", &material.emission_power, 0.0, 1000)
 	imgui.SameLine(0, 5)
 	help_marker("Controls the intensity of light emitted by this material")
 
@@ -600,7 +727,7 @@ render_delete_material_popup :: proc(
 @(private = "file")
 get_material_usage :: proc(scene: ^Scene, mat_index: int) -> (in_use: bool, count: int) {
 	for object in scene.objects {
-		if object.material_index == mat_index {
+		if int(object.material_index) == mat_index {
 			in_use = true
 			count += 1
 		}
@@ -652,3 +779,4 @@ help_marker :: proc(desc: string) {
 temp_cstring :: proc(value: string) -> cstring {
 	return strings.clone_to_cstring(value, context.temp_allocator)
 }
+

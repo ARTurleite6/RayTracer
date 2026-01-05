@@ -57,7 +57,7 @@ shader_binding_table_build :: proc(
 	}
 	sbt_memory_usage: vma.Memory_Usage = .Cpu_To_Gpu
 
-	buffer_init(
+	_ = buffer_init(
 		buffer,
 		ctx,
 		sbt_size,
@@ -138,3 +138,4 @@ shader_binding_table_add_group :: proc(
 	append(&self.groups, group)
 	self.group_counts[type] += 1
 }
+

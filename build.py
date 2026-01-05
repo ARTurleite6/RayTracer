@@ -1,11 +1,11 @@
 #! /usr/bin/python3
 
-from optparse import OptionParser
-import subprocess
 import platform
+import subprocess
+from optparse import OptionParser
 
-RED = '\033[91m'
-RESET = '\033[0m'
+RED = "\033[91m"
+RESET = "\033[0m"
 
 os = platform.system()
 
@@ -19,26 +19,11 @@ shaders = [
         "out": "shaders/rmiss.spv",
     },
     {
-        "src": "shaders/simple.vert",
-        "out": "shaders/vert.spv",
-    },
-    {
-        "src": "shaders/simple.frag",
-        "out": "shaders/frag.spv",
-    },
-    {
         "src": "shaders/simple.rchit",
         "out": "shaders/rchit.spv",
     },
-    {
-        "src": "shaders/shadow.rmiss",
-        "out": "shaders/shadow.spv",
-    },
-    {
-        "src": "shaders/shadow.rchit",
-        "out": "shaders/shadow_rchit.spv",
-    },
 ]
+
 
 def print_command_result(result: subprocess.CompletedProcess[str]):
     if result.stdout:
@@ -46,6 +31,7 @@ def print_command_result(result: subprocess.CompletedProcess[str]):
 
     if result.stderr:
         print(f"{RED}Error: {result.stderr}{RESET}")
+
 
 def get_build_command(build_mode):
     os = platform.system()
@@ -57,7 +43,7 @@ def get_build_command(build_mode):
     else:
         raise RuntimeError(f"Unsupported os #{os}")
 
-    command = f"odin build src -vet -strict-style -collection:external=external -out:{file} -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors" 
+    command = f"odin build src -vet -strict-style -collection:external=external -out:{file} -show-timings -vet-cast -vet-using-param -disallow-do -warnings-as-errors"
     if build_mode == "debug":
         command += " -debug"
     else:
@@ -65,21 +51,52 @@ def get_build_command(build_mode):
 
     return command
 
+
 def build_shaders():
     print("Building shaders...")
     for shader in shaders:
-        result = subprocess.run(["glslc", "--target-env=vulkan1.2", shader["src"], "-o", shader["out"]], capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                "glslangValidator",
+                "-V",
+                "--target-env",
+                "vulkan1.3",
+                # "-g0",
+                shader["src"],
+                "-o",
+                shader["out"],
+            ],
+            capture_output=True,
+            text=True,
+        )
         print_command_result(result)
+
 
 def main():
     parser = OptionParser()
-    parser.add_option("-b", "--build-mode", dest="build_mode", default="debug", help="Build in release or debug mode")
-    parser.add_option("-r", "--run", action="store_true",
-                  dest="run", default=False,
-                  help="Run program when finished building")
-    parser.add_option('-s', '--skip-executable', action='store_true',
-                      dest='skip_executable', default=False,
-                      help='Skip building the executable')
+    parser.add_option(
+        "-b",
+        "--build-mode",
+        dest="build_mode",
+        default="debug",
+        help="Build in release or debug mode",
+    )
+    parser.add_option(
+        "-r",
+        "--run",
+        action="store_true",
+        dest="run",
+        default=False,
+        help="Run program when finished building",
+    )
+    parser.add_option(
+        "-s",
+        "--skip-executable",
+        action="store_true",
+        dest="skip_executable",
+        default=False,
+        help="Skip building the executable",
+    )
 
     (options, _) = parser.parse_args()
 
@@ -94,6 +111,7 @@ def main():
 
         if options.run:
             subprocess.run(["./raytracer"])
+
 
 if __name__ == "__main__":
     main()

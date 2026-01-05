@@ -1,7 +1,9 @@
 package main
 
+import "core:fmt"
 import "core:log"
 @(require) import "core:mem"
+import os "core:os/os2"
 import "raytracer"
 
 main :: proc() {
@@ -23,17 +25,25 @@ main :: proc() {
 		}
 	}
 
-	// if err != nil {
-	// 	fmt.printfln("Error loading scene: %v", err)
-	// }
-	// _ = scene
-	//
-	// scene_path: Maybe(string)
-	// if len(os2.args) > 1 {
-	// 	scene_path = os2.args[1]
-	// }
+	if len(os.args) < 2 {
+		fmt.eprintln("Usage: pathtracer.exe <scene_file>")
+		return
+	}
 
-	app, err := raytracer.application_init(1280, 1020, "Raytracer")
+	fullscreen_mode := false
+	if len(os.args) > 2 && (os.args[2] == "-f" || os.args[2] == "--fullscreen") {
+		log.info("Creating fullscreen window")
+		fullscreen_mode = true
+	}
+
+	scene_file := os.args[1]
+	app, err := raytracer.application_init(
+		1280,
+		1020,
+		"Raytracer",
+		scene_file,
+		window_fullscreen = fullscreen_mode,
+	)
 	if err != nil {
 		log.errorf("Application: Error launching application %v", err)
 		return
@@ -42,3 +52,4 @@ main :: proc() {
 
 	raytracer.application_run(app)
 }
+

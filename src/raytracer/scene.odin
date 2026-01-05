@@ -41,8 +41,8 @@ Scene :: struct {
 Object :: struct {
 	name:           string,
 	transform:      Transform,
-	mesh_index:     int,
-	material_index: int,
+	mesh_index:     u32,
+	material_index: u32,
 }
 
 Transform :: struct {
@@ -107,7 +107,7 @@ scene_delete_material :: proc(scene: ^Scene, material_index: int) {
 	unordered_remove(&scene.materials, material_index)
 
 	for object, i in scene.objects {
-		if object.material_index == material_index {
+		if int(object.material_index) == material_index {
 			scene_update_object_material(scene, i, 0)
 		}
 	}
@@ -121,7 +121,7 @@ scene_update_material :: proc(scene: ^Scene, material_idx: int, material: Materi
 }
 
 scene_update_object_material :: proc(scene: ^Scene, object_idx, new_material_idx: int) {
-	scene.objects[object_idx].material_index = new_material_idx
+	scene.objects[object_idx].material_index = u32(new_material_idx)
 	append(&scene.changes, Scene_Change{type = .Object_Material_Changed, index = object_idx})
 }
 
@@ -157,7 +157,7 @@ scene_update_object_scale :: proc(scene: ^Scene, object_index: int, new_scale: V
 
 scene_update_object_mesh :: proc(scene: ^Scene, object_index: int, mesh_index: int) {
 	object := &scene.objects[object_index]
-	object.mesh_index = mesh_index
+	object.mesh_index = u32(mesh_index)
 
 	append(&scene.changes, Scene_Change{type = .Object_Mesh_Changed, index = object_index})
 }
@@ -185,8 +185,8 @@ scene_add_object :: proc(
 	object := Object {
 		name           = strings.clone(name),
 		transform      = transform,
-		mesh_index     = mesh_index,
-		material_index = material_index,
+		mesh_index     = u32(mesh_index),
+		material_index = u32(material_index),
 	}
 	object_update_model_matrix(&object)
 
@@ -476,3 +476,4 @@ create_cornell_box :: proc() -> (scene: Scene) {
 
 	return scene
 }
+

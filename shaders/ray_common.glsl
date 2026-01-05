@@ -19,12 +19,16 @@ struct RayPayload {
     bool hit;
     bool firstBounce;
     bool isSpecular;
+    float previousBrdfPdf;
+    vec3 previousHitPos;
+    float p_sample_light;
+    bool didDirectIllumination;
 };
 
 struct ShadowPayload {
-  bool occluded;
-  bool hitLight;
-  uint lightIndex;
+    bool occluded;
+    bool hitLight;
+    uint lightIndex;
 };
 
 struct ObjectData {
@@ -32,6 +36,7 @@ struct ObjectData {
     uint64_t index_address;
     uint material_index;
     uint mesh_index;
+    uint light_index;
 };
 
 struct LightData {
